@@ -1,0 +1,7 @@
+private/
+.venvs/
+.uv-cache/
+runtime/
+tests/results/
+__pycache__/
+*.pyc

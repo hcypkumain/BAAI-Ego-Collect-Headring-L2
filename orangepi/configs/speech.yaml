@@ -1,0 +1,10 @@
+enabled: true
+model: qwen3-tts-flash-realtime
+voice: Cherry
+url: wss://dashscope.aliyuncs.com/api-ws/v1/realtime
+language: Chinese
+foreground_wait_seconds: 90
+request_timeout_seconds: 35
+retry_initial_seconds: 5
+retry_max_seconds: 20
+wait_prompt_after_seconds: 3

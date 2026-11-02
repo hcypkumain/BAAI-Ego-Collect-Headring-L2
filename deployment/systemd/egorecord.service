@@ -1,0 +1,29 @@
+[Unit]
+Description=EgoRecord Multi-Camera Recorder (voice control)
+After=camd.service
+Requires=camd.service
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+SupplementaryGroups=input audio video
+WorkingDirectory=/opt/egorecord
+# Wait 3s for data to stabilize + 重新检测 USB 音频 card 编号
+ExecStartPre=/bin/sleep 3
+ExecStartPre=/opt/egorecord/bin/fix_asoundrc.sh
+ExecStart=/opt/egorecord/bin/egorecord baai_ego_task -c config/default.yaml --voice-control
+Restart=on-failure
+RestartSec=10
+Environment=ROS_MASTER_URI=http://localhost:11311
+Environment=ROS_HOSTNAME=localhost
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=/opt/ros/noetic/lib/python3/dist-packages
+Environment=EGORECORD_HOME=/opt/egorecord
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/orangepi/.Xauthority
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

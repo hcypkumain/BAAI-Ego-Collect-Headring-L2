@@ -1,0 +1,75 @@
+# Device identity only; driver installation and new device protocols need adapters.
+keyboard_name: auto
+web_ui:
+  access_code_required: false
+  enabled: true
+  host: 0.0.0.0
+  port: 8765
+# Storage root is configured in storage.yaml.
+first_image: null
+emg_calibration:
+  enabled: true
+  scope: boot
+wrist_calibration:
+  enabled: true
+  # The proof uses Linux boot_id; multiple recordings reuse it in the same boot.
+  scope: boot
+# Resolve current Linux USB paths at each scan and before a recording.
+# Duplicate camera serials use remembered ports and explicit unconfirmed A/B labels.
+auto_discovery:
+  enabled: true
+  wrist_usb_ids: ['0bda:5858']
+  emg_usb_ids: ['1a86:55d3']
+  poll_seconds: 2
+  retry_no_data_seconds: 15
+emg:
+  emg_left:
+    label: 肌电设备 A（左右未确认）
+  emg_right:
+    label: 肌电设备 B（左右未确认）
+# Headband fisheye cameras come from the camd daemon (EgoRecord >= v0.1.9),
+# which replaced the retired seeker_cam_bridge ROS topics. fps must match
+# /opt/egorecord/camd/camd.conf; camd owns the encoder and ignores other rates.
+cameras:
+  left: {label: 前左相机, camd: left, fps: 30, width: 1920, height: 1200}
+  right: {label: 前右相机, camd: right, fps: 30, width: 1920, height: 1200}
+  bleft: {label: 后左相机, camd: bleft, fps: 30, width: 1920, height: 1200}
+  bright: {label: 后右相机, camd: bright, fps: 30, width: 1920, height: 1200}
+# Read straight from the ICM20602 character device: EgoRecord v0.1.10 retired
+# the seeker_imu node that published /imu_data_raw.
+board_imu: {label: 板载惯性传感器, device: /dev/icm20602, rate_hz: 200}
+# Device-specific calibration source confirmed by the operator on 2026-10-28.
+headband_calibration:
+  enabled: true
+  source_dir: /opt/egorecord/calibrations
+  source_verified: true
+  device_id_file: /opt/egorecord/DEVICE_ID
+  hardware_model_file: /opt/egorecord/HARDWARE_MODEL
+# Rates/protocol are intentionally fixed: cameras 20 Hz, IMU 200 Hz, EMG 921600 baud.
+
+# Wrist roles assigned to these ports by the operator on 2026-09-28.
+# Identical serials collide in by-id; these by-path links bind to hub ports.
+wrist_cameras:
+  cam_left_wrist:
+    label: 左腕相机
+    device: /dev/v4l/by-path/platform-xhci-hcd.9.auto-usb-0:1.4.4.1:1.0-video-index0
+    width: 1920
+    height: 1080
+    fps: 30
+    fourcc: MJPG
+  cam_right_wrist:
+    label: 右腕相机
+    device: /dev/v4l/by-path/platform-xhci-hcd.9.auto-usb-0:1.4.3.4:1.0-video-index0
+    width: 1920
+    height: 1080
+    fps: 30
+    fourcc: MJPG
+
+# OmniBCI uses an independent Python 3.11 SDK owner managed by this controller.
+eeg:
+  enabled: true
+  # Temporary operator-selected policy: retain impedance results as advisory.
+  impedance_acceptance_policy: advisory
+  serial: 'F8:5B:1B:F4:27:44'
+  filter_preset: general
+  # Fixed profile in eeg_settings.py: active CH1-8 FC3 C3 O1 Pz Oz O2 C4 FC4.

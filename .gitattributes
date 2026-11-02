@@ -1,0 +1,4 @@
+# Preserve the deployed snapshot bytes and its recorded SHA256 values.
+# This disables automatic newline conversion, not textual diff/rendering.
+# Use LF explicitly when editing Linux scripts.
+* -text

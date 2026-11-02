@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: embodied-brain-collect
+Version: 1.1.0
+Summary: Multi-modal data collection framework (Neon eye, cameras, EMG, gloves, position, markers)
+Requires-Python: >=3.10

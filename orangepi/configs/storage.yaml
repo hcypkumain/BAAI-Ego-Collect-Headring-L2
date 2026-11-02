@@ -1,0 +1,8 @@
+# Existing 256 GB SD card; never formats or silently falls back to internal storage.
+mode: sd
+mount_point: /media/orangepi/sdcard
+expected_uuid: 4C7F-9FE2
+device_id: orangepi-01
+directory: Embodied-Brain-Collect
+shift: session-night
+minimum_start_free_mb: 1024

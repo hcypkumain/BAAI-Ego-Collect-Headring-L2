@@ -1,0 +1,310 @@
+{
+  "wait": {
+    "text": "请等待，正在获取语音。",
+    "sha256": "f5d21e0524373736bb9c4f537a193cafcc611fcb0b710fe7130fa9196dd5b4cc",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "fatal": {
+    "text": "语音服务不可用，程序已安全停止。请检查网络或密钥后重新启动。",
+    "sha256": "6f05665e89934fd0ca6d377b993e65c77ae319cd129fb11ab88df3450af84df2",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "api_error": {
+    "text": "阿里云语音接口返回错误，错误码：",
+    "sha256": "2932ae6452c358865d82e52c7cf6550c2dd392e647dca43d535e1dbf884a31fd",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "timeout": {
+    "text": "语音请求等待超时。",
+    "sha256": "cd918bf4ca7615412af8895134b29729e4d8a2078a33bf55fb9805b8cd3c1c76",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "unknown": {
+    "text": "错误码无法完整播报，请查看语音状态日志。",
+    "sha256": "6c3947c02ee66dd2fbde28f9ed4f068622c410fea49068c4b8525f081d343548",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_0": {
+    "text": "零",
+    "sha256": "a233bad6cfcb24437e53226ae4baeeb6f38e997b69cee9cb57cc8d2ffd1514c0",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_1": {
+    "text": "一",
+    "sha256": "4cc33dcc646776cefd72586b7eaf4dd11eeb26549bdc59b5cba71564e634fdde",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_2": {
+    "text": "二",
+    "sha256": "9513650faab7bae7b424a55108df58ca7e2fc6fbb7f6e77f030b7edb1fb9de6e",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_3": {
+    "text": "三",
+    "sha256": "70752ea4d3fbac5fdad65463133e168844630e8a7d43d430b976d24d4e3e0ab0",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_4": {
+    "text": "四",
+    "sha256": "2b40ac5a8630a062810a0c08105aabbefea68da0a6aa3649892b02934101c59b",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_5": {
+    "text": "五",
+    "sha256": "e49cc84b7a915c61cf86cbb5a535efc8c6a2ce6c72cfc5a862ac7c3ca40cdb05",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_6": {
+    "text": "六",
+    "sha256": "c616ee97b953107476b827c332e3ba9af9468268ffa524b2446f0215feb4bf2c",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_7": {
+    "text": "七",
+    "sha256": "1d961ccdc37dc5c892c92a21f65bc46b25132d0db69289c1d9f9b57b0e138646",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_8": {
+    "text": "八",
+    "sha256": "1a92acc7ba55a01fbaba5b30ea418073f182cdd93fd1e4e4134bb3dc0f3ba9cb",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_9": {
+    "text": "九",
+    "sha256": "e3418a8d5a28019dd97094ebe7a338938e047b52a32754674aa47376e845c06d",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_a": {
+    "text": "字母 A",
+    "sha256": "db5de757354297bd6a7186f857ed4e7cc85ff4b621a92d1f69e741828dca9094",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_b": {
+    "text": "字母 B",
+    "sha256": "5d925916997b38a402b178a0aa302cef3ce9c857695120a30e901d3bea615ec2",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_c": {
+    "text": "字母 C",
+    "sha256": "87f92be472c2e4d0fb7c564889eeac5becdd7102f23f4027bd59265f129a9e91",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_d": {
+    "text": "字母 D",
+    "sha256": "adc223f4572ead50c4b2a59b6828c0cb0ddbb59bdd49249e191c4ec09d187faf",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_e": {
+    "text": "字母 E",
+    "sha256": "d874404bb5649c8b7d008909c55d92499d430c2b11740fc411de6abf170065b3",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_f": {
+    "text": "字母 F",
+    "sha256": "26480bb95d227f17d1c7760606abe3f820d9bc325a8fdcf444e40f180b3d2ab5",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_g": {
+    "text": "字母 G",
+    "sha256": "dc0255767977f0e9c1adf27f462f60546920e0696ba4925d3c9a00377e4b1a49",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_h": {
+    "text": "字母 H",
+    "sha256": "096d4a5bbe0d4b7129adfdb418ba446f0a01db97511a6da4f0f1d3696852d047",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_i": {
+    "text": "字母 I",
+    "sha256": "3a13f007679d72abd17edc82f38f567387e7a2cafdffbf98e16f632ea6b55fd2",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_j": {
+    "text": "字母 J",
+    "sha256": "29538cb220488fdfd1c0d83b7b4d8ee93ef1ebffd7bf29b0f449b9a07071bfae",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_k": {
+    "text": "字母 K",
+    "sha256": "836cea1a6ababf9d8187fe70f2de2f3522cf837ce96940c2703d54ed6832b51f",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_l": {
+    "text": "字母 L",
+    "sha256": "f6dd6ac33c7a1cc66d4ec9f60893cd3e82b0c3c0ca95e50125d19a9bc786bf31",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_m": {
+    "text": "字母 M",
+    "sha256": "c50eb3a416b27efa4350ed1c7749722267c938f8b39467d1facfa7f21315a889",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_n": {
+    "text": "字母 N",
+    "sha256": "00966cc8b0433fd6f921aba0efb353dcb64992fc665117220cd80cf6632ca6d0",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_o": {
+    "text": "字母 O",
+    "sha256": "0ef68c8953b26d83fb2964f03b3fc45f8575cdebae3eff26db4edd5ed2597350",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_p": {
+    "text": "字母 P",
+    "sha256": "6c0ed0051ee931a4c6a4b6225b6c133844222c37b9b4ee03a3422e2748e3e5a3",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_q": {
+    "text": "字母 Q",
+    "sha256": "403da2981eb3cc2cd1f12c1e6819f6a5c1575ebbb942510c142dd5e477e27887",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_r": {
+    "text": "字母 R",
+    "sha256": "8784cbca11e0c2e902bc4da6a5eec893cdea4d3ee85c0b85c96df1db8ead1af2",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_s": {
+    "text": "字母 S",
+    "sha256": "a767f3bf6684ab3388a7b692ca5c9c939511b301c2b2f384238f4ca10bdd69b0",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_t": {
+    "text": "字母 T",
+    "sha256": "a529850e4fbae0b3e378dd131af46b91e456dc99d5bc024c66aa06785ae906a2",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_u": {
+    "text": "字母 U",
+    "sha256": "c5227ba3b31f6511674c9b49b4ce71e55d20c95275f33a602929b105bed99e13",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_v": {
+    "text": "字母 V",
+    "sha256": "5431b2f356442d159d6800b0957746997ccb4bc58b7bdc2037f9b3036f99204c",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_w": {
+    "text": "字母 W",
+    "sha256": "9183090114bc0e635c81d3a6be6d0376824bac18cadf904b1a335b002581a5cc",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_x": {
+    "text": "字母 X",
+    "sha256": "ec44f094749e53ca589a76ac980a96a0d4b50d8a82bcdbe18c581991bfaaa406",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_y": {
+    "text": "字母 Y",
+    "sha256": "5e122ab98b593d66ab7923f47c3d7227fa5aaedf85140d07494a058fa53f66db",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_z": {
+    "text": "字母 Z",
+    "sha256": "4c286799ebce0a14e1dc26a20a85dde4d6f2b6031a45491c53a955c7f7f4b3ea",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_underscore": {
+    "text": "下划线",
+    "sha256": "5d39d5ae14a9d08cc3106debfca01b049f501f01dd94769e443f2266d70c9d35",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_dash": {
+    "text": "连接号",
+    "sha256": "8173f305a78c258246e4fd67b5fc906beea1b70be1c16c165ef30e6a93763d8c",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  },
+  "char_dot": {
+    "text": "点",
+    "sha256": "abcec146fcfea52786d3c840a9d591530fe4366ceac713f977cce128606762ae",
+    "source": "Aliyun DashScope",
+    "model": "qwen3-tts-flash-realtime",
+    "voice": "Cherry"
+  }
+}

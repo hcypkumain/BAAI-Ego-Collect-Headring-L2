@@ -1,0 +1,1 @@
+{"enabled":false,"server":"unix:/tmp/pulse-socket","sink":"","player":"/opt/opi-headphone-audio/guarded-paplay"}

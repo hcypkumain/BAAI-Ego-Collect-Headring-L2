@@ -1,0 +1,139 @@
+# EgoRecord 默认配置 — 4 路鱼眼 ROS 话题 + IMU + 立体声麦克风
+# 可复制此文件并修改，用 -c 参数指定
+
+# 设备编号（填入后写入 meta.json，方便区分多台设备的数据）
+# 优先级: 安装目录 DEVICE_ID 文件 > 此处配置 > CPU 序列号自动获取
+# 部署新机器时，install.sh 会提示设置设备 ID，无需在此处填写
+# device_id: 不填则自动从 DEVICE_ID 文件或 CPU 序列号获取
+device_id: cs_0001
+
+# 硬件型号（用于区分不同硬件配置/版本，写入 meta.json）
+# 优先级: 安装目录 HARDWARE_MODEL 文件 > 此处配置
+# 例: OrangePi-CM5-Rev2, EgoCam-v1.5
+# hardware_model: 不填则从 HARDWARE_MODEL 文件获取
+hardware_model: baai-wuyu-ego4-01-171
+
+# 相机列表 — 默认为 ROS CompressedImage 话题（回退路径）
+# camd 直出模式（camd.enabled: true 时使用）：device 仅作展示，
+# 实际节点由 camd.conf 按 sensor 名解析（mXX_b_xxx 为设备树标识，比 /dev/videoN 稳定）
+# ROS 回退模式示例：
+#   - { name: left,   type: ros_compressed, topic: /fisheye/left/image_raw/compressed }
+cameras:
+  - { name: left,   type: camd, device: m03_b_sc233hgs }
+  - { name: right,  type: camd, device: m04_b_sc233hgs }
+  - { name: bright, type: camd, device: m00_b_sc233hgs }
+  - { name: bleft,  type: camd, device: m02_b_sc233hgs }
+
+# camd 相机守护进程 — 直出管线（相机 NV12 → MPP H.264 → MKV），替代 ROS 相机桥
+# 需 camd 服务已运行（见 camd/README.md）；启用后须把 cameras 的 type 改为 camd
+# 并填写 device（见 cameras 段上方注释示例），Python 侧经 Unix socket 控制录制
+camd:
+  enabled: true               # 设为 true 启用 camd 直出管线
+  socket_path: /run/camd.sock # camd 控制 socket 路径
+  gop: 30                     # 关键帧间隔（帧数）
+  deep_idle_after_minutes: 0  # 空闲多久后进入深度休眠（分钟），0=关闭（仅占位，camd 侧实现）
+
+imu:
+  enabled: true
+  device: /dev/icm20602   # IMU 内核字符设备（直读，替代旧 ROS 话题链路）
+  name: imu0
+  update_rate: 200
+
+# 佩戴检测 — 启动时以当前 IMU 重力方向为基准，之后每隔 check_interval 秒
+# 检查一次佩戴姿势，偏差超过 tolerance_deg 度时播报佩戴提示音；
+# 设备反戴（重力方向与基准相反）也算正常佩戴
+wear_check:
+  enabled: true
+  check_interval: 10      # 检查间隔 (秒)
+  tolerance_deg: 40       # 允许偏差角度 (度)
+  baseline_duration: 1.0  # 采集基准向量的时长 (秒)
+  baseline: [0.0, -9.8, 0.0]  # 固定基准向量 (实测 g=(0.41,-9.93,0.64) 取整，与实测仅差 ~4.4°)
+  baseline_file: wear_baseline.json  # 基准持久化文件；删除后下次启动重新采集，置空则每次启动采集
+
+audio:
+  enabled: true
+  device: usb_rec
+  channels: 2
+  sample_rate: 48000
+  format: S16_LE
+  output_format: wav          # wav | mp3 | both
+  mp3_bitrate: 320
+  name: audio
+
+voice:
+  enabled: false             # 默认关闭语音控制（省 CPU/NPU，消除 ALSA 争抢）；
+                             # 需要时改 true 或用 --voice-control 启用（需 KWS 模型）
+  model_path: ./models/kws_xiaohuan.rknn
+  wake_word: hey_jarvis_v0.1
+  device: usb_kws              # ALSA 设备 (dsnoop 共享麦克风)
+  playback_device: usb_play    # 语音反馈播放设备 (dmix 共享播放)
+  sample_rate: 16000
+  command_timeout: 5.0        # 命令识别超时 (秒)
+  voice_dir: ./语音
+  threshold: 0.5              # KWS 置信度阈值 (测试期间调低)
+  kws_model_type: openwakeword  # openwakeword (推荐) | ds_cnn | modelscope
+  # ASR 配置 (可选 — 不配置则使用 KWS-only 模式)
+  asr_model_path: ./models/asr_sensevoice_small.rknn  # 推荐
+  # asr_vocab_path: ./models/asr_vocab.json              # wav2vec2 需要
+  asr_model_type: sensevoice   # sensevoice (推荐) | wav2vec2 | whisper
+  asr_record_duration: 3.0    # 唤醒后录音时长 (秒)
+  asr_max_duration: 5.0       # ASR 最大处理时长 (秒)
+
+# BLE GATT Server — 小程序远程控制接口
+# 通过 BLE 低功耗蓝牙暴露 JSON RPC 控制接口
+# 与蓝牙键盘配对 (BR/EDR) 共存，不冲突
+ble:
+  enabled: true               # 设为 true 启用 BLE GATT Server
+  service_name_prefix: EgoRecord  # 广播名前缀 (最终: {prefix}-{device_id})
+  mtu: 512                     # ATT MTU (有效载荷 = MTU - 3)
+  adapter: hci1                # 蓝牙适配器 (AP6256 在 hci1)
+
+# 云平台对接 — 设备注册、心跳上报、事件上报
+# 设备首次联网时自动注册，获取 device_token 并持久化
+# device_token 存储位置: $EGORECORD_HOME/DEVICE_TOKEN
+cloud:
+  enabled: true               # 设为 true 启用云平台对接
+  base_url: https://ei2rmd.baai.ac.cn/api  # API 基地址 (正式环境)
+  heartbeat_interval: 60      # 心跳上报间隔 (秒)
+  auto_upload: true            # 启用自动上传 (空闲时上传未上传数据)
+  auto_upload_idle_timeout: 60  # 空闲多久后切高速 (秒)
+  auto_upload_delete_after_hours: 24  # 已上传数据保留时间 (小时)
+
+# 镜头校验模式 — 长按 a 键（TTY 下 Shift+A）触发，
+# 用数秒实时帧检验相机内参/外参与 calibrations_dir 标定文件的偏差。
+# 可选靶标: 已知边长的 ArUco 码（配好 aruco_size_mm 后启用带绝对尺度的精测项），
+# 不配靶标也能运行（直线保持性 + 对极几何 + 重力方向等无靶标指标）
+calib_check:
+  enabled: true
+  sample_duration_s: 5        # 采样窗口时长 (秒)
+  aruco_dict: DICT_6X6_1000   # ArUco 字典
+  aruco_id: 0                 # 靶标 marker ID
+  aruco_size_mm: 100          # 靶标实际边长 (毫米)，0=未提供，跳过靶标精测项
+  # 告警阈值（WARN；超过 2 倍为 FAIL）
+  reproj_rms_px: 3.0          # ArUco 重投影 RMS (像素)
+  line_residual_px: 1.5       # 直线保持性残差 (像素)
+  rot_dev_deg: 2.0            # 外参旋转偏差 (度)
+  trans_dev_cm: 2.0           # 外参平移偏差 (厘米)
+  gravity_dev_deg: 5.0        # 重力方向偏差 (度)
+  preview: true               # 有图形界面时开启实时预览窗口 (叠加 ArUco/直线标注)，便于摆放靶标调试
+
+recording:
+  output_dir: ./data
+  fps: 30
+  # 视频编码码率 (Mbps)，VBR 峰值为其 2 倍；降低可减小文件体积和上传压力
+  video_bitrate_mbps: 10
+  # JPEG 解码方式: true=硬件解码 (mppjpegdec，低功耗，遇损坏帧会崩溃并终止录制)
+  #               false=软件解码 (jpegdec，容忍损坏帧，但 CPU 占用与功耗显著升高)
+  hw_jpeg_decode: true
+  sync_mode: fifo            # fifo | strict | none
+  sync_tolerance_ms: 40
+  remux: false                 # 默认关闭，需要时用 --remux 启用
+  quality_check: true          # 后台单任务质检；数 H.264 包，不全量解码
+  calibrations_dir: ./calibrations
+  # 定期刷新 meta.json 的间隔（秒），防止崩溃/断电后数据不可用
+  # 设为 0 禁用
+  meta_update_interval: 300
+  # 扫码配 WiFi 使用的相机名（如 right），不填则遍历所有相机
+  qr_scan_camera: right
+  # 是否启用 [c] 丢弃上一条录制的功能（默认关闭，防止误删数据）
+  discard_enabled: false

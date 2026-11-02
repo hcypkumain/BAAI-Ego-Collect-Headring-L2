@@ -1,0 +1,35 @@
+Linux orangepicm5-tablet 5.10.160-rockchip-rk3588 #1.0.0 SMP Mon Aug 10 14:34:09 CST 2026 aarch64 aarch64 aarch64 GNU/Linux
+Ubuntu 20.04.6 LTS
+Python 3.8.10
+uv 0.12.15 (aarch64-unknown-linux-gnu)
+espeak-ng	1.50+dfsg-6ubuntu0.1
+gir1.2-gstreamer-1.0:arm64	1.16.3-0ubuntu1.1
+gstreamer1.0-tools	1.16.3-0ubuntu1.1
+pulseaudio-utils	1:13.99.1-1ubuntu3.13
+python3-gi	3.36.0-1
+python3-numpy	1:1.17.4-5ubuntu3.1
+python3-yaml	5.3.1-1ubuntu0.1
+gstreamer1.0-rockchip1: /usr/lib/aarch64-linux-gnu/gstreamer-1.0/libgstrockchipmpp.so
+Factory Details:
+  Rank                     primary + 1 (257)
+  Long-name                Rockchip's MPP JPEG image decoder
+  Klass                    Decoder/Image
+  Description              JPEG hardware decoder
+  Author                   Randy Li <randy.li@rock-chips.com>, Jeffy Chen <jeffy.chen@rock-chips.com>
+
+Plugin Details:
+  Name                     rockchipmpp
+  Description              Rockchip Mpp Video Plugin
+  Filename                 /usr/lib/aarch64-linux-gnu/gstreamer-1.0/libgstrockchipmpp.so
+  Version                  1.14.4
+  License                  LGPL
+  Source module            gst-rockchip
+  Binary package           GStreamer Rockchip Plug-ins
+  Origin URL               Unknown package origin
+
+GObject
+ +----GInitiallyUnowned
+       +----GstObject
+             +----GstElement
+                   +----GstVideoDecoder
+ffprobe version 4.2.7-0ubuntu0.1 Copyright (c) 2007-2022 the FFmpeg developers

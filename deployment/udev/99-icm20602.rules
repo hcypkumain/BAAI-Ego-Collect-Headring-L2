@@ -1,0 +1,4 @@
+# IMU 内核字符设备 /dev/icm20602 权限规则
+# 默认为 root:root 0600，egorecord 以普通用户运行无法直读；
+# 此规则放权给运行用户所在组（安装脚本会把 orangepi 替换为实际运行用户）。
+KERNEL=="icm20602", MODE="0660", GROUP="orangepi"

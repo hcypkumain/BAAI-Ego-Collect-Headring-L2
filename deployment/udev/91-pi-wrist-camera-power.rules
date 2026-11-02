@@ -1,0 +1,3 @@
+# Keep the verified 0bda:5858 wrist cameras awake across preview/record handover.
+# No USB reset and no device permissions are changed.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0bda", ATTR{idProduct}=="5858", TEST=="power/control", ATTR{power/control}="on", ATTR{power/autosuspend_delay_ms}="-1"

@@ -1,0 +1,4 @@
+ACTION=="remove", SUBSYSTEM=="typec", RUN+="/usr/local/bin/typec_usb2.sh"
+ACTION=="change", SUBSYSTEM=="typec", RUN+="/usr/bin/usbdevice restart"
+
+

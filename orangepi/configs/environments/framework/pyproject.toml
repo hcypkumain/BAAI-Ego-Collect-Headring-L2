@@ -1,0 +1,18 @@
+[project]
+name = "pi-embodied-framework-runtime"
+version = "0.2.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "numpy==2.2.6",
+  "PyYAML==6.0.2",
+  "loguru==0.7.3",
+  "opencv-python-headless==4.12.0.88",
+  "scipy==1.15.3",
+  "dashscope==1.27.6",
+]
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true

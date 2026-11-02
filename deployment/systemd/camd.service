@@ -1,0 +1,21 @@
+[Unit]
+Description=camd Camera Daemon (NV12 -> H.264 -> MKV 直出管线, 替代 seeker_cam_bridge)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+# 等待相机硬件就绪
+ExecStartPre=/bin/sleep 5
+# rkaiq_3A daemon 与 camd 的 3A 冲突（camd 检测到其 pidfile 会拒绝启动），先停掉
+ExecStartPre=/bin/bash -c '/etc/init.d/rkaiq_3A.sh stop 2>/dev/null || true'
+ExecStart=/opt/egorecord/camd/build/camd -c /opt/egorecord/camd/camd.conf
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=180
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

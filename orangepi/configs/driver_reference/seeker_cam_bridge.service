@@ -1,0 +1,20 @@
+[Unit]
+Description=Seeker Camera Bridge (4cam ROS launch)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=notify
+# 等待相机硬件就绪
+ExecStartPre=/bin/sleep 5
+# 启动 roslaunch，等数据流后发 sd_notify
+ExecStart=/bin/bash -lc 'source /opt/ros/noetic/setup.bash && export ROS_MASTER_URI=http://localhost:11311 && roslaunch seeker_cam_bridge test_4cam.launch & sleep 5 && systemd-notify --ready && wait'
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=180
+StartLimitBurst=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

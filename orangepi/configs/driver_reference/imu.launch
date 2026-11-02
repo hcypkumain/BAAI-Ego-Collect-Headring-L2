@@ -1,0 +1,5 @@
+<launch>
+  <arg name="manager" default="manager_imu"/>
+  <node pkg="nodelet" type="nodelet" name="$(arg manager)" args="manager" output="screen"/>
+  <node pkg="nodelet" type="nodelet" name="ImuIcm20Nodelet" args="load seeker/ImuIcm20Nodelet $(arg manager)" output="screen"/>
+</launch>

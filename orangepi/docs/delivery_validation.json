@@ -1,0 +1,67 @@
+{
+  "session": "orangepi/tests/results/2026-09-24-13-07-46",
+  "capture_status": "success",
+  "qc_level": "WARN",
+  "duration_seconds": 12.124468657,
+  "qc_seconds": 38.05607928399968,
+  "streams": {
+    "emg_left": {
+      "emg_samples": 24251,
+      "imu_samples": 2690,
+      "all_raw_arrivals_within_gate": true
+    },
+    "emg_right": {
+      "emg_samples": 24249,
+      "imu_samples": 2673,
+      "all_raw_arrivals_within_gate": true
+    },
+    "cam_ros_left": {
+      "samples": 242,
+      "all_arrivals_within_gate": true,
+      "codec_name": "hevc",
+      "width": 1920,
+      "height": 1200,
+      "nb_read_packets": "242",
+      "decoded_frames": 242
+    },
+    "cam_ros_right": {
+      "samples": 241,
+      "all_arrivals_within_gate": true,
+      "codec_name": "hevc",
+      "width": 1920,
+      "height": 1200,
+      "nb_read_packets": "241",
+      "decoded_frames": 241
+    },
+    "cam_ros_bleft": {
+      "samples": 241,
+      "all_arrivals_within_gate": true,
+      "codec_name": "hevc",
+      "width": 1920,
+      "height": 1200,
+      "nb_read_packets": "241",
+      "decoded_frames": 241
+    },
+    "cam_ros_bright": {
+      "samples": 242,
+      "all_arrivals_within_gate": true,
+      "codec_name": "hevc",
+      "width": 1920,
+      "height": 1200,
+      "nb_read_packets": "242",
+      "decoded_frames": 242
+    },
+    "board_imu": {
+      "samples": 2409,
+      "all_arrivals_within_gate": true,
+      "valid_orientations": 0
+    }
+  },
+  "marker_end_matches_first_stop": true,
+  "first_voice_after_recording_is_stopped_confirmation": true,
+  "operator_confirmation_pause_seconds": 5,
+  "tests_passed": 37,
+  "cloud_recovered": true,
+  "archived_session": "delivery_backups/20260924_delivery_validation/2026-09-24-13-07-46",
+  "service_state": "device_confirm"
+}

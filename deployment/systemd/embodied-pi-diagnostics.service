@@ -1,0 +1,18 @@
+[Unit]
+Description=Bounded Orange Pi collection fault evidence on SD card
+After=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=orangepi
+SupplementaryGroups=systemd-journal
+ExecStart=/usr/bin/python3 /home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi/scripts/diagnostics/system_observer.py --mount /media/orangepi/sdcard --output /media/orangepi/sdcard/Embodied-Brain-Collect/orangepi-01/diagnostics/system-health --base /home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi
+Restart=always
+RestartSec=10
+Nice=10
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

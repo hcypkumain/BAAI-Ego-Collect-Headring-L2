@@ -1,0 +1,25 @@
+<launch>
+
+<arg name="front_left_camera_name" default="cam0" />
+<arg name="front_right_camera_name" default="cam1" />
+<arg name="back_right_camera_name" default="cam2" />
+<arg name="back_left_camera_name" default="cam3" />
+<arg name="respawn" default="false" />
+<arg name="config" default="seeker1" />
+<arg name="frame_id" default="base_link" />
+<arg name="camera_config_yaml_file" default="$(find seeker_cam_bridge)/launch/v4l2_isp.yaml"/>
+
+<arg     if="$(arg respawn)" name="bond" value="" />
+<arg unless="$(arg respawn)" name="bond" value="--no-bond" />
+
+<arg name="manager" default="manager_cam"/>
+<node pkg="nodelet" type="nodelet" name="$(arg manager)" args="manager" output="screen" launch-prefix="taskset -c 4-5">
+  <param name="num_worker_threads" value="32"/>
+</node>
+
+<node pkg="nodelet" type="nodelet" name="ImagePublisherNodelet" args="load seeker/ImagePublisherNodelet $(arg manager)" output="screen">
+  <param name="sensor_yaml_file" type="string" value="$(arg camera_config_yaml_file)"/>
+  <param name="frame_id" value="$(arg frame_id)" />
+</node>
+
+</launch>

@@ -1,0 +1,4 @@
+# Isolated Python 3.11 ARM64 environment; do not install into the ROS environment.
+numpy==2.2.6
+scipy==1.15.3
+omnibci @ https://github.com/Omni-Intel/omnibci-python/releases/download/v0.1.2/omnibci-0.1.2-cp311-abi3-manylinux_2_28_aarch64.whl#sha256=b8346b25cf51e1abf4d153faa334b4d4a7b5f420cc981deaa1c6febcf2a14b12

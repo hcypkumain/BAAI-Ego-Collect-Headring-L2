@@ -1,0 +1,39 @@
+{
+  "automated_tests": 47,
+  "parallel_benchmark": {
+    "seconds": 91.19694294799774,
+    "same_report": true,
+    "level": "WARN",
+    "max_rss_mb": 307.8359375,
+    "old_pipeline_seconds": 250.7494047
+  },
+  "partial_emg_imu": {
+    "session": "/media/orangepi/sdcard/Embodied-Brain-Collect/orangepi-01/diagnostics/partial_20260924-170625",
+    "folders": [
+      "board_imu",
+      "emg_left",
+      "marker"
+    ],
+    "status": "success",
+    "qc": "WARN",
+    "seconds": 0.2804340359980415
+  },
+  "camera_imu_only": {
+    "session": "/media/orangepi/sdcard/Embodied-Brain-Collect/orangepi-01/diagnostics/2026-09-24-17-13-17",
+    "status": "success",
+    "qc": "INFO",
+    "qc_seconds": 7.300150023998867,
+    "selection": {
+      "selected": [
+        "cam_ros_left",
+        "cam_ros_right",
+        "cam_ros_bleft",
+        "cam_ros_bright",
+        "board_imu"
+      ]
+    }
+  },
+  "sd_uuid": "4C7F-9FE2",
+  "no_local_synthesis": true,
+  "cloud_wait_prompt_observed": true
+}

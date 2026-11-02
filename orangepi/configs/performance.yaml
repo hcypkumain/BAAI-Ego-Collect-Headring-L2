@@ -1,0 +1,11 @@
+# Post-capture only. Two independent MPP processes on cores 6/7 completed
+# the same full QC report in 13.4 s (one MPP process: 23.9 s).
+# Software fallback is serialized; low memory reduces modality workers.
+qc_cpu_ids: [6, 7]
+qc_workers: 2
+qc_address_space_mb: 1536
+qc_min_available_mb_per_worker: 500
+qc_reserved_available_mb: 600
+qc_video_backend: auto
+qc_mpp_timeout_seconds: 120
+qc_mpp_workers: 2
