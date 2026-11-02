@@ -304,6 +304,14 @@
       "baseline_sha256": "47104de211d1689b3055984f10e78dccd89c65b857576016e0060dfe45ffe608",
       "published_sha256": "d0f06bdb2e2cdebd73e7071c32edb8600e5934ca3685f9b10992a82c029ae786",
       "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/cloud_worker.py",
+      "current_path": "orangepi/src/orangepi_collect/control/cloud_worker.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9c62c3ea461081b84d450f8a63c51687efea52ca8c737e4d8de6941c0b6ee355",
+      "published_sha256": "4deae4247a713754cc67ce242f25918fdd5d764d45556294bbd93d020cf413d6",
+      "reason": "Request temporary storage credentials and verify literal zero-byte uploads"
     }
   ]
 }

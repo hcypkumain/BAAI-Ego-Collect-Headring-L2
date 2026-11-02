@@ -1,5 +1,5 @@
 """One upload or cleanup process. Credentials arrive only through stdin."""
-import contextlib,hashlib,io,json,os,shutil,signal,sys,time
+import base64,contextlib,hashlib,io,json,os,shutil,signal,sys,time
 from pathlib import Path
 from cloud_common import CloudError,atomic,read_json,source_manifest,check_source,verify_remote,same_manifest,session_lock,sync_dir
 
@@ -18,6 +18,12 @@ def authenticate(credentials):
     vendor.Connection=secure
     client=vendor.RobotDataUploader();client.set_max_worker(2);client.set_file_filters(['*'])
     if not client.get_eai_token(credentials['ak'],credentials['sk']):raise CloudError('AK/SK 验证失败或平台暂不可达，请核对凭据后重试')
+    # Platform login and KS3 object-storage authorization are separate steps.
+    # The wheel's get_connection() exits if sts_token has never been populated.
+    if not client.get_ks3_sts():raise CloudError('平台临时存储授权获取失败，未开始传输，请稍后重试')
+    token=getattr(client,'sts_token',None)
+    if not isinstance(token,dict) or any(not isinstance(token.get(key),str) or not token[key] for key in ('accessKeyId','secretAccessKey','securityToken')):
+        raise CloudError('平台临时存储授权不完整，未开始传输，请稍后重试')
     return client,vendor,config
 
 class Progress:
@@ -27,6 +33,21 @@ class Progress:
         if time.monotonic()-self.last>.5:self.last=time.monotonic();self.callback(self.value)
     def refresh(self,*args,**kwargs):pass
     def close(self):pass
+
+def upload_empty(client,config,key):
+    # Requests treats an empty file object as a stream and adds chunked
+    # encoding while this SDK also forces Content-Length: 0. Send a literal
+    # empty payload through the SDK's signed request path instead.
+    client._refresh_sts_if_needed();connection=client.get_connection(False)
+    headers={'Content-Length':'0','Content-Type':'application/octet-stream',
+             'Content-MD5':base64.b64encode(hashlib.md5(b'').digest()).decode('ascii')}
+    response=connection.make_request('PUT',config.BUCKET_NAME,key,data=b'',headers=headers)
+    if not response or not 200<=response.status<300:raise CloudError('零字节文件上传未获存储服务确认，本地数据保留')
+    response.read()
+    # Upload-only STS grants can allow PUT/LIST while denying object HEAD.
+    # Use the same exact-name/size evidence as the final full verification.
+    stored=[row for row in connection.get_bucket(config.BUCKET_NAME).list(prefix=key,delimiter='') if row.name==key]
+    if len(stored)!=1 or int(stored[0].size)!=0:raise CloudError('零字节文件云端核验未通过，本地数据保留')
 
 def upload(payload):
     base=Path(payload['base']);job=payload['job'];source=Path(job['source']);directory=Path(payload['directory'])
@@ -71,9 +92,11 @@ def upload(payload):
             key=prefix+row['path'];path=source/row['path']
             emit(current_file=row['path'],completed_files=completed,completed_bytes=done_bytes)
             if remote_map.get(key)!=row['bytes']:
-                adapter=Progress(row['bytes'],lambda n:emit(completed_bytes=done_bytes+n))
-                returned=client.upload_file(str(path),job['remote_path'],base_dir=str(source),skip_dir_check=True,show_progress=False,pbar=adapter)
-                if not isinstance(returned,tuple) or len(returned)!=2 or returned[1]!=key:raise CloudError('上传器未确认文件成功，已停止并保留本地数据')
+                if row['bytes']==0:upload_empty(client,config,key)
+                else:
+                    adapter=Progress(row['bytes'],lambda n:emit(completed_bytes=done_bytes+n))
+                    returned=client.upload_file(str(path),job['remote_path'],base_dir=str(source),skip_dir_check=True,show_progress=False,pbar=adapter)
+                    if not isinstance(returned,tuple) or len(returned)!=2 or returned[1]!=key:raise CloudError('上传器未确认文件成功，已停止并保留本地数据')
             completed+=1;done_bytes+=row['bytes']
             emit(completed_files=completed,completed_bytes=done_bytes)
             if time.monotonic()-last_platform>10:
