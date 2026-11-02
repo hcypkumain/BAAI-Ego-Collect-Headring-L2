@@ -69,7 +69,8 @@ systemctl status camd embodied-pi-collect pi-phone-media --no-pager
 
 先结束正在录制/准备的段及后台上传，再备份代码和本机配置。比较待更新 diff，
 不要覆盖 `runtime/`、`private/`、任务图库、录制目录或上传回执。
-本次发布仅上传仓库快照，没有用部署工具修改当前 Pi 的采集服务。
+仓库本身不会修改设备；安装工具执行和服务切换属于单独的部署过程。
+设备当前运行状态应通过 `systemctl` 和手机页面核对。
 
 已有设备从旧服务名称升级时，先按 [媒体服务迁移说明](MIGRATION_PHONE_MEDIA.md) 完成切换。
 不要在采集回调仍运行时只更换共享内存的消费者端。

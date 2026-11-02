@@ -40,6 +40,13 @@ def clean_name(value):
     # 24 rows plus every state field must still fit the native 16KiB limit.
     return ''.join(c if c.isprintable() else ' ' for c in str(value))[:32]
 
+def battery_percent(interfaces):
+    try:
+        value=interfaces.get('org.bluez.Battery1',{}).get('Percentage')
+        number=int(value)
+        return number if 0<=number<=100 else None
+    except (ValueError,TypeError,OverflowError):return None
+
 
 def unique_json(raw):
     def unique(pairs):
@@ -170,6 +177,7 @@ class BluezTransport:
                             'paired': bool(properties.get('Paired', False)),
                             'trusted': bool(properties.get('Trusted', False)),
                             'connected': bool(properties.get('Connected', False)),
+                            'battery_percent': battery_percent(interfaces),
                             'audio': True})
         return {'available': True, 'powered': bool(adapter.get('Powered', False)), 'devices': devices}
 
@@ -196,10 +204,16 @@ class BluezTransport:
                 pass
 
     def pair(self, mac):
+        # Application-scoped NoInputNoOutput agent: no Pi display/default GUI
+        # agent is needed. Verify BlueZ state rather than trusting CLI text.
         try:
-            self._interface(self.paths[mac], 'org.bluez.Device1').Pair(timeout=20)
-        except Exception as exc:
-            raise self._error(exc, 'pair_failed')
+            address(mac)
+            subprocess.run(['bluetoothctl','--agent','NoInputNoOutput','--timeout','20','pair',mac],
+                stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=23,check=False)
+            if not any(row['address']==mac and row['paired'] for row in self.inspect()['devices']):
+                raise BluetoothError('pair_failed')
+        except subprocess.TimeoutExpired:raise BluetoothError('timeout')
+        except OSError:raise BluetoothError('bluetooth_unavailable')
 
     def trust(self, mac):
         try:
@@ -274,6 +288,7 @@ class HeadphoneManager:
         self.scan_until = 0.0
         self.next_retry = 0.0
         self.retry_delay = 5.0
+        self.auto_paused = False
         self.devices = []
         self.sinks = set()
         self.state = {'version': 1, 'available': False, 'powered': False,
@@ -282,6 +297,8 @@ class HeadphoneManager:
                       'selected_saved': False, 'connected_address': '', 'audio_ready': False,
                       'output': 'none', 'devices': [], 'retry_seconds': 0,
                       'test_result': 'never', 'wearing_confirmed': False}
+        self.state.update(bluetooth_connected=False,paired=False,trusted=False,battery_percent=None,
+                          auto_reconnect=False,auto_reconnect_paused=False)
         self.thread = None
         self.start_requested = start
         if start:
@@ -307,7 +324,7 @@ class HeadphoneManager:
         if self.stopped.is_set() or (self.start_requested and
                 (self.thread is None or not self.thread.is_alive())):
             return 503, 'worker_unavailable'
-        if action not in ('scan', 'connect', 'reconnect', 'disconnect', 'test'):
+        if action not in ('scan', 'connect', 'reconnect', 'disconnect', 'forget', 'test'):
             return 400, 'invalid_action'
         if action == 'connect':
             try:
@@ -398,6 +415,10 @@ class HeadphoneManager:
                      selected_saved=self.saved, connected_address=self.selected if ready else '',
                      audio_ready=ready, output='headphones' if ready else 'speaker' if SPEAKER in self.sinks else 'none',
                      status=status, error=error, scanning=bool(self.scan_until))
+        self._update(bluetooth_connected=bool(target and target['connected']),
+            paired=bool(target and target['paired']),trusted=bool(target and target['trusted']),
+            battery_percent=target.get('battery_percent') if target else None,
+            auto_reconnect=bool(self.selected and not self.auto_paused),auto_reconnect_paused=self.auto_paused)
         if ready:
             self.retry_delay = 5.0
             self.next_retry = self.clock() + 5.0
@@ -410,6 +431,7 @@ class HeadphoneManager:
             self._update(scanning=False)
 
     def _connect(self, mac, manual):
+        self.auto_paused = False
         self._stop_scan()
         self._update(busy=True, status='connecting' if manual else 'reconnecting', error='', pairing_progress='connecting')
         target, unused = self._refresh()
@@ -466,11 +488,13 @@ class HeadphoneManager:
             if not chosen:
                 raise BluetoothError('no_saved_headphone')
             self._connect(chosen, manual=action == 'connect')
-        elif action == 'disconnect':
+        elif action in ('disconnect','forget'):
             self._stop_scan()
             chosen = self.selected
-            self._save(None)
-            if chosen:
+            if action=='forget':self._save(None)
+            self.auto_paused=action=='disconnect'
+            row=next((x for x in self.devices if x['address']==chosen),None)
+            if chosen and row and row['connected']:
                 self.transport.disconnect(chosen)
             self._update(pairing_progress='idle', error='')
         elif action == 'test':
@@ -500,7 +524,7 @@ class HeadphoneManager:
             if self.scan_until and self.clock() >= self.scan_until:
                 self._stop_scan()
                 self._refresh()
-            elif (not self.scan_until and self.selected and not ready and self.clock() >= self.next_retry):
+            elif (not self.scan_until and self.selected and not ready and not self.auto_paused and self.clock() >= self.next_retry):
                 self._connect(self.selected, manual=False)
         except BluetoothError as exc:
             if exc.code in ('bluetooth_unavailable', 'adapter_missing'):

@@ -248,14 +248,20 @@
   if(pageId==='fitcheck')fit?.open();
   const connections=global.createPhoneConnections?.({root:$('phone-link-switch'),...options,page:()=>pageId,view:()=>({page:pageId,camera:currentCamera,signal:signalId,quality:$('phone-live-rate').value}),onKind:name=>{text(linkButton,name);linkButton.setAttribute('aria-label','当前连接：'+name+'，打开连接设置')}});
   const diagnosticRoot=document.createElement('section');pages.connections.querySelector('.phone-connections-card').insertBefore(diagnosticRoot,$('phone-connection-detail'));
+  const headphoneRoot=document.createElement('section');headphoneRoot.id='phone-headphone-panel';headphoneRoot.className='card';pages.connections.prepend(headphoneRoot);
+  const headphoneSummary=document.createElement('section');headphoneSummary.className='card phone-headphone-summary';pages.overview.insertBefore(headphoneSummary,$('phone-native-metrics'));
+  const headphones=global.createPhoneHeadphones?.({root:headphoneRoot,summary:headphoneSummary,headers:options.headers,status:()=>snapshot||options.status(),unlocked:options.unlocked,
+   active:()=>['overview','connections'].includes(pageId)&&!auxOpen&&!settingsOpen,open:()=>openHeadphones()});
+  function openHeadphones(){closeAux();navigate('connections',true);headphones?.refresh();headphoneRoot.scrollIntoView({block:'start'});}
   diagnostics=global.createPhoneDiagnostics?.({root:diagnosticRoot,headers:options.headers,status:options.status,unlocked:options.unlocked,active:()=>pageId==='connections'&&!auxOpen&&!settingsOpen});
   $('phone-open-diagnostics').onclick=()=>{navigate('connections',true);diagnostics?.open();};
   return {
+   openHeadphones,
    displayOptions(){return {review:pageId==='results'||snapshot?.state==='confirm_stop',cameras:safe()&&!auxOpen&&!settingsOpen&&(pageId==='preview'||pageId==='fitcheck'||manualWrist),camera:pageId==='preview'?currentCamera:null};},
    beforeStart(){if(pageId!=='workflow'||setupStage!=='start'||snapshot?.camera_check?.required&&!snapshot.camera_check.confirmed){navigate('workflow');return false;}return true;},
    openCameraCheck(){navigate('fitcheck',true);},
    allowLegacyFrame(name){return pageId==='workflow'&&manualWrist&&name.startsWith('cam_')&&document.getElementById(name)?.getClientRects().length>0;},
-   suspend(){referenceChoiceGeneration++;referenceChoiceRevision=0;$('phone-reference-choice').replaceChildren();$('phone-reference-choice').hidden=true;$('phone-use-reference').hidden=true;$('phone-more-references').hidden=true;stopLive();stopWrists();release();fit?.suspend();diagnostics?.suspend();aux.hidden=true;settings.hidden=true;auxOpen=settingsOpen=false;},
+   suspend(){referenceChoiceGeneration++;referenceChoiceRevision=0;$('phone-reference-choice').replaceChildren();$('phone-reference-choice').hidden=true;$('phone-use-reference').hidden=true;$('phone-more-references').hidden=true;stopLive();stopWrists();release();fit?.suspend();diagnostics?.suspend();headphones?.suspend();aux.hidden=true;settings.hidden=true;auxOpen=settingsOpen=false;},
    showAux(mode){
     if(mode==='reference'){navigate('workflow');return;}
     stopLive();auxOpen=true;aux.hidden=false;panel.querySelector('h3').textContent=mode==='recordings'?'采集管理':mode==='references'?'参考图库':mode==='tasks'?'任务列表':mode==='audio'?'蓝牙耳机':'历史回看 · 各设备';
@@ -274,7 +280,7 @@
     for(const [id,b] of Object.entries(cameraButtons)){
      const label=(value.devices||[]).find(d=>d.name===id)?.label||cameraNames[id];text(b,label);const pressed=String(id===currentCamera);if(b.getAttribute('aria-pressed')!==pressed)b.setAttribute('aria-pressed',pressed);
     }
-    connections?.update(value);diagnostics?.update();syncWrists();if(active()){if(liveURL&&performance.now()-lastPresentedAt>2500)$('phone-live-stage').classList.add('phone-live-stale');if(!liveController&&liveTimer===null)schedule();}else if(liveController)stopLive();
+    connections?.update(value);headphones?.update();diagnostics?.update();syncWrists();if(active()){if(liveURL&&performance.now()-lastPresentedAt>2500)$('phone-live-stage').classList.add('phone-live-stale');if(!liveController&&liveTimer===null)schedule();}else if(liveController)stopLive();
    }
   };
  };

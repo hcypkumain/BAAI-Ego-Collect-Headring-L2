@@ -24,6 +24,7 @@ ASSETS = {'/phone-app.js': ('phone_app.js', 'text/javascript; charset=utf-8'),
           '/phone-transport.js':('phone_transport.js','text/javascript; charset=utf-8'),
           '/phone-shell.js': ('phone_shell.js', 'text/javascript; charset=utf-8'),
           '/phone-connections.js': ('phone_connections.js', 'text/javascript; charset=utf-8'),
+          '/phone-headphones.js': ('phone_headphones.js', 'text/javascript; charset=utf-8'),
           '/phone-capture.js': ('phone_capture.js', 'text/javascript; charset=utf-8'),
           '/phone-recording.js': ('phone_recording.js', 'text/javascript; charset=utf-8'),
           '/phone-app.css': ('phone_app.css', 'text/css; charset=utf-8')}

@@ -32,7 +32,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/phone_app.css",
       "action": "moved-or-modified",
       "baseline_sha256": "58470a460ad7948f1cb266df25d84113f54a799ccd4f9211a93813263ecea9d3",
-      "published_sha256": "f46a323cae60f49804a79c281d941847bdce78eac02cdb759f4596b87db24363",
+      "published_sha256": "730d0e34009a662a918f1c35f4b565dea898e1366a25fc2652e4e51cb3147728",
       "reason": "phone-only media architecture"
     },
     {
@@ -40,7 +40,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/phone_shell.js",
       "action": "moved-or-modified",
       "baseline_sha256": "a757f393c96933e7f12564479057ad25d526b74945bb00ad5d0f5e434b9f4a15",
-      "published_sha256": "e8c8a0d3520133583cf2e7f6e06b2f65c5172cd00b321c54cf13f57d19cc7913",
+      "published_sha256": "358677e0ed137986c05ec50bcb9daee065ce7ee134fd80ae244f3635c79cb97d",
       "reason": "phone-only media architecture"
     },
     {
@@ -102,7 +102,7 @@
       "current_path": "services/phone-media/headphone_manager.py",
       "action": "moved-or-modified",
       "baseline_sha256": "1a21e6285fd5f42e96ed274749b9e94540a9ceac9e40394b1554a96a73b9c8df",
-      "published_sha256": "d602c1c9c897f39bdb7d375af8d31f599a071184c063d5ee685f442a7ef4f9ef",
+      "published_sha256": "4b4ed1a7b61e8af2b0e30cffb24feea72900e7ee3f41d0947218db4f08b79369",
       "reason": "phone-only media architecture"
     },
     {
@@ -208,6 +208,30 @@
       "action": "removed",
       "baseline_sha256": "294eb2f7e89644d30d21c0e27f9e7fd4c7f827928a24358b996f2dfc84827564",
       "reason": "terminal-only route retired"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/dashboard.html",
+      "current_path": "orangepi/src/orangepi_collect/control/dashboard.html",
+      "action": "moved-or-modified",
+      "baseline_sha256": "f8b60e59d6e659febc0a3474e0f333ad21d51f0f8d0b4b3effd3f901fcfffe29",
+      "published_sha256": "a64ebc2be683b59e4b737d4a46f52dbd1ebcbf73706e52f6b7c01befc003a647",
+      "reason": "Headless phone-controlled Bluetooth and live headphone status"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_app.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_app.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "b896d9a3c8256bfc841242e4aa8af7bd2e6acfbe575f9aa8da07a5a8fceb17fe",
+      "published_sha256": "1a463a85cdc244c66ea79b4c1cb40af872bd9f6ed33bc55ea00d3e29ab28ebdb",
+      "reason": "Headless phone-controlled Bluetooth and live headphone status"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_http.py",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_http.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "a2ee2edc6dcd7c5b7bc677ee7eb2af5b37726dd291c15ba6048256be2fff3cd1",
+      "published_sha256": "c068685642a54254784239bc4c3f35db06577585c6374ab6edf23bd54130f8a0",
+      "reason": "Headless phone-controlled Bluetooth and live headphone status"
     }
   ]
 }

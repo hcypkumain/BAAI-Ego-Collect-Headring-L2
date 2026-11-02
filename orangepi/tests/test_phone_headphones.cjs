@@ -1,0 +1,11 @@
+'use strict';
+const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict');
+const global={};vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../src/orangepi_collect/control/phone_headphones.js'),'utf8'),{window:global,Set});
+const describe=global.describePhoneHeadphones;
+assert.equal(describe(null,false).ready,false);
+assert.equal(describe({selected_name:'Headset',bluetooth_connected:true,audio_ready:false},false).ready,false);
+assert(describe({selected_name:'Headset',bluetooth_connected:true,audio_ready:false},false).title.includes('蓝牙已连接'));
+assert.equal(describe({selected_name:'Headset',bluetooth_connected:true,audio_ready:true},false).ready,true);
+assert.equal(describe({selected_name:'Headset',audio_ready:true},true).ready,false);
+assert(describe({error:'connect_failed'},false).detail.includes('断开手机连接'));
+console.log('PASS headphone link/audio distinction, readiness, stale status and error guidance');

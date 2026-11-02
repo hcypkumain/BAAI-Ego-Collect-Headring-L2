@@ -282,6 +282,7 @@
   viewport.addEventListener('wheel',event=>{if(!safe()||viewer.hidden)return;event.preventDefault();changeZoom(zoom*Math.exp(-event.deltaY*.002));},{passive:false});
   if(global.ResizeObserver)new ResizeObserver(()=>requestPaint()).observe(viewport);
   async function audio(action, address) {
+   if(shell?.openHeadphones){shell.openHeadphones();return;}
    if (mode!=='audio') begin('audio'); const identity=epoch;
    try {
     const config=action?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(address?{action,address}:{action})}:{};
