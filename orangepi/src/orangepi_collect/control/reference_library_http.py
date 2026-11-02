@@ -99,7 +99,7 @@ def handle_reference_request(handler, owner, method):
         return False
     try:
         if getattr(owner, 'reference_catalog', None) is None or getattr(owner, 'reference_credentials', None) is None:
-            raise CatalogError('图库暂未就绪，请稍后刷新或返回RV06重试', 'library_unavailable', 503)
+            raise CatalogError('图库暂未就绪，请稍后刷新或返回手机采集页面重试', 'library_unavailable', 503)
         seen = set()
         for name, value in handler.headers.items():
             name = name.lower()
@@ -115,7 +115,7 @@ def handle_reference_request(handler, owner, method):
         authorized, limited = authorize_library(handler, owner)
         if not authorized:
             _send(handler, 429 if limited else 401, dict(error='rate_limited' if limited else 'library_code_required',
-                message='尝试次数较多，请30秒后重试' if limited else '请输入RV06上传页面显示的图库管理码'))
+                message='尝试次数较多，请30秒后重试' if limited else '请输入手机采集页面显示的图库管理码'))
             return True
         store = owner.reference_catalog
         if method == 'GET':

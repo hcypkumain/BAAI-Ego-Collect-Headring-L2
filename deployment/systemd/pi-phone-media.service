@@ -1,0 +1,30 @@
+[Unit]
+Description=Pi phone preview, reference, replay and headphone backend
+After=network-online.target bluetooth.service
+Wants=network-online.target bluetooth.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+WorkingDirectory=/home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi
+Environment=PYTHONUNBUFFERED=1
+RuntimeDirectory=pi-phone-media
+RuntimeDirectoryMode=0700
+ExecStart=/home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi/.venvs/ros/bin/python -u /opt/pi-phone-media/phone_media.py --bind 127.0.0.1 --port 8766 --token-file /home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi/runtime/dashboard_token
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=5
+KillSignal=SIGTERM
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=512M
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pi-phone-media
+
+[Install]
+WantedBy=multi-user.target

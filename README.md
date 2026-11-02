@@ -1,13 +1,13 @@
 # BAAI Ego Collect · Headring L2
 
-Orange Pi / RK3588 采集系统的当前运行代码快照，导出于 **2026-11-02**。
+基于 **2026-11-02** Orange Pi / RK3588 运行快照整理的手机采集项目。
 包含主采集框架、手机控制页、六路视频、脑电/肌电/IMU、任务 ZIP 导入、QC、云端上传及配套服务。
 
 | 路径 | 内容 |
 |---|---|
 | `orangepi/src/orangepi_collect/` | Pi 上当前使用的采集、控制、预览发布、存储和 QC 集成 |
 | `src/embodied_brain_collect/` | 原始采集框架与检查器，含现场使用的修改 |
-| `services/rv06-preview/` | 当前 `/opt/rv06-preview` 的只读预览、历史回看和耳机管理代码 |
+| `services/phone-media/` | 手机页面的本机预览、历史回看、参考图和耳机管理后端 |
 | `orangepi/tests/`、`tests/` | 当前测试代码 |
 | `deployment/systemd/`、`deployment/udev/` | Pi 上生效的服务及规则快照 |
 | `deployment/os-reference/` | PulseAudio、Avahi、平台 USB/音频脚本参考；不自动覆盖操作系统 |
@@ -71,10 +71,15 @@ sudo python3 scripts/install_pi_services.py --apply   # 安装配置，不自动
 python3 tools/verify_repository.py
 node orangepi/tests/test_screen_sync.cjs
 node orangepi/tests/test_recording_overlay.cjs
+# Linux 依赖环境下的隔离媒体接口测试，不连接采集设备：
+orangepi/.venvs/ros/bin/python orangepi/tests/test_phone_media_service.py
 ```
 
 完整硬件测试应在依赖就绪的 Pi 上执行；部分原框架测试需要自行导入的任务图片或具体硬件。
 本次上传不在运行中的 Pi 上启动录制或重跑采集设备测试。
+
+仓库已移除独立终端路线，手机通过 8765 访问采集界面；媒体后端只监听本机 8766。
+旧设备升级服务名和共享内存目录前，请阅读 [手机媒体服务迁移](docs/MIGRATION_PHONE_MEDIA.md)。
 
 - [快照范围与已知限制](docs/SNAPSHOT_SCOPE.md)
 - [厂商接入文档](docs/integration/hal_integration.md)：文档与实际 camd 二进制有接口差异，当前实现以 `camd_source.py` 为准。

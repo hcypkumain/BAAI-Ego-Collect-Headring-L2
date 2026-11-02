@@ -1,4 +1,4 @@
-"""Bounded Pi-owned classic Bluetooth headphone controls for the RV06.
+"""Bounded Pi-owned classic Bluetooth headphone controls for the phone interface.
 
 All D-Bus, filesystem and Pulse operations run on one daemon worker. HTTP
 threads only copy a bounded status or enqueue an explicit action. No recording
@@ -18,7 +18,7 @@ VERSION = 1
 MAC = re.compile(r'[0-9A-F]{2}(?::[0-9A-F]{2}){5}\Z')
 AUDIO_SINK = '0000110b-0000-1000-8000-00805f9b34fb'
 LEGACY_ADDRESS = '41:42:98:47:58:B5'
-PULSE_SERVER = 'unix:/run/user/1000/pulse/rv06-headphones'
+PULSE_SERVER = 'unix:/run/user/1000/pulse/pi-collect-headphones'
 SPEAKER = 'alsa_output.usb-Timesintelli_USB_Audio_Device_223483-00.mono-fallback'
 PLAYER = '/opt/opi-headphone-audio/guarded-paplay'
 MAX_DEVICES = 24

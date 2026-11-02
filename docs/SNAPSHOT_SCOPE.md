@@ -12,6 +12,11 @@
 根 README 与原 gitignore 为发布需要重新编写，原版分别保存在 `docs/framework/`。
 三份本机选择配置改为提供模板。`tools/verify_repository.py` 对这些明确的发布转换单独核对。
 
+独立终端路线已从当前运行代码和部署入口移除。手机仍需要的媒体功能已迁入
+`services/phone-media/`，服务名为 `pi-phone-media.service`，仅监听回环地址。
+`repository-changes.json` 记录基于原快照的移动、修改及删除，原始来源路径只作为历史审计保留，
+不代表当前设备已经按新目录部署。
+
 排除范围：原始录制、任务图片及已导入图库、日志、运行状态数据库、虚拟环境、缓存、
 密钥、凭据库、令牌、开机左右确认/阻抗证明、旧安装备份以及可从标准依赖获取的整个 Python 环境。
 标准 pip/system 依赖记录版本，不复制其整套 site-packages。

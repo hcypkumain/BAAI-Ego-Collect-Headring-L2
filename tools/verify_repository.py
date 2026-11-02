@@ -8,16 +8,32 @@ LOCAL_SELECTIONS={'orangepi/configs/reference_control.json','orangepi/configs/he
 
 def main():
     manifest=json.loads((ROOT/'deployment/manifests/pi-source-snapshot.json').read_text(encoding='utf-8'))
-    verified=0
+    migration_path=ROOT/'deployment/manifests/repository-changes.json'
+    changes=json.loads(migration_path.read_text(encoding='utf-8'))['files'] if migration_path.is_file() else []
+    changes={row['original_path']:row for row in changes}
+    verified=retired=modified=0
     for row in manifest['files']:
         if row['path'] in LOCAL_SELECTIONS:
             assert not (ROOT/row['path']).exists(),'Do not publish station preferences: '+row['path']
             continue
-        path=ROOT/RELOCATED.get(row['path'],row['path'])
+        change=changes.get(row['path'])
+        if change:
+            assert change['baseline_sha256']==row['sha256'],'Baseline drift: '+row['path']
+            if change['action']=='removed':
+                assert not (ROOT/row['path']).exists(),'Retired file returned: '+row['path']
+                retired+=1;continue
+        path=ROOT/(change['current_path'] if change else RELOCATED.get(row['path'],row['path']))
         assert path.is_file(),'Missing deployed source: '+row['path']
-        assert hashlib.sha256(path.read_bytes()).hexdigest()==row['sha256'],'Changed deployed source: '+row['path']
+        expected=change['published_sha256'] if change else row['sha256']
+        assert hashlib.sha256(path.read_bytes()).hexdigest()==expected,'Changed source: '+row['path']
+        if change:modified+=1
         verified+=1
     syntax=0
+    for folder in ('services','orangepi/src','deployment/systemd'):
+        for path in (ROOT/folder).rglob('*'):
+            if not path.is_file() or path.suffix not in ('.py','.js','.css','.html','.service','.conf'):continue
+            data=path.read_bytes().lower()
+            assert b'rv06' not in data and b'192.168.250.' not in data,'Retired terminal dependency: '+str(path.relative_to(ROOT))
     for path in ROOT.rglob('*'):
         if '.git' in path.relative_to(ROOT).parts or not path.is_file():continue
         relative=path.relative_to(ROOT)
@@ -31,7 +47,9 @@ def main():
     if process.returncode:
         print(process.stdout);print(process.stderr,file=sys.stderr);raise SystemExit(process.returncode)
     audit=json.loads(process.stdout)
-    print(json.dumps(dict(deployed_files_verified=verified,local_selection_files_excluded=len(LOCAL_SELECTIONS),
+    print(json.dumps(dict(snapshot_or_derived_files_verified=verified,retired_files_verified=retired,
+        documented_repository_changes=modified,local_selection_files_excluded=len(LOCAL_SELECTIONS),
+        runtime_terminal_dependencies_absent=True,
         python_files_compiled=syntax,secret_audit=audit),ensure_ascii=False,indent=2))
 
 if __name__=='__main__':main()

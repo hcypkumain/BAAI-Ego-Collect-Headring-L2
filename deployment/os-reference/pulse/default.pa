@@ -142,7 +142,7 @@ load-module module-filter-apply
 set-default-source alsa_input.platform-es8388-sound.HiFi__hw_rockchipes8388__source
 set-default-sink alsa_output.platform-es8388-sound.HiFi__hw_rockchipes8388__sink
 
-# RV06 optional headphone controls: local same-user socket in private 0700 directory.
+# Phone headphone controls: local same-user socket in private 0700 directory.
 .nofail
-load-module module-native-protocol-unix auth-anonymous=1 socket=/run/user/1000/pulse/rv06-headphones
+load-module module-native-protocol-unix auth-anonymous=1 socket=/run/user/1000/pulse/pi-collect-headphones
 .fail

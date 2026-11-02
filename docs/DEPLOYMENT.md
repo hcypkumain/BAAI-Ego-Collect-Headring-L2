@@ -58,8 +58,8 @@ sudo python3 scripts/install_pi_services.py --apply --with-vendor-runtime
 
 ```bash
 sudo systemctl enable --now camd
-sudo systemctl enable --now embodied-pi-collect rv06-preview embodied-pi-diagnostics
-systemctl status camd embodied-pi-collect rv06-preview --no-pager
+sudo systemctl enable --now embodied-pi-collect pi-phone-media embodied-pi-diagnostics
+systemctl status camd embodied-pi-collect pi-phone-media --no-pager
 ```
 
 手机整页刷新以加载新脚本。按页面完成本次 USB 枚举下的腕相机、肌电左右确认和脑电采前流程。
@@ -70,3 +70,6 @@ systemctl status camd embodied-pi-collect rv06-preview --no-pager
 先结束正在录制/准备的段及后台上传，再备份代码和本机配置。比较待更新 diff，
 不要覆盖 `runtime/`、`private/`、任务图库、录制目录或上传回执。
 本次发布仅上传仓库快照，没有用部署工具修改当前 Pi 的采集服务。
+
+已有设备从旧服务名称升级时，先按 [媒体服务迁移说明](MIGRATION_PHONE_MEDIA.md) 完成切换。
+不要在采集回调仍运行时只更换共享内存的消费者端。

@@ -175,8 +175,6 @@ def main(config):
     pub = publisher()
     pub.bind_emg_sources(config.get('_preview_id'),
                         {slot:item['port'] for slot,item in config.get('emg',{}).items()})
-    pub.bind_wrist_sources(config.get('_preview_id'),
-                          {slot:item['device'] for slot,item in config.get('wrist_cameras',{}).items()})
     parent = os.getppid()
 
     def serial_reader(name, item):

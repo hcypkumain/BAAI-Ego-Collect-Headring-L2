@@ -9,7 +9,7 @@ import threading
 import time
 
 ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-TRUSTED_PEERS = frozenset(('127.0.0.1', '::1', '192.168.250.1', '192.168.250.2'))
+TRUSTED_PEERS = frozenset(('127.0.0.1', '::1'))
 
 
 class ReferenceCredentials:

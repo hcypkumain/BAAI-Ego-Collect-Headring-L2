@@ -68,13 +68,14 @@ for path,relative in project_files(ALTERNATE):
     if main.is_file() and path.read_bytes()==main.read_bytes():continue
     add(path,'legacy/alternate-project/'+relative,'alternate-project-differences');alternate.append(relative)
 
-sidecar=Path('/opt/rv06-preview')
+sidecar=Path('/opt/pi-phone-media')
+if not sidecar.is_dir():raise RuntimeError('Export the migrated phone media installation; old device snapshots remain in Git history')
 for path in sorted(sidecar.rglob('*')):
     relative=path.relative_to(sidecar)
     if path.is_symlink() or not path.is_file() or 'backups' in relative.parts or BACKUP.search(path.name):continue
     if path.suffix not in ('.py','.md','.sh','.json','.toml','.txt','.c','.h'):continue
-    add(path,'services/rv06-preview/'+relative.as_posix(),'preview-and-replay')
-if (sidecar/'headphone-test.wav').is_file():add(sidecar/'headphone-test.wav','services/rv06-preview/headphone-test.wav','preview-and-replay')
+    add(path,'services/phone-media/'+relative.as_posix(),'preview-and-replay')
+if (sidecar/'headphone-test.wav').is_file():add(sidecar/'headphone-test.wav','services/phone-media/headphone-test.wav','preview-and-replay')
 
 for source,destination in (
     ('/etc/pulse/client.conf','deployment/os-reference/pulse/client.conf'),
@@ -89,7 +90,7 @@ for source,destination in (
         raw=path.read_bytes()
         if b'\x00' not in raw:add(path,destination,'platform-configuration-reference')
 
-for name in ('embodied-pi-collect.service','embodied-pi-diagnostics.service','rv06-preview.service','camd.service','egorecord.service'):
+for name in ('embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service','camd.service','egorecord.service'):
     unit=Path('/etc/systemd/system')/name
     if unit.is_file() and not unit.is_symlink():add(unit,'deployment/systemd/'+name,'systemd')
     directory=unit.with_name(name+'.d')

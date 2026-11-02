@@ -39,7 +39,6 @@ def network_addresses(records, wireless=None):
                 continue
             if (address.version != 4 or address.is_loopback or address.is_link_local
                     or address.is_multicast or address.is_unspecified
-                    or str(address) in ('192.168.250.1', '192.168.250.2')
                     or address in ipaddress.ip_network('10.231.47.0/24')
                     or str(address) in seen):
                 continue
@@ -117,7 +116,7 @@ def handle_reference_access(handler, owner):
         handler.send(400, {'error': 'invalid_framing'})
         return True
     if handler.client_address[0] not in TRUSTED_PEERS or 'origin' in seen:
-        handler.send(403, {'error': 'on_device_only', 'message': '请在 RV06 的手机上传入口查看管理码'})
+        handler.send(403, {'error': 'on_device_only', 'message': '请在 Pi 手机采集页面的参考图库入口查看管理码'})
         return True
     if not handler.authorized():
         handler.send(401, {'error': 'control_authorization_required'})

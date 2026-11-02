@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only, latest-frame ROS JPEG thumbnails for the RV06 terminal."""
+"""Loopback-only media backend for the Pi phone collection interface."""
 import argparse
 from collections import Counter
 import hmac
@@ -17,7 +17,6 @@ from urllib.parse import parse_qs, urlsplit
 import uuid
 from frame_stream import packet,begin
 from reference_preview import ReferenceSource, ReferenceError
-from dual_wrist_preview import DualWristSource, DualError
 from headphone_manager import HeadphoneManager
 from headphone_http import handle_headphones
 from replay_runtime import ReplayRuntime
@@ -28,20 +27,10 @@ except ImportError:
     WRIST_DIRECTORY = None
 
 VERSION = '1.6.0'
-ROS_TOPICS = {
-    'cam_ros_left': '/fisheye/left/image_raw/compressed',
-    'cam_ros_right': '/fisheye/right/image_raw/compressed',
-    'cam_ros_bleft': '/fisheye/bleft/image_raw/compressed',
-    'cam_ros_bright': '/fisheye/bright/image_raw/compressed',
-}
-WRISTS = ('cam_left_wrist', 'cam_right_wrist')
-CAMERAS = tuple(ROS_TOPICS) + WRISTS
-# EgoRecord v0.1.10 retired seeker_cam_bridge, so /fisheye/*/image_raw/compressed
-# no longer exists and a ROS subscription for a headband camera can never yield a
-# frame. The collector's preview worker publishes those cameras as JPEG files in
-# its publisher directory, exactly like the wrist cameras, so the file source
-# serves both kinds now and ROS_TOPICS is kept only to name the cameras.
-FILE_CAMERAS = WRISTS + tuple(ROS_TOPICS)
+HEADBAND_CAMERAS = ('cam_ros_left','cam_ros_right','cam_ros_bleft','cam_ros_bright')
+WRISTS = ('cam_left_wrist','cam_right_wrist')
+CAMERAS = HEADBAND_CAMERAS + WRISTS
+FILE_CAMERAS = CAMERAS
 MAX_INPUT = 2 * 1024 * 1024
 MAX_OUTPUT = 128 * 1024
 MAX_DIMENSION = 2048
@@ -71,41 +60,6 @@ def encode_phone_preview(raw, quality='fast'):
         if image.mode!='RGB':image=image.convert('RGB')
         image.save(output,'JPEG',quality=82,subsampling=2,optimize=False)
         return output.getvalue()
-
-
-def encode_thumbnail(raw):
-    """Scaled JPEG IDCT; no full-resolution RGB image for ordinary JPEG input."""
-    from PIL import Image
-    if not 0 < len(raw) <= MAX_INPUT:
-        raise ValueError('JPEG size exceeds limit')
-    with Image.open(BytesIO(raw)) as image:
-        if image.format != 'JPEG':
-            raise ValueError('Not JPEG')
-        width, height = image.size
-        if (not 0 < width <= MAX_DIMENSION or not 0 < height <= MAX_DIMENSION or
-                width * height > MAX_PIXELS):
-            raise ValueError('JPEG dimensions exceed limit')
-        if image.mode not in ('RGB', 'L'):
-            raise ValueError('Unsupported JPEG color mode')
-        # Camera JPEGs are baseline. Refuse coefficient-heavy progressive input.
-        if image.info.get('progressive') or image.info.get('progression'):
-            raise ValueError('Progressive JPEG is unsupported')
-        image.draft('RGB', (480, 270))
-        # Ubuntu 20.04 / ROS Noetic ships Pillow 7, before Image.Resampling.
-        resampling = getattr(Image, 'Resampling', Image)
-        image.thumbnail((480, 270), resampling.BILINEAR)
-        output = BytesIO()
-        if image.mode == 'RGB':
-            image.save(output, 'JPEG', quality=65, subsampling=2,
-                       progressive=False, optimize=False)
-        else:
-            with image.convert('RGB') as rgb:
-                rgb.save(output, 'JPEG', quality=65, subsampling=2,
-                         progressive=False, optimize=False)
-        encoded = output.getvalue()
-        if len(encoded) > MAX_OUTPUT:
-            raise ValueError('Encoded thumbnail exceeds limit')
-        return encoded
 
 
 class LegacyWristFileSource:
@@ -221,7 +175,7 @@ class WristFileSource:
 
 class PreviewCore:
     """One selected source, latest raw frame and latest encoded frame only."""
-    def __init__(self, subscribe=None, fallback=None, decoder=encode_thumbnail,
+    def __init__(self, subscribe=None, fallback=None, decoder=encode_phone_preview,
                  stale_seconds=STALE_SECONDS, idle_seconds=IDLE_SECONDS,
                  max_output=MAX_OUTPUT, max_fps=None):
         self.subscribe = subscribe
@@ -248,7 +202,7 @@ class PreviewCore:
         self.stopping = False
         self.counters = Counter()
         self.thread = threading.Thread(target=self._decode_loop,
-                                       name='rv06-thumbnail', daemon=True)
+                                       name='phone-preview', daemon=True)
         self.thread.start()
 
     @staticmethod
@@ -282,22 +236,10 @@ class PreviewCore:
             self._unsubscribe(old)
             if self.fallback:
                 self.fallback.reset()
-            # Headband cameras are file-fed since the ROS bridge was retired, so
-            # only subscribe for a camera that is not served from files.
-            if (name in ROS_TOPICS and name not in FILE_CAMERAS
-                    and self.subscribe is not None):
-                try:
-                    self.subscription = self.subscribe(name, generation)
-                except Exception:
-                    with self.condition:
-                        self.counters['subscribe_errors'] += 1
-                        self.selected = None
-                        self._clear_locked()
-                    raise RuntimeError('ROS subscription unavailable')
             return generation
 
     def offer(self, name, generation, payload, source_key=None, arrival=None):
-        """ROS callback: no decode, IO, blocking lock or frame-history queue."""
+        """Source callback: no decode, IO, blocking lock or frame-history queue."""
         if (not isinstance(payload, bytes) or not 0 < len(payload) <= MAX_INPUT or
                 payload[:2] != b'\xff\xd8'):
             self.counters['input_rejected'] += 1
@@ -364,7 +306,7 @@ class PreviewCore:
             self.selection_lock.release()
 
     def release(self):
-        """Release the single-camera demand while the dual calibration is open."""
+        """Release the selected camera demand."""
         with self.selection_lock:
             with self.condition:
                 if self.selected is None:
@@ -474,18 +416,15 @@ class PreviewHTTPServer(ThreadingMixIn, HTTPServer):
     request_queue_size = 2
 
     def server_bind(self):
-        # Both supported bind addresses are numeric. Reverse DNS can stall
-        # startup on the isolated Pi/RV06 link and is unnecessary for HTTP.
+        # The backend listens on numeric loopback only; no reverse DNS is needed.
         TCPServer.server_bind(self)
         self.server_name, self.server_port = self.server_address[:2]
 
-    def __init__(self, address, core, token='', reference=None, dual=None, headphones=None, replay_runtime=None, phone_core=None):
-        self.core = core
+    def __init__(self, address, phone_core, token='', reference=None, headphones=None, replay_runtime=None):
         self.phone_core = phone_core
         self.phone_profile_lock = threading.Lock()
         self.token = token
         self.reference = reference or ReferenceSource()
-        self.dual = dual
         self.headphones = headphones
         self.replay_runtime = replay_runtime
         self.replay = None
@@ -532,7 +471,7 @@ class PreviewHTTPServer(ThreadingMixIn, HTTPServer):
 
 
 class PreviewHandler(BaseHTTPRequestHandler):
-    server_version = 'RV06Preview/' + VERSION
+    server_version = 'PiPhoneMedia/' + VERSION
     sys_version = ''
 
     def log_message(self, *args):
@@ -572,7 +511,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         url = urlsplit(self.path)
         if url.path == '/health':
-            value = self.server.core.health()
+            value = self.server.phone_core.health()
             value['reference_detail'] = True
             value['headphone_management'] = self.server.headphones is not None
             value['recording_replay'] = (self.server.replay_runtime.health()
@@ -583,8 +522,6 @@ class PreviewHandler(BaseHTTPRequestHandler):
             value['phone_continuous_source']=True
             if self.server.phone_core is not None:
                 value['phone_preview'] = self.server.phone_core.health()
-            if self.server.dual is not None:
-                value['dual_wrist'] = self.server.dual.health()
             self.send(200, value)
             return
         if self.server.token:
@@ -646,7 +583,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             return
         if url.path.startswith('/replay/'):
             if (not self.server.token and self.client_address[0] not in
-                    ('127.0.0.1', '::1', '192.168.250.1', '192.168.250.2')):
+                    ('127.0.0.1', '::1')):
                 self.send(403, {'error': 'peer_forbidden'})
                 return
             if self.server.replay_runtime is None:
@@ -659,33 +596,6 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     self.send(404)
             except Exception:
                 self.send(503, {'error': '回看存储或服务不可用，请检查采集SD卡'})
-            return
-        if url.path.startswith('/calibration/wrist/'):
-            match = re.fullmatch(r'/calibration/wrist/(cam_left_wrist|cam_right_wrist)\.jpg', url.path)
-            if not match or self.server.dual is None:
-                self.send(404)
-                return
-            query = parse_qs(url.query, keep_blank_values=True)
-            if set(query)-{'after','wait_ms'} or any(len(value)!=1 for value in query.values()):
-                self.send(400)
-                return
-            try:
-                wait_ms = int(query.get('wait_ms', ['0'])[0])
-                if not 0 <= wait_ms <= 50:
-                    raise ValueError()
-                self.server.core.release()
-                status, body, frame_id = self.server.dual.get(match.group(1), self.headers.get('X-Access-Token', ''),
-                                                            query.get('after', [''])[0], wait_ms)
-            except ValueError:
-                self.send(400)
-                return
-            except DualError as error:
-                self.send(error.status, {'error': error.message})
-                return
-            except OSError:
-                self.send(503, {'error': 'Wrist calibration transport unavailable'})
-                return
-            self.send(status, body or b'', 'image/jpeg' if status == 200 else 'application/json', frame_id)
             return
         if url.path == '/reference.jpg':
             detail = None
@@ -717,42 +627,13 @@ class PreviewHandler(BaseHTTPRequestHandler):
                 return
             self.send(200, body, 'image/jpeg', frame_id)
             return
-        match = re.fullmatch(r'/preview/([a-z_]+)\.jpg', url.path)
-        if not match or match.group(1) not in CAMERAS:
-            self.send(404)
-            return
-        query = parse_qs(url.query, keep_blank_values=True)
-        after = query.get('after', [''])
-        wait = query.get('wait_ms', ['150'])
-        if (len(after) != 1 or len(wait) != 1 or
-                (after[0] and not FRAME_PATTERN.fullmatch(after[0]))):
-            self.send(400)
-            return
-        try:
-            wait_ms = int(wait[0])
-            if not 0 <= wait_ms <= MAX_WAIT_MS:
-                raise ValueError()
-        except ValueError:
-            self.send(400)
-            return
-        try:
-            name = match.group(1)
-            if self.server.dual is not None:
-                self.server.dual.release()
-            generation = self.server.core.select(name)
-            status, body, frame_id = self.server.core.frame(name, generation,
-                                                           after[0], wait_ms)
-        except (ValueError, RuntimeError):
-            self.send(503)
-            return
-        self.send(status, body or b'', 'image/jpeg' if status == 200 else 'application/json',
-                  frame_id)
+        self.send(404)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--bind', default='127.0.0.1',
-                        choices=('127.0.0.1', '192.168.250.1'))
+                        choices=('127.0.0.1',))
     parser.add_argument('--port', type=int, default=8766)
     parser.add_argument('--token-file', type=Path)
     parser.add_argument('--preview-dir', type=Path)
@@ -772,28 +653,17 @@ def main():
             parser.error('Invalid token file')
         if not 24 <= len(token) <= 511 or '\r' in token or '\n' in token:
             parser.error('Invalid token file')
-    from PIL import Image
-    # Every camera is file-fed since EgoRecord v0.1.10 retired seeker_cam_bridge,
-    # and the ROS master went with it. rospy.init_node() blocked here forever
-    # ("master may not be running yet"), so the sidecar never reached serve_forever
-    # and every preview request failed to connect. No subscriber is created now,
-    # so ROS is not imported at all.
-    core = PreviewCore(subscribe=None,
-                       fallback=WristFileSource(args.preview_dir, args.preview_root,
-                                                ipc_directory=WRIST_DIRECTORY))
+    # Display profiles consume the existing capture owner's JPEGs only.
     phone_core = None
-    # Separate demand and latest-only slots preserve the RV06 thumbnail API.
-    # Source mode forwards exact compressed bytes; display profiles reduce bandwidth.
     phone_core = PreviewCore(subscribe=None,
         fallback=WristFileSource(args.preview_dir,args.preview_root,ipc_directory=WRIST_DIRECTORY),
         decoder=lambda raw:encode_phone_preview(raw,getattr(phone_core,'phone_quality','fast')),
         max_output=MAX_INPUT,max_fps=60.,idle_seconds=3.)
     phone_core.phone_quality='fast'
-    dual = DualWristSource()
     headphones = HeadphoneManager(Path.cwd())
     replay_runtime = ReplayRuntime(Path.cwd(), token)
-    server = PreviewHTTPServer((args.bind, args.port), core, token, dual=dual, headphones=headphones,
-                               replay_runtime=replay_runtime,phone_core=phone_core)
+    server = PreviewHTTPServer((args.bind, args.port), phone_core, token, headphones=headphones,
+                               replay_runtime=replay_runtime)
     stopped = threading.Event()
     signal.signal(signal.SIGTERM, lambda *unused: stopped.set())
     signal.signal(signal.SIGINT, lambda *unused: stopped.set())
@@ -805,9 +675,7 @@ def main():
         server.server_close()
         replay_runtime.close()
         headphones.close()
-        core.close()
         phone_core.close()
-        dual.close()
 
 
 if __name__ == '__main__':

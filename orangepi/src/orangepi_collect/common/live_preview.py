@@ -12,10 +12,9 @@ import threading
 import time
 from display_demand import DemandReader
 try:
-    from wrist_preview_transport import Producer as WristPreviewProducer, DualProducer
+    from wrist_preview_transport import Producer as WristPreviewProducer
 except ImportError:
     WristPreviewProducer = None
-    DualProducer = None
 
 CAMERAS = ('cam_left_wrist', 'cam_right_wrist', 'cam_ros_left', 'cam_ros_right', 'cam_ros_bleft', 'cam_ros_bright')
 # Upper bound on published frames per camera, not the intended rate: the
@@ -64,16 +63,12 @@ class Publisher:
         self.skipped_updates = collections.Counter()
         self.lock = threading.Lock(); self.stop = threading.Event()
         self.wrist_tap = None
-        self.dual_wrist_tap = None
         self.wrist_tap_errors = 0
         if self.directory:
             if WristPreviewProducer is not None:
                 # Scheduling headroom for a 30 Hz UVC source avoids dropping a
                 # frame just because consecutive callbacks jitter around 33 ms.
                 try:self.wrist_tap = WristPreviewProducer(max_fps=40)
-                except Exception:self.wrist_tap_errors += 1
-            if DualProducer is not None:
-                try:self.dual_wrist_tap = DualProducer(max_fps=40)
                 except Exception:self.wrist_tap_errors += 1
             self.directory.mkdir(parents=True, exist_ok=True)
             self.thread = threading.Thread(target=self._run, daemon=True)
@@ -100,22 +95,12 @@ class Publisher:
         heads=self.demand.camera_names.intersection(('cam_ros_left','cam_ros_right','cam_ros_bleft','cam_ros_bright'))
         return name in self.demand.camera_detail_names or len(heads)==1
 
-    def bind_wrist_sources(self, preview_id, sources):
-        # Idle owner calls this before opening UVC sources. Recording never binds
-        # this separate calibration tap and cannot supply calibration evidence.
-        if self.dual_wrist_tap is not None:
-            try:self.dual_wrist_tap.bind(preview_id, sources)
-            except (ValueError, TypeError):pass
-
     def camera(self, name, payload):
         if not self.directory or name not in CAMERAS: return
         # Optional viewer receives the existing UVC owner's latest JPEG before
         # legacy throttling. This path never opens a camera or performs IO.
         if self.wrist_tap is not None and name in ('cam_left_wrist','cam_right_wrist'):
             try:self.wrist_tap.offer(name,payload)
-            except Exception:self.wrist_tap_errors += 1
-        if self.dual_wrist_tap is not None and name in ('cam_left_wrist','cam_right_wrist'):
-            try:self.dual_wrist_tap.offer(name,payload)
             except Exception:self.wrist_tap_errors += 1
         if not self.wants_camera(name):return
         now = time.monotonic();interval = camera_publish_interval(name)
@@ -192,15 +177,10 @@ class Publisher:
             delay = max(.001,legacy_at-now)
             if self.wrist_tap is not None:
                 delay = min(delay,self.wrist_tap.poll_interval)
-            if self.dual_wrist_tap is not None:
-                delay = min(delay,self.dual_wrist_tap.poll_interval)
             if self.stop.wait(delay):break
             now = time.monotonic()
             if self.wrist_tap is not None:
                 try:self.wrist_tap.tick(now)
-                except Exception:self.wrist_tap_errors += 1
-            if self.dual_wrist_tap is not None:
-                try:self.dual_wrist_tap.tick(now)
                 except Exception:self.wrist_tap_errors += 1
             if now >= legacy_at:
                 self._publish_once()
@@ -252,9 +232,6 @@ class Publisher:
         if self.directory: self.thread.join(timeout=2)
         if self.wrist_tap is not None:
             try:self.wrist_tap.close()
-            except Exception:self.wrist_tap_errors += 1
-        if self.dual_wrist_tap is not None:
-            try:self.dual_wrist_tap.close()
             except Exception:self.wrist_tap_errors += 1
 
 

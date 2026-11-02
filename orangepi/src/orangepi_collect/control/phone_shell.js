@@ -6,7 +6,7 @@
   if(!/^\/(?:phone\/?)?$/.test(location.pathname))return null;
   const $=id=>document.getElementById(id),main=document.querySelector('main');
   const text=(node,value)=>{value=String(value??'');if(node.textContent!==value)node.textContent=value;};
-  document.body.classList.add('phone-app','phone-rv06');
+  document.body.classList.add('phone-app','phone-native');
   const legacy=document.createElement('div');legacy.id='phone-legacy';legacy.hidden=true;
   for(const node of main.querySelectorAll(':scope > .hero,:scope > .flow,:scope > .footer'))legacy.append(node);
   const shell=document.createElement('div');shell.id='phone-shell';main.append(shell,legacy);

@@ -1,4 +1,4 @@
-"""Read-only saved-recording catalog and bounded signal windows for RV06.
+"""Read-only saved-recording catalog and bounded signal windows for the phone interface.
 
 No imports of acquisition owners and no device opens. Video decoding is lazy and
 delegated to replay_video; original recordings and QC reports are never written.
@@ -21,7 +21,7 @@ from qc_details import summarize_qc,compact_qc
 
 import numpy as np
 
-READ_PEERS = frozenset(('127.0.0.1', '::1', '192.168.250.1', '192.168.250.2'))
+READ_PEERS = frozenset(('127.0.0.1', '::1'))
 CAMERAS = ('cam_ros_left', 'cam_ros_right', 'cam_ros_bleft', 'cam_ros_bright',
            'cam_left_wrist', 'cam_right_wrist')
 SIGNALS = ('eeg', 'emg_left', 'emg_right', 'emg_left_imu', 'emg_right_imu', 'board_imu')

@@ -1,0 +1,213 @@
+{
+  "schema_version": 1,
+  "baseline_commit": "ccf2b3891275f07caec454058f65432c01ce5980",
+  "reason": "Retire the separate terminal route while retaining phone functionality",
+  "files": [
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/preview_worker.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/preview_worker.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "88f914b345d6d983368764ab9d8c35ce51627d5cc3c0b6543cb3632984a2542c",
+      "published_sha256": "f905dd3a3df1875c1ff5b73decb9a0a26813588d464f5ff88ccab0a0d7e9d7ad",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/live_preview.py",
+      "current_path": "orangepi/src/orangepi_collect/common/live_preview.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "d870c05fd8ac2150a3bb6c62ff10e971c3970f657ce488bd1207840997a21b7f",
+      "published_sha256": "c42887f4c486cf58a91d907b408a3a4d1720473e5d444e7e259b2c3fe19891dc",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/wrist_preview_transport.py",
+      "current_path": "orangepi/src/orangepi_collect/common/wrist_preview_transport.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9b7b14d1f0bd815ef5a34bd45b46d7d7934e5d8b33c121b77caa8d3229490dd6",
+      "published_sha256": "5a2b0c7dae826e4feb2af8e8ff2ea9306b8cecdc6a9f14cfb3cf9f21ada3f95c",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_app.css",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_app.css",
+      "action": "moved-or-modified",
+      "baseline_sha256": "58470a460ad7948f1cb266df25d84113f54a799ccd4f9211a93813263ecea9d3",
+      "published_sha256": "f46a323cae60f49804a79c281d941847bdce78eac02cdb759f4596b87db24363",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_shell.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_shell.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "a757f393c96933e7f12564479057ad25d526b74945bb00ad5d0f5e434b9f4a15",
+      "published_sha256": "e8c8a0d3520133583cf2e7f6e06b2f65c5172cd00b321c54cf13f57d19cc7913",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_access.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_access.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "f6741b5db016a43a91a139a5469cbac7245c7e8e9a7f3ead8355a883e8fd40a0",
+      "published_sha256": "afc260fed615fdb56650a4a86fad2ca5f0d1cbce13ca56e4817c17ec982cf976",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_credentials.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_credentials.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "4bd99d3ef8c25d30fe13733800b479b44d5a2a255e1a300a0d6e76faf2e1d59d",
+      "published_sha256": "27aba75cda754e106e10ab16e907524d13387c17defc6a938bd812b22f9cc8ab",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_library_http.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_library_http.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "b8ee4b9602e085e299682782262a8b0e43a31b95b688334198bbe6e556116021",
+      "published_sha256": "17e6fefe8b60033938b7a9051d3738aa0d8a8661044f06a49232843cd7a04a10",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/references.html",
+      "current_path": "orangepi/src/orangepi_collect/control/references.html",
+      "action": "moved-or-modified",
+      "baseline_sha256": "c984c7194d5baf34932949bbd50337fa3f5a6569e8fde6de379c6dc26b73544a",
+      "published_sha256": "8a2e6a9108465ba42146dd62f84f061b1ed76cf2bf700475af2a7adfaf7d0a27",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/dual_wrist_preview.py",
+      "action": "removed",
+      "baseline_sha256": "79fa40cc592c77d4fbcbc94e3f08e70dda744e4c4559217424d66b223504a5b6",
+      "reason": "terminal-only route retired"
+    },
+    {
+      "original_path": "services/rv06-preview/frame_stream.py",
+      "current_path": "services/phone-media/frame_stream.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "8a31ce3f9ed6733dc997f2d0429c3718e354fd5048935360c1a5c42e37731ac9",
+      "published_sha256": "8a31ce3f9ed6733dc997f2d0429c3718e354fd5048935360c1a5c42e37731ac9",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/headphone_http.py",
+      "current_path": "services/phone-media/headphone_http.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "297c11813bb1233739c767b537db2849ce2ab8f5b0f894fc188e5f5e168fe926",
+      "published_sha256": "d6edb9eda9fdbff8a8ee6e9b12c4cf083bae707e19844bc8d65b6787ac46b90c",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/headphone_manager.py",
+      "current_path": "services/phone-media/headphone_manager.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1a21e6285fd5f42e96ed274749b9e94540a9ceac9e40394b1554a96a73b9c8df",
+      "published_sha256": "d602c1c9c897f39bdb7d375af8d31f599a071184c063d5ee685f442a7ef4f9ef",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/preview_sidecar.py",
+      "current_path": "services/phone-media/phone_media.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9a3a85c3bd3c35ed32d346120036c408480a992b323dc12fba4d8ead7d314d12",
+      "published_sha256": "91417eeffcbd71eb8c204d6a761ea4c03c5bc8669b31c61df2f82eb3f3d52b59",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/qc_details.py",
+      "current_path": "services/phone-media/qc_details.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "5246f2aeefc442308fcf20fe67ee896b89415dfcd656778081abc21cbee51811",
+      "published_sha256": "5246f2aeefc442308fcf20fe67ee896b89415dfcd656778081abc21cbee51811",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/recording_replay.py",
+      "current_path": "services/phone-media/recording_replay.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "5c6e6d4377ae3c76f8bde4872b0275fdcb08b3b22f6d546e2c3c5c9281c1f975",
+      "published_sha256": "bed54e0db76c8f6594093154bee7d13c5f6eb8c9e6007cb9cbf1241f136fad7f",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/reference_preview.py",
+      "current_path": "services/phone-media/reference_preview.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1dfbd3a899e79b7626b4a481da48f9299b4d746c1aacc876f8bd8b3f20fef100",
+      "published_sha256": "1dfbd3a899e79b7626b4a481da48f9299b4d746c1aacc876f8bd8b3f20fef100",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/replay_runtime.py",
+      "current_path": "services/phone-media/replay_runtime.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "d5aa8fb2bd3d44787e6ab8b8af006d862a4cd1b902a51c84bf290eb70baf0774",
+      "published_sha256": "d5aa8fb2bd3d44787e6ab8b8af006d862a4cd1b902a51c84bf290eb70baf0774",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/replay_video.py",
+      "current_path": "services/phone-media/replay_video.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1fe2f93262a4cc17d4b3065da785e8ff95622289ae97083a51e6c08c26cc030d",
+      "published_sha256": "1fe2f93262a4cc17d4b3065da785e8ff95622289ae97083a51e6c08c26cc030d",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/wrist_preview_transport.py",
+      "current_path": "services/phone-media/wrist_preview_transport.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9b7b14d1f0bd815ef5a34bd45b46d7d7934e5d8b33c121b77caa8d3229490dd6",
+      "published_sha256": "5a2b0c7dae826e4feb2af8e8ff2ea9306b8cecdc6a9f14cfb3cf9f21ada3f95c",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "services/rv06-preview/headphone-test.wav",
+      "current_path": "services/phone-media/headphone-test.wav",
+      "action": "moved-or-modified",
+      "baseline_sha256": "2f5069054f00c85622f0e763fec963bbfdd762cf984643e063236bbaad82c539",
+      "published_sha256": "2f5069054f00c85622f0e763fec963bbfdd762cf984643e063236bbaad82c539",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "deployment/os-reference/pulse/default.pa",
+      "current_path": "deployment/os-reference/pulse/default.pa",
+      "action": "moved-or-modified",
+      "baseline_sha256": "839bcb4a5b7705be6f8df5f14680d3416cdb477cec282ea6f6caa2e1759a9fff",
+      "published_sha256": "bc83b2de280a3bb7a4230dd21ff066b9d1dddcd2132f5038dc87fb9622d20135",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "deployment/systemd/rv06-preview.service",
+      "current_path": "deployment/systemd/pi-phone-media.service",
+      "action": "moved-or-modified",
+      "baseline_sha256": "85eb3978791fbb9d1913afc75a31dd8fda4afd80a262883372868477c2f72631",
+      "published_sha256": "273c64d9242ef70eb72b36dddac9699ba6681e80cebd047904778dbbd3e1ae21",
+      "reason": "phone-only media architecture"
+    },
+    {
+      "original_path": "deployment/systemd/rv06-preview.service.d/headphone-control.conf",
+      "action": "removed",
+      "baseline_sha256": "50e01d2a607143a1dd54606904a254237e3c0d375226d3328f412bffd4a548b6",
+      "reason": "terminal-only route retired"
+    },
+    {
+      "original_path": "deployment/systemd/rv06-preview.service.d/pi-local-display.conf",
+      "action": "removed",
+      "baseline_sha256": "4eba9ba9abdb235200d37d8bacf1e7b77d47987421f72e6b757cf710262548f8",
+      "reason": "terminal-only route retired"
+    },
+    {
+      "original_path": "deployment/systemd/rv06-preview.service.d/reference-detail-memory.conf",
+      "action": "removed",
+      "baseline_sha256": "3c7ce33c8c1c3e0ebe144320911f64ffd16f1b7e1647eda8b6ed0d16923ee8d2",
+      "reason": "terminal-only route retired"
+    },
+    {
+      "original_path": "deployment/systemd/rv06-preview.service.d/reference-library-memory.conf",
+      "action": "removed",
+      "baseline_sha256": "294eb2f7e89644d30d21c0e27f9e7fd4c7f827928a24358b996f2dfc84827564",
+      "reason": "terminal-only route retired"
+    }
+  ]
+}

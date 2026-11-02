@@ -5,8 +5,8 @@ from urllib.parse import urlsplit
 
 from headphone_manager import unique_json
 
-READ_PEERS = frozenset(('127.0.0.1', '::1', '192.168.250.1', '192.168.250.2'))
-WRITE_PEERS = frozenset(('127.0.0.1', '::1', '192.168.250.2'))
+READ_PEERS = frozenset(('127.0.0.1', '::1'))
+WRITE_PEERS = frozenset(('127.0.0.1', '::1'))
 
 
 def handle_headphones(handler, method):

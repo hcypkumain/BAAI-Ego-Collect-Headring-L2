@@ -5,9 +5,10 @@ from pathlib import Path
 
 def plan(root,include_vendor):
     result=[]
-    for source in sorted((root/'services/rv06-preview').rglob('*')):
-        if source.is_file():result.append((source,Path('/opt/rv06-preview')/source.relative_to(root/'services/rv06-preview'),False))
-    for name in ('camd.service','embodied-pi-collect.service','embodied-pi-diagnostics.service','rv06-preview.service'):
+    for source in sorted((root/'services/phone-media').rglob('*')):
+        if source.is_file() and '__pycache__' not in source.parts and source.suffix in ('.py','.wav'):
+            result.append((source,Path('/opt/pi-phone-media')/source.relative_to(root/'services/phone-media'),False))
+    for name in ('camd.service','embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service'):
         unit=root/'deployment/systemd'/name
         result.append((unit,Path('/etc/systemd/system')/name,True))
         for source in sorted(unit.with_name(unit.name+'.d').glob('*.conf')):
