@@ -32,7 +32,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/phone_app.css",
       "action": "moved-or-modified",
       "baseline_sha256": "58470a460ad7948f1cb266df25d84113f54a799ccd4f9211a93813263ecea9d3",
-      "published_sha256": "730d0e34009a662a918f1c35f4b565dea898e1366a25fc2652e4e51cb3147728",
+      "published_sha256": "6e07271ba07fdb56687f2da54ef257d6a799a6a446fd4a44c1e1b5a4c8f865c2",
       "reason": "phone-only media architecture"
     },
     {
@@ -40,7 +40,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/phone_shell.js",
       "action": "moved-or-modified",
       "baseline_sha256": "a757f393c96933e7f12564479057ad25d526b74945bb00ad5d0f5e434b9f4a15",
-      "published_sha256": "358677e0ed137986c05ec50bcb9daee065ce7ee134fd80ae244f3635c79cb97d",
+      "published_sha256": "e5a0ba0b0a427de07178933e31a14384a98d2638d1684e3bfb27a93ff80e8d04",
       "reason": "phone-only media architecture"
     },
     {
@@ -64,7 +64,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/reference_library_http.py",
       "action": "moved-or-modified",
       "baseline_sha256": "b8ee4b9602e085e299682782262a8b0e43a31b95b688334198bbe6e556116021",
-      "published_sha256": "17e6fefe8b60033938b7a9051d3738aa0d8a8661044f06a49232843cd7a04a10",
+      "published_sha256": "27d5b4936bd4ca86d0550d50c7f3e06296cf580884d38b60033d3214dc1fb7fa",
       "reason": "phone-only media architecture"
     },
     {
@@ -214,7 +214,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/dashboard.html",
       "action": "moved-or-modified",
       "baseline_sha256": "f8b60e59d6e659febc0a3474e0f333ad21d51f0f8d0b4b3effd3f901fcfffe29",
-      "published_sha256": "a64ebc2be683b59e4b737d4a46f52dbd1ebcbf73706e52f6b7c01befc003a647",
+      "published_sha256": "ee3fa8357a8d24a09b615072af1af4428701f55d624eb2ee417f46e2df759610",
       "reason": "Headless phone-controlled Bluetooth and live headphone status"
     },
     {
@@ -222,7 +222,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/phone_app.js",
       "action": "moved-or-modified",
       "baseline_sha256": "b896d9a3c8256bfc841242e4aa8af7bd2e6acfbe575f9aa8da07a5a8fceb17fe",
-      "published_sha256": "1a463a85cdc244c66ea79b4c1cb40af872bd9f6ed33bc55ea00d3e29ab28ebdb",
+      "published_sha256": "a6f3505c258cb2e3704e2d29e326794f059882344adaba24eed8cc7dc28b2b7e",
       "reason": "Headless phone-controlled Bluetooth and live headphone status"
     },
     {
@@ -232,6 +232,78 @@
       "baseline_sha256": "a2ee2edc6dcd7c5b7bc677ee7eb2af5b37726dd291c15ba6048256be2fff3cd1",
       "published_sha256": "c068685642a54254784239bc4c3f35db06577585c6374ab6edf23bd54130f8a0",
       "reason": "Headless phone-controlled Bluetooth and live headphone status"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_worker.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_worker.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "813cb98508f6e7ae658803ca9fbb104f7fc8cd79ebc8ebfdc1bb01a259c43d98",
+      "published_sha256": "3984914cbcc8a1f207d64dd092ed9211ea4ccf62064e6627ccfbfdf1f7233b3d",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/scan_devices.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/scan_devices.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "8fdcd6b8703c7061174ab749669d05bf1c47286abcf032d0c0a5c3a35b0a968c",
+      "published_sha256": "82bd76e3b80eda32604478135ec120abcc3aba2ef49d268e1988f79210514c47",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/serial_v1_impedance.py",
+      "current_path": "orangepi/src/orangepi_collect/common/serial_v1_impedance.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "d6b6a5114336130a980329f1ae0d9f4caf648ba67898d057ab0dfb39f2c87694",
+      "published_sha256": "abc1802530d2547dd5e81421ec52f3718eb13ba0a6bfd9d2908fe9626afeab29",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/dashboard.py",
+      "current_path": "orangepi/src/orangepi_collect/control/dashboard.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "bc974ad84705e96f657f23be08328e788850eb866bf7d1050a62fdc7c8ccf0a1",
+      "published_sha256": "f1ac50e1f8149d4e6e2fc600bd3663ba8c7c55d3f70d3258db2351b8d7a4d042",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_references.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_references.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "f87776ee385fd43d44b721cb27a9618555c629acd0d9134b6390c3376e70fe28",
+      "published_sha256": "af0869a630ea4feae02a00b55de5e45896d44b33ca97d1b3c82642d667f4ac1c",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_catalog.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_catalog.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "8b11b78d95bd6ce8261ea14bb47f4dae93c60c78cfb304dc709c0436900ba55f",
+      "published_sha256": "6a9a261532f44a5dfe2b2afc238324dbbf97244de3372247ca8b2ab2ce1f057f",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_controls.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_controls.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "dfdd22522018f3fa7c084dafba474a4efabd4768cea6e920cbc30262ba2fa58f",
+      "published_sha256": "ba0d667d41187ec98efb63b567dfddd51fbe80c40ee3a5a2fc2a5c94f05fb286",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/framework_qc.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/framework_qc.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "2784e64076ae3f3509aaa162f77b5e1a476aeb4eb5ac9b1c80510c635ed95d34",
+      "published_sha256": "1d744ce831754f98a85ddb012f92be94e66e22d198b50495ab2f435e4c693f59",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
+    },
+    {
+      "original_path": "orangepi/tests/test_screen_sync.cjs",
+      "current_path": "orangepi/tests/test_screen_sync.cjs",
+      "action": "moved-or-modified",
+      "baseline_sha256": "47104de211d1689b3055984f10e78dccd89c65b857576016e0060dfe45ffe608",
+      "published_sha256": "d0f06bdb2e2cdebd73e7071c32edb8600e5934ca3685f9b10992a82c029ae786",
+      "reason": "Mixed task pool, preserved page context, display registration and EEG startup retries"
     }
   ]
 }

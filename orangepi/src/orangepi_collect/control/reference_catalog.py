@@ -63,6 +63,12 @@ def display_name(value, default='未命名'):
             raw = raw[:-1]
 
 
+def task_tags(value):
+    if not isinstance(value, list) or len(value) > 16 or any(not isinstance(tag, str) or not tag.strip() for tag in value):
+        raise CatalogError('标签应为最多 16 个非空文字')
+    return list(dict.fromkeys(display_name(tag) for tag in value))
+
+
 def unique_json(raw):
     def pairs(values):
         result = {}
@@ -198,6 +204,9 @@ class ReferenceCatalog:
                     or type(item.get('deleted')) is not bool or type(item.get('readonly')) is not bool):
                 raise ValueError('invalid list items')
             ReferenceCatalog._validate_scene(item.get('scene'))
+            if any(type(item.get(key, default)) is not bool for key, default in (('hidden', False), ('sampling_enabled', True))):
+                raise ValueError('invalid sampling state')
+            task_tags(item.get('tags', []))
             aliases=item.get('original_filenames',{})
             if not isinstance(aliases,dict) or any(key not in images or not isinstance(name,str) or not 0<len(name.encode('utf-8'))<=384 for key,name in aliases.items()):
                 raise ValueError('invalid image aliases')
@@ -354,6 +363,9 @@ class ReferenceCatalog:
         return image
 
     def _list(self, value, identifier, include_deleted=False):
+        if identifier == 'pool':
+            ids = list(dict.fromkeys(image_id for row in self._sampling_lists(value) for image_id in row['items']))
+            return dict(id='pool', name='混合任务池', items=ids, readonly=True, deleted=False)
         if identifier == 'all':
             return dict(id='all', name='全部参考图', items=list(value['image_order']), readonly=True, deleted=False)
         if not valid_id(identifier) or identifier not in value['lists']:
@@ -363,15 +375,35 @@ class ReferenceCatalog:
             raise CatalogError('这个任务列表已移到回收站', 'deleted', 409)
         return item
 
+    def _sampling_lists(self, value):
+        return [value['lists'][identifier] for identifier in value['list_order']
+                if not value['lists'][identifier]['deleted'] and not value['lists'][identifier].get('hidden', False)
+                and value['lists'][identifier].get('sampling_enabled', True)
+                and (value['lists'][identifier].get('bundle') or {}).get('state') != 'importing']
+
+    def set_list_sampling(self, identifier, hidden, enabled, tags, expected_revision):
+        if type(hidden) is not bool or type(enabled) is not bool:
+            raise CatalogError('任务池设置无效')
+        tags = task_tags(tags)
+        with self._transaction(expected_revision) as value:
+            item = self._list(value, identifier)
+            if identifier in ('all', 'pool'):
+                raise CatalogError('请操作具体列表')
+            if any(self.pins.get(image_id) for image_id in item['items']):
+                raise CatalogError('列表正在准备或采集中，请结束本段后再修改', 'in_use', 409)
+            item.update(hidden=hidden, sampling_enabled=enabled and not hidden, tags=tags)
+        return dict(id=identifier, revision=value['revision'])
+
     def _active_items(self, value, item):
         pending=set();available=set()
         if item['id']=='all':
             for row in value['lists'].values():
-                if row['deleted']:continue
+                if row['deleted'] or row.get('hidden', False):continue
                 (pending if (row.get('bundle') or {}).get('state')=='importing' else available).update(row['items'])
         aliases=item.get('original_filenames') or {}
         result=[]
         for identifier in item['items']:
+            if item['id'] == 'all' and identifier not in available:continue
             if value['images'][identifier]['deleted'] or identifier in pending-available:continue
             image=value['images'][identifier]
             if str(image.get('original_filename',image['name'])).lower().endswith('_placements_overview.png') or image['name'].lower().endswith('_placements_overview'):
@@ -392,20 +424,23 @@ class ReferenceCatalog:
             raise CatalogError('页码无效')
         return offset, limit
 
-    def library_page(self, offset=0, limit=12, completed_paths=(), include_deleted=False):
+    def library_page(self, offset=0, limit=12, completed_paths=(), include_deleted=False, hidden_only=False):
         offset, limit = self._page(offset, limit)
         completed_paths = set(completed_paths)
         with self.mutex:
             value = self._load()
-            identifiers = ['all'] + [identifier for identifier in value['list_order']
-                if include_deleted or not value['lists'][identifier]['deleted']]
+            identifiers = ([] if hidden_only else ['pool', 'all']) + [identifier for identifier in value['list_order']
+                if (include_deleted or not value['lists'][identifier]['deleted'])
+                and (include_deleted or bool(value['lists'][identifier].get('hidden', False)) == hidden_only)]
             rows = []
             for identifier in identifiers[offset:offset+limit]:
                 item = self._list(value, identifier, include_deleted=True)
                 images = self._active_items(value, item)
                 rows.append(dict(id=identifier, name=item['name'], count=len(images),
                     remaining=sum(not self._completed(image, completed_paths) for image in images),
-                    readonly=item['readonly'], deleted=item['deleted'],import_pending=(item.get('bundle') or {}).get('state')=='importing'))
+                    readonly=item['readonly'], deleted=item['deleted'], hidden=item.get('hidden', False),
+                    sampling_enabled=item.get('sampling_enabled', True) and not item.get('hidden', False), tags=item.get('tags', []),
+                    import_pending=(item.get('bundle') or {}).get('state')=='importing'))
             return dict(version=1, revision=value['revision'], total=len(identifiers), offset=offset,
                         next_offset=offset+limit if offset+limit < len(identifiers) else None, lists=rows)
 
@@ -420,6 +455,7 @@ class ReferenceCatalog:
             brief = dict(id=item['id'], name=item['name'], count=len(active),
                 remaining=sum(not self._completed(image, completed_paths) for image in active),
                 readonly=item['readonly'], deleted=item['deleted'],import_pending=(item.get('bundle') or {}).get('state')=='importing')
+            brief.update(hidden=item.get('hidden', False), sampling_enabled=item.get('sampling_enabled', True) and not item.get('hidden', False), tags=item.get('tags', []))
             scene = item.get('scene')
             if scene:
                 brief['scene'] = dict(task=scene.get('task'), notes=scene.get('notes'),
@@ -672,15 +708,34 @@ class ReferenceCatalog:
             if value['revision'] != expected_revision:
                 raise CatalogError('图库已更新，请刷新列表后再选择', 'revision_conflict', 409)
             item = self._list(value, list_id)
+            if item.get('hidden', False):
+                raise CatalogError('隐藏列表不参与采集，请先在隐藏列表页恢复', 'hidden_list', 409)
+            if list_id == 'all':item = self._list(value, 'pool')
             if (item.get('bundle') or {}).get('state')=='importing':raise CatalogError('任务包导入未完成，请先继续导入','bundle_incomplete',409)
             images = [image for image in self._active_items(value, item)
                 if include_completed or not self._completed(image, completed_paths)]
             items = [dict(id=image['id'], name=image['name'], origin=image['origin'],
                 relative_path=(self.library/self._relative(image['path'])).relative_to(self.project).as_posix(),
                 original_filename=image.get('original_filename', image['name'])) for image in images]
+            sources = self._sampling_lists(value) if item['id'] == 'pool' else [item]
+            scenes = {}
+            for asset in items:
+                rows = [row for row in sources if asset['id'] in row['items']]
+                if not rows:
+                    continue
+                asset['source_lists'] = [dict(id=row['id'], name=row['name']) for row in rows]
+                asset['tags'] = list(dict.fromkeys(tag for row in rows for tag in ([row['name']] + row.get('tags', []))))[:16]
+                primary = rows[0]
+                alias = primary.get('original_filenames', {}).get(asset['id'])
+                if alias:
+                    asset.update(name=display_name(Path(alias).stem), original_filename=alias)
+                if primary.get('scene'):
+                    scenes[primary['id']] = copy.deepcopy(primary['scene'])
+                    asset['_scene_id'] = primary['id']
             snapshot = dict(version=1, catalog_revision=value['revision'], list_id=item['id'], list_name=item['name'],
                             total=len(items), items=items)
             if item.get('scene'):snapshot['scene']=copy.deepcopy(item['scene'])
+            if scenes:snapshot['scenes']=scenes
             snapshot['queue_sha256'] = hashlib.sha256(_encoded(snapshot)).hexdigest()
             return snapshot
 
@@ -693,6 +748,7 @@ class ReferenceCatalog:
         if digest != hashlib.sha256(_encoded(expected)).hexdigest():
             raise CatalogError('任务列表快照校验失败', 'invalid_snapshot', 409)
         asset = copy.deepcopy(snapshot['items'][index]); identifier = asset['id']
+        asset.pop('_scene_id', None)
         with self.mutex:
             image = self._image(self._load(), identifier)
             if owner_token is not None and owner_token not in self.pins.get(identifier, ()):
@@ -716,8 +772,9 @@ class ReferenceCatalog:
         return dict(version=1, catalog_revision=snapshot['catalog_revision'], list_id=snapshot['list_id'],
             list_name=snapshot['list_name'], queue_sha256=digest, position=index+1, total=len(snapshot['items']), asset=asset)
 
-    def snapshot_scene(self,snapshot,destination):
-        scene=snapshot.get('scene')
+    def snapshot_scene(self,snapshot,destination,index=None):
+        scene=(snapshot.get('scenes',{}).get(snapshot['items'][index].get('_scene_id'),snapshot.get('scene'))
+               if index is not None else snapshot.get('scene'))
         if not scene:return None
         check=dict(snapshot);digest=check.pop('queue_sha256',None)
         if hashlib.sha256(_encoded(check)).hexdigest()!=digest:raise CatalogError('场景快照校验失败')

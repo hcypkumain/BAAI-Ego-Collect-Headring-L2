@@ -271,6 +271,9 @@ class ReferenceControlsMixin:
         self._reference_task=dict(id=snapshot['list_id'],name=snapshot['list_name'],
             total=snapshot['total'],remaining=len(self.images),position=entry['index']+1 if entry else 0,
             catalog_revision=snapshot['catalog_revision'],selection_mode='random_without_replacement')
+        if entry:
+            asset=snapshot['items'][entry['index']]
+            self._reference_task.update(tags=asset.get('tags', []), source_lists=asset.get('source_lists', []))
         if getattr(self,'_reference_manual_id',None):
             self._reference_task['remaining']=sum(v['path'].relative_to(self._reference_project).as_posix() not in set(self._reference_completed) for v in entries)
 
@@ -286,7 +289,13 @@ class ReferenceControlsMixin:
         self._reference_completed=_completed_paths(self._reference_project,self._reference_ledger)
         self.refresh_reference_histories()
         identifier=current['list_id'] if self._reference_cli_image and current else self._reference_preferences['selected_list_id']
-        snapshot=self.reference_catalog.freeze_list(identifier,self.reference_catalog.revision,include_completed=True)
+        try:snapshot=self.reference_catalog.freeze_list(identifier,self.reference_catalog.revision,include_completed=True)
+        except CatalogError as error:
+            if error.code not in ('hidden_list','deleted','not_found'):raise
+            preferences=dict(self._reference_preferences,selected_list_id='pool')
+            _save_preferences(self._reference_base,preferences);self._reference_preferences=preferences
+            self._reference_retry=None;self._reference_manual_id=None
+            snapshot=self.reference_catalog.freeze_list('pool',self.reference_catalog.revision,include_completed=True)
         self._apply_reference_snapshot(snapshot);self.reference_error=self._reference_preferences_error
         return True
 
@@ -357,7 +366,7 @@ class ReferenceControlsMixin:
             try:
                 path,identity=reserve_session_dir(root,self.collector_id)
                 active=self._reference_active;active['path']=path;active['identity']=identity
-                try:active['scene_snapshot']=self.reference_catalog.snapshot_scene(active['entry']['snapshot'],path) if active['entry']['snapshot'].get('scene') else None
+                try:active['scene_snapshot']=self.reference_catalog.snapshot_scene(active['entry']['snapshot'],path,active['entry']['index'])
                 except CatalogError as error:error.path=path;raise
                 return path,dict(identity)
             except AllocationDurabilityError as error:

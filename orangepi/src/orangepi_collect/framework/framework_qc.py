@@ -307,11 +307,16 @@ def _frozen_reference_selection(old_meta):
     asset=value['asset']
     fields={'id','name','origin','relative_path','sha256'}
     if (not isinstance(asset,dict) or not fields<=set(asset)
-            or not set(asset)<=fields|{'original_filename'} or not token(asset['id'])
+            or not set(asset)<=fields|{'original_filename','tags','source_lists'} or not token(asset['id'])
             or not text(asset['name']) or asset['origin'] not in ('upload','legacy')
             or not digest(asset['sha256'])
             or ('original_filename' in asset and not text(asset['original_filename']))):
         raise ValueError('invalid frozen reference asset')
+    if 'tags' in asset and (not isinstance(asset['tags'], list) or len(asset['tags'])>16 or any(not text(tag) for tag in asset['tags'])):
+        raise ValueError('invalid frozen task tags')
+    if 'source_lists' in asset and (not isinstance(asset['source_lists'], list) or not 1<=len(asset['source_lists'])<=1000
+            or any(not isinstance(row,dict) or set(row)!={'id','name'} or not token(row['id']) or not text(row['name']) for row in asset['source_lists'])):
+        raise ValueError('invalid frozen task sources')
     relative=asset['relative_path']
     if (not text(relative,1024) or '\\' in relative or ':' in relative
             or not relative.startswith('configs/environments/')

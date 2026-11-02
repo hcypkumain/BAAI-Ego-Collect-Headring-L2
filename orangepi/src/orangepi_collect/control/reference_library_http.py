@@ -124,12 +124,12 @@ def handle_reference_request(handler, owner, method):
             if handler.headers.get('Content-Length', '0') != '0':
                 raise CatalogError('读取请求不能带上传内容')
             if url.path == '/api/reference-library':
-                args = _parameters(url.query, ('offset', 'limit', 'include_deleted'))
+                args = _parameters(url.query, ('offset', 'limit', 'include_deleted', 'hidden_only'))
                 deleted = args.get('include_deleted', '0')
-                if deleted not in ('0', '1'):
+                if deleted not in ('0', '1') or args.get('hidden_only','0') not in ('0','1'):
                     raise CatalogError('回收站参数无效')
                 value = store.library_page(_integer(args.get('offset'), 0), _integer(args.get('limit'), 12, 50),
-                    completed_paths=_completed(owner), include_deleted=deleted == '1')
+                    completed_paths=_completed(owner), include_deleted=deleted == '1', hidden_only=args.get('hidden_only') == '1')
                 _send(handler, 200, value)
             elif url.path == '/api/reference-list':
                 args = _parameters(url.query, ('id', 'offset', 'limit', 'include_deleted', 'deleted_only'))
@@ -200,6 +200,7 @@ def handle_reference_request(handler, owner, method):
             raise CatalogError('列表操作格式无效')
         action = value.get('action')
         fields = {'create_list': {'action', 'name', 'revision'},
+            'set_list_sampling': {'action','id','hidden','enabled','tags','revision'},
             'begin_bundle': {'action','name','manifest','revision'}, 'complete_bundle': {'action','id','revision'},
             'clone_list': {'action', 'source_id', 'name', 'revision'},
             'rename_list': {'action', 'id', 'name', 'revision'},
@@ -212,6 +213,7 @@ def handle_reference_request(handler, owner, method):
             raise CatalogError('未知或无效的图库操作')
         revision = value['revision']
         if action == 'create_list':result = store.create_list(value['name'], revision)
+        elif action == 'set_list_sampling':result = store.set_list_sampling(value['id'], value['hidden'], value['enabled'], value['tags'], revision)
         elif action == 'begin_bundle':result = store.begin_bundle(value['name'],value['manifest'],revision)
         elif action == 'complete_bundle':result = store.complete_bundle(value['id'],revision)
         elif action == 'clone_list':result = store.clone_list(value['source_id'], value['name'], revision)

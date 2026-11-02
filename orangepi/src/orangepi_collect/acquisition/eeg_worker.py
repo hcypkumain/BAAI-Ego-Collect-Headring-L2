@@ -231,7 +231,8 @@ def main():
                 batch = board.read(25, timeout=1)
                 if batch.sample_rate_hz != 250 or batch.eeg_uv.shape != (25, 8):
                     raise RuntimeError('Unsupported EEG device profile')
-                emit('probe', ready=True, sample_rate_hz=250, device=info)
+                emit('probe', ready=True, sample_rate_hz=250, device=info,
+                     startup_diagnostics=getattr(board,'startup_diagnostics',{}))
             finally: board.stop(timeout=3)
             return 0
         _, frontend = enable_all_channels(board)

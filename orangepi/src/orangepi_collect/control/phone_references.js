@@ -2,7 +2,7 @@
 (function(global){
  'use strict';
  global.createPhoneReferenceLibrary=function({root,request,status,action,message,current}){
-  let generation=0,key='',revision=0,selected='all',list=null,trash=false,next=null,busy=false,loaded=false;
+  let generation=0,key='',revision=0,selected='pool',list=null,trash=false,hiddenView=false,next=null,busy=false,loaded=false;
   let pickerTarget=null,pendingSelection=null,resumeOffered=false;
   let lastTransfer=null;
   let pendingBundles=null;
@@ -16,7 +16,7 @@
   function release(){for(const url of urls)URL.revokeObjectURL(url);urls.clear();}
   function suspend(){if(lastTransfer?.state==='running')lastTransfer.state='interrupted';generation++;key='';loaded=false;list=null;release();root.hidden=true;root.replaceChildren();}
   function lock(value){busy=value;for(const node of root.querySelectorAll('button,input,select'))node.disabled=value;controls();}
-  let select,uploadLabel,bundleLabel,use,refresh,trashButton,newName,createButton,items,count,more,preview,activeList,selectionBox,transfer,transferText,progress;
+  let select,uploadLabel,bundleLabel,use,refresh,trashButton,hiddenButton,sampling,newName,createButton,items,count,more,preview,activeList,selectionBox,transfer,transferText,progress;
   // Keep the native input connected while a mobile gallery is open. Privacy
   // suspension still removes every displayed image and cancels all requests.
   const files=el('input');files.type='file';files.accept='image/png,image/jpeg,image/webp';files.multiple=true;files.id='phone-reference-files';files.className='phone-reference-file';files.tabIndex=-1;files.setAttribute('aria-label','选择参考图片');root.parentElement.append(files);
@@ -31,10 +31,12 @@
    pendingSelection={files:chosen,listId:target};resumeOffered=false;
   };
   function controls(){if(!use)return;const editable=!busy&&loaded&&!!key;
-   use.disabled=!editable||trash||!list||list.deleted||list.import_pending||list.remaining===0||!(status().actions||[]).includes('reference_list');
-   files.disabled=!editable||trash;uploadLabel.classList.toggle('disabled',files.disabled);createButton.disabled=!editable||trash;newName.disabled=!editable||trash;more.hidden=next===null;
-   bundles.disabled=!editable||trash;bundleLabel.classList.toggle('disabled',bundles.disabled);
+   use.disabled=!editable||trash||hiddenView||!(status().actions||[]).includes('reference_list');
+   files.disabled=!editable||trash||hiddenView;uploadLabel.classList.toggle('disabled',files.disabled);createButton.disabled=!editable||trash||hiddenView;newName.disabled=!editable||trash||hiddenView;more.hidden=next===null;
+   bundles.disabled=!editable||trash||hiddenView;bundleLabel.classList.toggle('disabled',bundles.disabled);
+   uploadLabel.parentElement.hidden=trash||hiddenView;
    for(const node of root.querySelectorAll('.phone-reference-item button,.phone-reference-selection button'))node.disabled=!editable;
+   for(const node of sampling?.querySelectorAll('input[type=checkbox]')||[])node.disabled=!editable||hiddenView||node.dataset.pending==='true';
   }
   async function json(path,body){return (await request(path,{headers:headers(body?{'Content-Type':'application/json'}:{}),...(body?{method:'POST',body:JSON.stringify(body)}:{})})).json();}
   function errorMessage(error){return error.name==='AbortError'?'请求超时，请刷新确认操作结果。':error.name==='TypeError'?'网络连接中断，请恢复后刷新核对。':error.message;}
@@ -42,10 +44,11 @@
   function ui(){
    root.replaceChildren();root.hidden=false;
    const label=el('label','参考图列表');select=el('select');select.id='phone-reference-select';select.setAttribute('aria-label','参考图列表');label.append(select);
-   refresh=button('刷新',()=>key?load(selected):open());trashButton=button('回收站',()=>{trash=!trash;load('all');});const toolbar=row();toolbar.append(refresh,trashButton);
-   use=button('用此列表采集',()=>{if(!use.disabled)action('reference_list',{list_id:selected,catalog_revision:revision});},'primary');use.id='phone-reference-use';
+   refresh=button('刷新',()=>key?load(selected):open());trashButton=button('回收站',()=>{trash=!trash;hiddenView=false;load('all');});hiddenButton=button('隐藏列表',()=>{hiddenView=!hiddenView;trash=false;load('pool');});hiddenButton.id='phone-reference-hidden';const toolbar=row();toolbar.append(refresh,hiddenButton,trashButton);
+   use=button('启用混合抽取',()=>{if(!use.disabled)action('reference_list',{list_id:'pool',catalog_revision:revision});},'primary');use.id='phone-reference-use';
    count=el('p','','phone-hint');count.id='phone-reference-count';
    activeList=el('p','','phone-hint');activeList.id='phone-reference-active-list';
+   sampling=el('section','','phone-reference-sampling');sampling.id='phone-reference-sampling';
    const upload=row();uploadLabel=el('label','上传图片','phone-reference-upload');uploadLabel.htmlFor='phone-reference-files';
    bundleLabel=el('label','从 ZIP 导入','phone-reference-upload');bundleLabel.htmlFor='phone-reference-bundles';bundleLabel.id='phone-reference-bundle-entry';upload.append(uploadLabel,bundleLabel,use);
    const create=row();newName=el('input');newName.placeholder='新列表名称';newName.maxLength=128;newName.setAttribute('aria-label','新列表名称');newName.id='phone-reference-name';
@@ -57,22 +60,33 @@
    items=el('div','','phone-reference-items');items.id='phone-reference-items';more=button('加载更多',()=>loadItems(false));
    preview=el('div','','phone-reference-preview');preview.hidden=true;preview.setAttribute('role','dialog');preview.setAttribute('aria-modal','true');preview.setAttribute('aria-label','参考图预览');
    const close=button('关闭预览',()=>{preview.hidden=true;preview.querySelector('img')?.removeAttribute('src');});const image=el('img');image.alt='参考图预览';preview.append(close,image);
-   root.append(label,toolbar,count,activeList,upload,el('p','ZIP 按文件名建立任务列表；摆放总览、YAML 和 CSV 作为辅助资料保存，不进入随机任务池。','phone-hint'),selectionBox,transfer,create,items,more,preview);showPendingSelection();update(status());
+   const advanced=el('details');advanced.append(el('summary','更多管理：新建列表与回收站'),create,trashButton);
+   root.append(toolbar,activeList,upload,selectionBox,transfer,el('p','勾选的列表合并抽取，优先未采集任务；标签随任务保存。导入完整的新列表会自动加入任务池；隐藏列表只供查看。','phone-hint'),sampling,label,count,advanced,items,more,preview);showPendingSelection();update(status());
    select.onchange=()=>{selected=select.value;loadItems(true);};
   }
   async function load(wanted=selected){
    if(busy||!current())return;const id=generation;invalidate();lock(true);message('正在读取参考图库…');
-   try{await catalog(wanted,id);if(valid(id))message('每段从选中列表随机抽取未完成的图；重采仍用同一张。');}
+   try{await catalog(wanted,id);if(valid(id))message(hiddenView?'隐藏列表不参与抽取；恢复后可重新勾选。':'多个启用列表一起随机抽取，重采保持同一张。');}
    catch(error){if(valid(id))invalidate('列表未能加载，请刷新后再操作。');failure(error,id);}finally{if(valid(id))lock(false);}
   }
   async function catalog(wanted,id){
    let rows=[],offset=0,version=null;
-   do{const data=await json('/api/reference-library?'+query({offset,limit:50,include_deleted:trash?1:0}));if(!valid(id))return;
+   do{const data=await json('/api/reference-library?'+query({offset,limit:50,include_deleted:trash?1:0,hidden_only:hiddenView?1:0}));if(!valid(id))return;
     if(version!==null&&version!==data.revision)throw Error('图库已更新，请点击刷新。');version=data.revision;rows.push(...data.lists);offset=data.next_offset;
    }while(offset!==null);
-   revision=version;selected=rows.some(item=>item.id===wanted)?wanted:'all';select.replaceChildren();
+   revision=version;selected=rows.some(item=>item.id===wanted)?wanted:(rows[0]?.id||'');select.replaceChildren();sampling.replaceChildren();
+   if(!trash){sampling.append(el('b',hiddenView?'隐藏区 · 不参与抽取':'参与混合抽取的列表'));
+    for(const entry of rows.filter(item=>!['pool','all'].includes(item.id))){const card=el('div','','phone-pool-row'),label=el('label'),check=el('input');check.type='checkbox';check.checked=entry.sampling_enabled&&!entry.hidden;check.disabled=hiddenView||entry.import_pending;check.setAttribute('aria-label','参与抽取：'+entry.name);
+     check.dataset.pending=String(!!entry.import_pending);check.onchange=()=>mutate({action:'set_list_sampling',id:entry.id,hidden:false,enabled:check.checked,tags:entry.tags||[]});label.append(check,document.createTextNode(entry.name+' · 剩余 '+entry.remaining+' / '+entry.count));card.append(label);
+     const extra=el('details');extra.append(el('summary','标签与列表管理'));const tags=el('input');tags.value=(entry.tags||[]).join('，');tags.placeholder='附加标签，以逗号分隔';tags.setAttribute('aria-label','标签：'+entry.name);
+     extra.append(el('small','列表名称会自动作为标签保存。'),tags,button('保存标签',()=>mutate({action:'set_list_sampling',id:entry.id,hidden:entry.hidden,enabled:entry.sampling_enabled,tags:tags.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean)})),button(hiddenView?'恢复到可见列表':'移到隐藏区',()=>mutate({action:'set_list_sampling',id:entry.id,hidden:!hiddenView,enabled:false,tags:entry.tags||[]})));
+     card.append(button('查看任务',()=>{select.value=entry.id;selected=entry.id;loadItems(true);}),extra);sampling.append(card);
+    }
+   }
    for(const item of rows){const option=el('option',(item.deleted?'回收站 · ':'')+(item.import_pending?'导入未完成 · ':'')+item.name+'（待采集 '+item.remaining+' / '+item.count+'）');option.value=item.id;select.append(option);}select.value=selected;
-   trashButton.textContent=trash?'返回图库':'回收站';await readItems(true,id);
+   trashButton.textContent=trash?'返回图库':'回收站';hiddenButton.textContent=hiddenView?'返回任务池':'隐藏列表';
+   if(!selected){loaded=true;list=null;items.replaceChildren();count.textContent=hiddenView?'隐藏区暂无列表。':'暂无列表。';controls();return;}
+   await readItems(true,id);
   }
   async function readItems(reset,id){
    const requested=selected;
@@ -100,7 +114,7 @@
   async function loadItems(reset){if(busy||!current())return;const id=generation;if(reset)invalidate();lock(true);try{await readItems(reset,id);}catch(error){if(valid(id))invalidate('列表未能加载，请刷新后再操作。');failure(error,id);}finally{if(valid(id))lock(false);}}
   async function mutate(body,newList=false){
    if(busy||!loaded||!current())return;const id=generation;lock(true);message('正在保存…');
-   try{const data=await json('/api/reference-library',{...body,revision});if(!valid(id))return;revision=data.revision;await catalog(newList?data.id:selected,id);if(valid(id))message(newList?'列表已创建，可上传图片后点击“用此列表采集”。':'已保存。');}
+   try{const data=await json('/api/reference-library',{...body,revision});if(!valid(id))return;revision=data.revision;await catalog(newList?data.id:selected,id);if(valid(id))message(newList?'列表已创建，可上传图片后点击“启用混合抽取”。':'已保存。');}
    catch(error){if(valid(id))invalidate('保存结果需要刷新确认，请先刷新图库。');failure(error,id);}finally{if(valid(id))lock(false);}
   }
   function showPendingSelection(){if(!selectionBox)return;selectionBox.replaceChildren();selectionBox.hidden=!pendingSelection&&!pendingBundles;
@@ -142,7 +156,7 @@
      }
      const completed=await json('/api/reference-library',{action:'complete_bundle',id:target,revision});if(!valid(id))return;revision=completed.revision;done++;
     }
-    await catalog(target,id);if(valid(id)){lastTransfer.state='complete';transferText.textContent='已完成 '+done+' 个任务包、'+saved+' 张任务图。';message(transferText.textContent+' 可选择列表用于采集。');}
+    await catalog(target,id);if(valid(id)){lastTransfer.state='complete';transferText.textContent='已完成 '+done+' 个任务包、'+saved+' 张任务图。';message(transferText.textContent+' 已自动加入混合任务池。');}
    }catch(error){if(valid(id)){lastTransfer.state='paused';invalidate('导入未完成，请刷新核对。');transferText.textContent='已确认 '+saved+' / '+total+' 张。';message(errorMessage(error)+' 已落盘内容保留；重新选择同一 ZIP 可继续未完成列表。');}}
    finally{if(valid(id))lock(false);}
   }
@@ -159,15 +173,15 @@
      const result=await (await request('/api/reference-upload?'+query({list_id:target,revision,name:file.name}),{method:'POST',headers:headers({'Content-Type':'application/octet-stream'}),body:file,timeoutMs:40000})).json();
      if(!valid(id))return;revision=result.revision;saved++;lastTransfer.confirmed=saved;progress.value=saved;if(result.deduplicated)reused++;else added++;
     }
-    await catalog(target,id);if(valid(id)){lastTransfer.state='complete';transferText.textContent='已处理 '+saved+' 张：新增 '+added+' 张'+(reused?'，已存在 '+reused+' 张':'')+'。';message('已处理 '+saved+' 张图片。点击“用此列表采集”，下一段将从此列表随机抽图。');}
+    await catalog(target,id);if(valid(id)){lastTransfer.state='complete';transferText.textContent='已处理 '+saved+' 张：新增 '+added+' 张'+(reused?'，已存在 '+reused+' 张':'')+'。';message('已处理 '+saved+' 张图片。点击“启用混合抽取”，下一段将从多个启用列表随机抽图。');}
    }catch(error){if(valid(id)){lastTransfer.state='paused';transferText.textContent='上传已暂停，已确认 '+saved+' / '+chosen.length+' 张。';invalidate('上传结果需要刷新确认，请先刷新图库。');message('已确认上传 '+saved+' 张。'+errorMessage(error)+' 请刷新核对后再上传剩余图片。');}}
    finally{if(valid(id))lock(false);}
   }
-  function update(snapshot){if(activeList&&!root.hidden){activeList.textContent='当前采集列表：'+(snapshot.task_list?.name||'等待 Pi 确认');
+  function update(snapshot){if(activeList&&!root.hidden){activeList.textContent='当前抽取范围：'+(snapshot.task_list?.name||'等待 Pi 确认');
     if(!busy&&loaded&&Number.isSafeInteger(snapshot.task_list?.catalog_revision)&&snapshot.task_list.catalog_revision>revision){invalidate('图库已在其他页面更新，请刷新后继续。');message('参考图库已更新，请点击刷新。');}
     controls();}}
   async function open(){suspend();const id=generation;selected=pendingSelection?.listId||(['interrupted','paused'].includes(lastTransfer?.state)?lastTransfer.listId:null)||status().task_list?.id||'all';resumeOffered=!!(pendingSelection||pendingBundles);trash=false;busy=false;ui();lock(true);message('正在连接参考图库…');
-   try{const access=await (await request('/api/phone/reference-access')).json();if(!valid(id))return;key=access.access_code;await catalog(selected,id);if(valid(id))message('上传并选择列表后，每段随机抽取一张未完成的参考图。');}
+   try{const access=await (await request('/api/phone/reference-access')).json();if(!valid(id))return;key=access.access_code;await catalog(selected,id);if(valid(id))message('勾选参与抽取的列表；每段在混合任务池随机抽图，重采保持同一张。');}
    catch(error){failure(error,id);}finally{if(valid(id))lock(false);}
   }
   return {suspend,open,update,resumeNeeded:()=>!!(pendingSelection||pendingBundles)&&!resumeOffered};

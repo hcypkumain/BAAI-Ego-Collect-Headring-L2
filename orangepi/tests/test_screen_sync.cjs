@@ -14,15 +14,16 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 function idle(){return {state:'ready',revision:7,server_time:100,result:{ok:true,time:99},
  worker:{recording_active:false},privacy:{policy:'screen_black_before_capture_v1',instance:'pi',
  generation:0,phase:'idle',required:false,stop_confirmed:true,nonce:'',session_id:''}};}
-async function harness(){
+async function harness(integrated=false){
  const global={crypto:webcrypto};vm.runInNewContext(source,{window:global,console});
  const h={now:0,visible:true,locked:true,events:[],gate:idle(),readFails:false,heartbeatFails:false};
- const options={now:()=>h.now,visible:()=>h.visible,needsLogin:()=>false,frame:cb=>cb(),
+ const options={integratedRegistration:integrated,now:()=>h.now,visible:()=>h.visible,needsLogin:()=>false,frame:cb=>cb(),
   setLocked:value=>{h.locked=value;h.events.push(value?'lock':'reveal')},setLogin:()=>{},
   post:async(action)=>{h.events.push(action);if(h.heartbeatFails)throw Error('brief heartbeat delay')},
   readStatus:async()=>clone(h.gate),readDisplayState:async()=>{if(h.readFails)throw Error('unavailable');
    // Match the small production response: no result/server_time payload.
-   const s=clone(h.gate);delete s.result;delete s.server_time;return s;}};
+   const s=clone(h.gate);delete s.result;delete s.server_time;
+   if(integrated){s.display_registration={client_id:h.screen.clientId,instance:s.privacy.instance};s._displayRequestedAt=h.requestStartedAt??h.now;}return s;}};
  h.screen=global.createPrivacyScreen(options);h.screen.authorized();
  const first=await h.screen.synchronize(idle());h.screen.revealIfSafe(first.snapshot);
  assert.equal(h.locked,false);h.events=[];
@@ -90,6 +91,18 @@ test('a live recording enables STOP and confirmed idle removes it',async()=>{
  await h.tick(750);assert.equal(h.screen.canRequestStop(),true);
  h.gate=idle();h.gate.privacy.generation=2;await h.tick(1500);
  assert.equal(h.screen.canRequestStop(),false);assert.equal(h.locked,false);
+});
+test('one small state request renews registration without a second heartbeat request',async()=>{
+ const h=await harness(true);h.heartbeatFails=true;
+ for(let t=750;t<=15000;t+=750){await h.tick(t);await h.screen.heartbeat(false)}
+ assert.equal(h.locked,false);assert(!h.events.includes('lock'));assert(!h.events.includes('privacy_display'));
+});
+test('registration on an old slow response cannot extend trust beyond its request time',async()=>{
+ const h=await harness(true);h.requestStartedAt=0;h.heartbeatFails=true;await h.tick(4600);assert.equal(h.locked,true);
+});
+test('integrated registration still paints before arming acknowledgement',async()=>{
+ const h=await harness(true);Object.assign(h.gate.privacy,{generation:1,phase:'arming',required:true,stop_confirmed:false,nonce:'n',session_id:'s'});
+ await h.tick(750);assert.equal(h.locked,true);assert(h.events.indexOf('lock')<h.events.indexOf('privacy_ack'));
 });
 (async()=>{let failed=0;for(const {name,run} of cases){try{await run();console.log('PASS '+name)}catch(error){failed++;console.error('FAIL '+name+'\n'+error.stack)}}
  console.log(`${cases.length-failed}/${cases.length} passed`);process.exitCode=failed?1:0;})();

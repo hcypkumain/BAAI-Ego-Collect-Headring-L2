@@ -211,7 +211,16 @@ class Dashboard:
                 if path.startswith('/api/video/'):
                     self.video();return
                 if path=='/api/wrist-context':self.send(200,owner.wrist_context());return
-                if path=='/api/display-state':self.send(200,owner.display_state());return
+                if path=='/api/display-state':
+                    query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+                    if set(query)-{'client_id'} or any(len(v)!=1 for v in query.values()):self.send(400,{'error':'无效屏幕状态请求'});return
+                    identity=query.get('client_id',[None])[0]
+                    if identity is not None:
+                        try:owner.privacy.display({'client_id':identity})
+                        except ValueError as error:self.send(400,{'error':str(error)});return
+                    value=owner.display_state()
+                    if identity is not None:value['display_registration']={'client_id':identity,'instance':value['privacy']['instance']}
+                    self.send(200,value);return
                 if path=='/api/status':
                     query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
                     if not query:

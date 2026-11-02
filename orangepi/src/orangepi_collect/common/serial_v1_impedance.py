@@ -199,6 +199,7 @@ class SerialV1Board:
         self.original_config=None; self.restore_required=False; self.samples=0
         self.closed=False; self.fault_error=None; self.stopping=False; self.last_stop=None
         self.notification_error=None; self.notification_error_count=0
+        self.startup_diagnostics={'config_queries':0,'start_commands':0}
         self._last_sequence=None; self._index=0; self.missing=0
         self.on_state=lambda **state: None
         self._query_config(timeout)
@@ -281,10 +282,22 @@ class SerialV1Board:
 
     def _query_config(self, timeout):
         from omnibci import FrontendConfig
-        self.transport.write(b'c')
-        value=self._wait(lambda kind,v:kind=='config' and v['verified'],timeout)
-        self._config=FrontendConfig._from_wire(value)
-        return self._config
+        # A freshly enumerated ESP32 can still be booting when the first query
+        # arrives. Reissue only the idempotent read command inside one budget.
+        # Never reset the USB hub, frontend, or an active recording here.
+        deadline=time.monotonic()+timeout
+        while time.monotonic()<deadline:
+            self.startup_diagnostics['config_queries']+=1
+            self.transport.write(b'c')
+            try:value=self._wait(lambda kind,v:kind=='config' and v['verified'],min(1.0,max(.001,deadline-time.monotonic())))
+            except TimeoutError:
+                if time.monotonic()>=deadline:
+                    raise TimeoutError('EEG configuration handshake timed out after %d queries; crc=%d discarded=%d' %
+                        (self.startup_diagnostics['config_queries'],self.parser.crc_errors,self.parser.discarded))
+                continue
+            self._config=FrontendConfig._from_wire(value)
+            return self._config
+        raise TimeoutError('EEG configuration handshake deadline expired')
 
     def configure(self, config, timeout=1.8):
         self._ensure_open()
@@ -307,8 +320,15 @@ class SerialV1Board:
         self._ensure_open()
         if self.running: return
         self.frames.clear(); self.generation+=1; self._last_sequence=None; self._index=0
-        self.transport.write(b'b'); self.running=True
-        try: self._wait(lambda kind,v:kind=='eeg',timeout)
+        self.running=True;deadline=time.monotonic()+timeout
+        try:
+            while time.monotonic()<deadline:
+                self.startup_diagnostics['start_commands']+=1
+                self.transport.write(b'b')
+                try:self._wait(lambda kind,v:kind=='eeg',min(1.0,max(.001,deadline-time.monotonic())));return
+                except TimeoutError:
+                    if time.monotonic()>=deadline:raise
+            raise TimeoutError('EEG start handshake deadline expired')
         except Exception:
             self.running=False
             self.transport.write(b's')

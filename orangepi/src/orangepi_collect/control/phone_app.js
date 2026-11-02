@@ -86,6 +86,12 @@
    $('phone-plot').getContext('2d').clearRect(0,0,900,420);
    if (hadReplay) releaseReplay();
   }
+  function pause() {
+   // The cover hides all content. Preserve navigation, forms and list selection
+   // through a short reconnection; cancel optional traffic and live decoders.
+   stopPlaying();shell?.pause();
+   for(const controller of pending)controller.abort();pending.clear();
+  }
   async function showImage(id, response, identity, versionValid) {
    const blob = await response.blob();
    if (identity !== epoch || !safe() || !versionValid()) return false;
@@ -99,20 +105,7 @@
    return identity === epoch && safe() && versionValid();
   }
   function begin(nextMode) { suspend(); mode = nextMode; panel.classList.remove('phone-playing-panel');shell?.showAux(nextMode);message('正在读取…'); $('phone-player').hidden = true; }
-  async function tasks(page = 0) {
-   begin('tasks'); offset = page; const identity = epoch;
-   try {
-    const data = await (await request('/api/phone/tasks?offset=' + page)).json();
-    if (identity !== epoch || !safe()) return;
-    $('phone-list').append(button('参考图库 · 上传/删除', () => references()));
-    for (const item of data.lists || []) $('phone-list').append(button(item.name || item.label || item.id,
-       () => options.action('reference_list',{list_id:item.id,catalog_revision:data.revision}),
-       !(options.status().actions || []).includes('reference_list')));
-    nextOffset = data.next_offset; $('phone-pages').hidden = false;
-    $('phone-previous').disabled = offset <= 0; $('phone-next').disabled = nextOffset == null;
-    message('选择本次任务列表，每段随机抽取一张未完成的图；重采保持同一张。');
-   } catch (error) { report(error); }
-  }
+  async function tasks() {return references();}
   async function history(page = 0) {
    begin('replay'); offset = page; const identity = epoch;
    try {
@@ -320,19 +313,19 @@
    catch {message('此浏览器或当前连接不支持保持亮屏，请在手机系统中设置自动锁屏时间。');}
   }
   $('phone-awake').onclick=async () => {keepAwake=!keepAwake;if(!keepAwake){if(wakeLock)await wakeLock.release();$('phone-awake').textContent='保持亮屏';}else{$('phone-awake').textContent='允许息屏';await acquireWakeLock();}};
-  document.addEventListener('visibilitychange',() => {if(document.hidden)suspend();else acquireWakeLock();});
+  document.addEventListener('visibilitychange',() => {if(document.hidden)pause();else acquireWakeLock();});
   document.addEventListener('keydown',event => {if(event.key==='Escape'&&!viewer.hidden)suspend();});
   async function references(){begin('references');await referenceLibrary?.open();}
-  referenceLibrary=global.createPhoneReferenceLibrary?.({root:$('phone-reference-library'),request,status:options.status,action:options.action,message,current:()=>mode==='references'&&safe()});
+  referenceLibrary=global.createPhoneReferenceLibrary?.({root:$('phone-reference-library'),request,status:options.status,action:options.action,message,current:()=>mode==='references'});
   $('phone-references').onclick=references;
   async function recordings(){begin('recordings');await recordingManager?.open();}
-  recordingManager=global.createPhoneRecordingManager?.({root:$('phone-recording-manager'),request,status:options.status,action:options.action,refresh:options.refresh,message,current:()=>mode==='recordings'&&safe()});
+  recordingManager=global.createPhoneRecordingManager?.({root:$('phone-recording-manager'),request,status:options.status,action:options.action,refresh:options.refresh,message,current:()=>mode==='recordings'});
   $('phone-recordings').onclick=recordings;
   shell=global.createPhoneShell?.({panel,options,openHistory:()=>history(),openTasks:()=>tasks(),openAudio:()=>audio(),closeAux:suspend,openReference:reference,openRecordings:recordings});
-  return {suspend,displayOptions:()=>shell?.displayOptions()||{review:true,cameras:true},beforeStart:()=>shell?.beforeStart()!==false,managesPreview:!!shell,legacyFrameVisible:name=>shell?.allowLegacyFrame(name),update(snapshot) {
+  return {suspend,pause,displayOptions:()=>shell?.displayOptions()||{review:true,cameras:true},beforeStart:()=>shell?.beforeStart()!==false,managesPreview:!!shell,legacyFrameVisible:name=>shell?.allowLegacyFrame(name),update(snapshot) {
    if(snapshot.preparation_cancelled_at&&snapshot.preparation_cancelled_at!==lastPreparationCancel){lastPreparationCancel=snapshot.preparation_cancelled_at;suspend();}
    const value=[snapshot.privacy?.instance,snapshot.session,snapshot.image,snapshot.preview_id].join('|');
-   const keepManager=mode==='recordings'&&context.split('|')[0]===snapshot.privacy?.instance&&!snapshot.privacy?.required&&snapshot.privacy?.stop_confirmed&&['device_confirm','idle','failed_wait','exhausted','scanning'].includes(snapshot.state);
+   const keepManager=['recordings','references','tasks'].includes(mode)&&context.split('|')[0]===snapshot.privacy?.instance&&!snapshot.privacy?.required&&snapshot.privacy?.stop_confirmed&&['device_confirm','idle','failed_wait','exhausted','scanning'].includes(snapshot.state);
    if(context && context!==value&&!keepManager)suspend(); context=value;
    shell?.update(snapshot);
    referenceLibrary?.update(snapshot);recordingManager?.update(snapshot);$('phone-reference-history').textContent=global.describeReferenceState?.(snapshot.reference_image_state)||'';

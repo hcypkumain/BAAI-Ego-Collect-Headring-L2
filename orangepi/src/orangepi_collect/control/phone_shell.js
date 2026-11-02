@@ -1,6 +1,21 @@
 /* Page content follows source/ui/app/panel.c and panel_workflow.c. */
 (function(global){
  'use strict';
+ global.describePhoneRecordingResult=function(value,label){
+  const review=value.review||{},last=value.last_completed||{},current=(value.session||'').split('/').pop()||'';
+  const session=review.session||'',historical=!!session&&session!==current;
+  const saved=!!session&&last.session===session&&last.outcome==='success';
+  const title=session?(historical?(saved?'最近已保存采集结果':'最近可回看采集结果'):(saved?'本段已确认保存':'本段采集结果')):'本次结果摘要';
+  const progress=value.worker?.progress||{};
+  const lines=['当前流程：'+label,'当前任务标识：'+(current||'尚未准备新段')];
+  if(session)lines.push((historical?'以下为历史采集结果，批次：':'本段回看批次：')+session,
+   '质量检查：'+(review.qc_level||'等待返回')+'    ERROR：'+(review.error_count??'—')+' 条    WARN：'+(review.warn_count??'—')+' 条',
+   '可回看视频：'+(review.videos||[]).length+' 路');
+  else lines.push('尚无已完成收尾的回看结果。');
+  if(value.worker)lines.push('当前流程收尾进度：'+(progress.completed||0)+' / '+(progress.total||0));
+  lines.push(saved?'Pi 已确认此批次保存。':'可回看不代表已确认保留；保存状态以 Pi 返回结果为准。');
+  return {title,text:lines.join('\n\n'),qc_level:session?review.qc_level:null};
+ };
  global.describeReferenceState=function(value){if(value?.pending_current_result)return (value.collected?'本图已有有效采集；':'')+(value.current_qc==='ERROR'?'本段 ERROR，待确认处理；不算成功':'本段已拍摄，等待检验/保存确认，尚未计为成功');if(!value?.state)return '准备或选择参考图后显示状态';if(value.collected)return value.latest_qc==='ERROR'?'已有有效采集；最近一次 ERROR 不算成功':'已采集（WARN 也计为成功）';if(!value.ever_recorded)return '从未产生采集数据 · 优先采集';return '已拍 '+(value.attempt_count||0)+' 次，当前无有效成功'+(value.latest_qc?' · 最近 '+value.latest_qc:'')+(value.latest_retained?' · 未成功录像已保留':'')+(value.latest_deleted?' · 最近录像已删除':'')+(value.latest_qc==='WARN'?'（WARN本身不判失败）':'');};
  global.createPhoneShell=function({panel,options,openHistory,openTasks,openAudio,closeAux,openReference,openRecordings}){
   if(!/^\/(?:phone\/?)?$/.test(location.pathname))return null;
@@ -20,7 +35,7 @@
   const button=(label,fn)=>{const b=document.createElement('button');b.textContent=label;b.onclick=fn;return b;};
   const step=document.querySelector('.step-card'),referenceCard=document.querySelector('.reference-card'),wristCard=$('wrists').closest('.card'),emgCard=$('emg-card'),eegCard=$('eeg').closest('.card');
   const waves={eeg:$('eeg'),emg_left:$('emg_left'),emg_right:$('emg_right')};
-  const referenceStatus=document.createElement('section');referenceStatus.id='phone-reference-status';referenceStatus.innerHTML='<p id="phone-reference-state-text"></p><small>ERROR 可保留但不算成功；WARN 不判失败。当前列表自动顺序：从未采集 → ERROR 未成功 → 其他已释放图片。</small><div class="phone-row"><button id="phone-pick-reference">自选参考图</button><button id="phone-switch-reference">切换下一张</button><button id="phone-manage-current">管理已拍录像</button></div><div class="phone-row"><select id="phone-reference-choice" hidden aria-label="选择要采集的参考图"></select><button id="phone-use-reference" hidden>使用所选图</button><button id="phone-more-references" hidden>加载更多</button></div><p id="phone-reference-choice-message" class="phone-hint"></p>';referenceCard.querySelector('.reference').append(referenceStatus);
+  const referenceStatus=document.createElement('section');referenceStatus.id='phone-reference-status';referenceStatus.innerHTML='<p id="phone-reference-state-text"></p><small>ERROR 可保留但不算成功；WARN 不判失败。多个启用列表合并随机抽取，优先从未采集；重采保持同一张。</small><div class="phone-row"><button id="phone-pick-reference">自选参考图</button><button id="phone-switch-reference">切换下一张</button><button id="phone-manage-current">管理已拍录像</button></div><div class="phone-row"><select id="phone-reference-choice" hidden aria-label="选择要采集的参考图"></select><button id="phone-use-reference" hidden>使用所选图</button><button id="phone-more-references" hidden>加载更多</button></div><p id="phone-reference-choice-message" class="phone-hint"></p>';referenceCard.querySelector('.reference').append(referenceStatus);
   let referenceChoiceRevision=0,referenceChoicesNext=null,referenceChoicesBusy=false,referenceChoiceGeneration=0;
   async function loadReferenceChoices(more=false){
    if(referenceChoicesBusy||!safe())return;const generation=referenceChoiceGeneration,cancel=new AbortController(),timeout=setTimeout(()=>cancel.abort(),5000);referenceChoicesBusy=true;const select=$('phone-reference-choice'),apply=$('phone-use-reference');apply.disabled=true;
@@ -42,6 +57,7 @@
   pages.overview.insertBefore(taskCard,$('phone-native-metrics'));
   const problems=document.createElement('details');problems.id='phone-device-problems';problems.hidden=true;problems.innerHTML='<summary id="phone-device-problem-summary"></summary><ul id="phone-device-problem-list"></ul><button id="phone-open-diagnostics">查看设备与 USB 诊断</button>';
   pages.overview.insertBefore(problems,$('phone-overview-actions'));
+  $('phone-tasks').textContent='任务池 · 导入与隐藏';$('phone-references').hidden=true;
   pages.overview.querySelector('.phone-home-entries').append(button('采集步骤',()=>navigate('workflow',true)),$('phone-tasks'),$('phone-references'));
   for(const [id,label] of [['connected','连接设备'],['space','剩余空间'],['time','本段时长'],['saved','成功段数']]){
    const card=document.createElement('div');card.className='card phone-native-metric';const small=document.createElement('small');small.textContent=label;const value=document.createElement('b');value.id='phone-metric-'+id;value.textContent='--';card.append(small,value);$('phone-native-metrics').append(card);
@@ -151,8 +167,8 @@
   }
   function openSettings(){if(!safe())return;settingsOpen=true;settings.hidden=false;stopLive();}
   function updateWorkflow(){
-   abandon.hidden=!snapshot?.actions?.includes('abandon');abandon.disabled=!safe()||snapshot?.busy||options.pending?.();referenceEntry.disabled=!safe()||!snapshot?.image||!['ready','preparing'].includes(snapshot?.state);
-   text($('phone-reference-state-text'),global.describeReferenceState(snapshot?.reference_image_state));
+   abandon.hidden=!snapshot?.actions?.includes('abandon')||['device_confirm','idle','exhausted'].includes(snapshot?.state);abandon.disabled=!safe()||snapshot?.busy||options.pending?.();referenceEntry.disabled=!safe()||!snapshot?.image||!['ready','preparing'].includes(snapshot?.state);
+   text($('phone-reference-state-text'),global.describeReferenceState(snapshot?.reference_image_state)+((snapshot?.task_list?.tags||[]).length?' · 标签：'+snapshot.task_list.tags.join(' / '):''));
    $('phone-pick-reference').disabled=referenceChoicesBusy||!safe()||!snapshot?.actions?.includes('select_reference')||snapshot?.busy;
    $('phone-use-reference').disabled=referenceChoicesBusy||!referenceChoiceRevision||!safe()||!snapshot?.actions?.includes('select_reference')||snapshot?.busy;
    $('phone-switch-reference').disabled=!safe()||!snapshot?.actions?.includes('switch_reference')||snapshot?.busy;
@@ -201,8 +217,8 @@
   }
   nav.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;const index=Math.max(0,names.findIndex(([id])=>id===pageId)),n=event.key==='Home'?0:event.key==='End'?4:(index+(event.key==='ArrowRight'?1:-1)+5)%5;event.preventDefault();navigate(names[n][0],true);tabs[names[n][0]].focus();});
   function overviewActions(value){
-   const supported=['confirm_devices','prepare','stop','keep','retry','abandon'],labels={confirm_devices:'确认设备，继续',prepare:'准备本段',stop:'停止采集',keep:'确认保存',retry:'重采本段',abandon:'放弃本次采集'};
-   const allowed=supported.filter(action=>(value.actions||[]).includes(action)).slice(0,4),container=$('phone-overview-actions');
+   const supported=['confirm_devices','prepare','stop','keep','retry','rescan'],labels={confirm_devices:'确认设备，继续',prepare:'准备本段',stop:'停止采集',keep:'确认保存',retry:'重采本段',rescan:'重新检测设备'};
+   const allowed=supported.filter(action=>(value.actions||[]).includes(action)&&(action!=='rescan'||(value.devices||[]).some(device=>!device.connected))).slice(0,4),container=$('phone-overview-actions');
    for(const node of [...container.children])if(!allowed.includes(node.dataset.action))node.remove();
    allowed.forEach((action,index)=>{let b=[...container.children].find(node=>node.dataset.action===action);if(!b){b=button(labels[action],()=>options.action(action));b.dataset.action=action;}
     b.classList.toggle('danger',action==='stop');b.classList.toggle('primary',action!=='stop');const disabled=!safe()||value.busy||options.pending?.();if(b.disabled!==!!disabled)b.disabled=!!disabled;
@@ -217,6 +233,7 @@
    const devices=value.devices||[],chosen=value.selected_devices||[];
    const task=value.task_list||{},total=task.total,remaining=task.remaining;
    text($('phone-task-name'),task.name||'请先选择参考图列表');
+   $('phone-task-name').title=(task.tags||[]).join(' · ');
    const countsValid=Number.isSafeInteger(total)&&Number.isSafeInteger(remaining)&&total>=0&&remaining>=0&&remaining<=total;
    text($('phone-task-counts'),countsValid?'已完成 '+(total-remaining)+' · 剩余 '+remaining+' / '+total:'等待 Pi 返回进度');
    const taskProgress=$('phone-task-progress');taskProgress.max=countsValid?Math.max(1,total):1;if(countsValid)taskProgress.value=total-remaining;else taskProgress.removeAttribute('value');
@@ -232,9 +249,8 @@
    problems.hidden=!issues.length;text($('phone-device-problem-summary'),'设备提示（'+issues.length+' 项）');
    if(signature!==problemSignature){problemSignature=signature;const target=$('phone-device-problem-list');target.replaceChildren();for(const device of issues){const item=document.createElement('li');item.textContent=device.label+'：'+(!device.connected?(device.error||'未发现设备，请检查 USB 连接和供电'):'已连接，请在采集步骤确认左右')+(value.selected_devices&&!chosen.includes(device.name)?'；本段未选，不参与录制':'');target.append(item);}}
    overviewActions(value);text($('phone-home-hint'),(value.errors||[]).join('；')||(!value.actions?.some(a=>['confirm_devices','prepare','start','stop','keep','retry'].includes(a))?'请进入当前采集步骤，按提示继续设置或标定。':value.selected_devices?'本段已选 '+chosen.length+' 台；未选设备不参与本段。':'预览独立于录制；停止后还需完成收尾与保存确认。'));
-   const review=value.review||{},last=value.last_completed||{},session=(value.session||'').split('/').pop()||'--',progress=value.worker?.progress||{};
-   text($('phone-result-badge'),last.outcome==='success'?'上一次录制：Pi 已确认保存':'本次结果摘要');$('phone-result-badge').classList.toggle('phone-qc-error',review.qc_level==='ERROR');$('phone-result-badge').classList.toggle('phone-qc-warn',review.qc_level==='WARN');
-   text($('phone-result-text'),'当前流程：'+label+'\n\n录制标识：'+session+'\n\n质量检查：'+(review.qc_level||'等待返回')+'    ERROR：'+(review.error_count??'—')+' 条    WARN：'+(review.warn_count??'—')+' 条\n\n可回看视频：'+(review.videos||[]).length+' 路\n\n收尾进度：'+(progress.completed||0)+' / '+(progress.total||0)+'\n\n保存结果以 Pi 返回状态为准。');
+   const result=global.describePhoneRecordingResult(value,label);
+   text($('phone-result-badge'),result.title);$('phone-result-badge').classList.toggle('phone-qc-error',result.qc_level==='ERROR');$('phone-result-badge').classList.toggle('phone-qc-warn',result.qc_level==='WARN');text($('phone-result-text'),result.text);
    text($('phone-wave-hint'),signalId==='eeg'?'脑电单位：µV · 近 2 秒逐点波形；可切换原始电压与显示滤波，纵轴使用实际单位。':'肌电单位：ADC counts · 20 ms 包络，尚未换算成电压；纵轴刻度与通道数值可查看。');
    for(const b of signalTabs.children)if(b.dataset.signal!=='eeg')text(b,value.emg_calibration?.valid?(b.dataset.signal==='emg_left'?'左臂肌电':'右臂肌电'):(b.dataset.signal==='emg_left'?'肌电候选 A':'肌电候选 B'));
    text($('phone-connection-detail'),'Pi 地址：'+location.origin+'\n\n连接：'+(safe()?'在线':'未连接或过期')+'\n\n权限：控制已启用\n\n认证：'+(options.requiresCode?'已配置访问码':'当前设备无需访问码')+'\n\n左右确认、肌电插序与阻抗请进入总览的当前采集步骤。');
@@ -257,6 +273,7 @@
   $('phone-open-diagnostics').onclick=()=>{navigate('connections',true);diagnostics?.open();};
   return {
    openHeadphones,
+   pause(){stopLive();stopWrists();fit?.suspend();diagnostics?.suspend();headphones?.suspend();},
    displayOptions(){return {review:pageId==='results'||snapshot?.state==='confirm_stop',cameras:safe()&&!auxOpen&&!settingsOpen&&(pageId==='preview'||pageId==='fitcheck'||manualWrist),camera:pageId==='preview'?currentCamera:null};},
    beforeStart(){if(pageId!=='workflow'||setupStage!=='start'||snapshot?.camera_check?.required&&!snapshot.camera_check.confirmed){navigate('workflow');return false;}return true;},
    openCameraCheck(){navigate('fitcheck',true);},
@@ -265,7 +282,7 @@
    showAux(mode){
     if(mode==='reference'){navigate('workflow');return;}
     stopLive();auxOpen=true;aux.hidden=false;panel.querySelector('h3').textContent=mode==='recordings'?'采集管理':mode==='references'?'参考图库':mode==='tasks'?'任务列表':mode==='audio'?'蓝牙耳机':'历史回看 · 各设备';
-    text($('phone-help'),mode==='recordings'?'可多选或上传今日保留数据；上传核验后清理本地副本会保留任务完成记录。作废删除才会释放参考图。':mode==='references'?'上传图片后选择该列表用于采集；每段随机抽一张未完成的图，重采保持原图。':mode==='replay'?'选择采集段，查看各设备的落盘内容。':'操作结果由 Pi 确认。');
+    text($('phone-help'),mode==='recordings'?'可多选或上传今日保留数据；上传核验后清理本地副本会保留任务完成记录。作废删除才会释放参考图。':mode==='references'?'多个勾选列表合并抽取，完成过的图排除，重采保持原图。隐藏区仅供查看。':mode==='replay'?'选择采集段，查看各设备的落盘内容。':'操作结果由 Pi 确认。');
    },
    update(value){
     snapshot=value;const state=value.state||'';updateContent(value);
@@ -273,9 +290,9 @@
     fit?.update(value);
     if(!auxOpen&&!settingsOpen&&state!==lastState){
      const guide=state.startsWith('wrist_')||['emg_manual','emg_pairing','preparing','ready'].includes(state);
-     if(state==='device_confirm')navigate('overview');else if(guide||state==='confirm_stop')navigate('workflow');lastState=state;
+     if(state==='device_confirm')navigate('overview');else if(guide||state==='confirm_stop')navigate('workflow');
     }
-    updateWorkflow();
+    lastState=state;updateWorkflow();
     const liveNames=Object.keys(cameraNames).filter(name=>value.previews?.[name]?.live);if(!selectedByUser&&liveNames.length&&!liveNames.includes(currentCamera))selectCamera(liveNames[0],false);
     for(const [id,b] of Object.entries(cameraButtons)){
      const label=(value.devices||[]).find(d=>d.name===id)?.label||cameraNames[id];text(b,label);const pressed=String(id===currentCamera);if(b.getAttribute('aria-pressed')!==pressed)b.setAttribute('aria-pressed',pressed);
