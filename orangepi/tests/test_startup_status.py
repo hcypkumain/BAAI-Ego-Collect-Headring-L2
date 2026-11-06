@@ -90,7 +90,13 @@ class StartupTests(unittest.TestCase):
         def state(unit):
             if unit=='egorecord.service':return 'inactive'
             return 'inactive'if now[0]<.4 else 'activating'
-        service_entry.wait_for_camera_start(timeout=1,state=state,clock=lambda:now[0],sleep=lambda d:now.__setitem__(0,now[0]+d))
+        service_entry.wait_for_camera_start(timeout=1,state=state,clock=lambda:now[0],sleep=lambda d:now.__setitem__(0,now[0]+d),time_service=lambda:None)
+        self.assertAlmostEqual(now[0],.4)
+
+    def test_queued_camera_job_does_not_skip_incomplete_clock_alignment(self):
+        now=[0.0]
+        def state(unit):return 'inactive'if unit=='egorecord.service'else'activating'
+        service_entry.wait_for_camera_start(timeout=1,state=state,clock=lambda:now[0],sleep=lambda d:now.__setitem__(0,now[0]+d),time_service=lambda:'activating'if now[0]<.4 else'active')
         self.assertAlmostEqual(now[0],.4)
 
     def test_boot_page_stays_available_until_handoff_guard_finishes(self):

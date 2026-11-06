@@ -22,6 +22,16 @@ def service_state(name):
         return 'unknown'
 
 
+def clock_service_state():
+    try:
+        result=subprocess.run(['systemctl','show','headring-lan-time.service','--property=LoadState','--property=ActiveState'],capture_output=True,text=True,timeout=2)
+        values=dict(line.split('=',1)for line in result.stdout.splitlines()if'='in line)
+        if result.returncode or values.get('LoadState')=='not-found':return None
+        return values.get('ActiveState','inactive')
+    except (OSError,subprocess.TimeoutExpired):
+        return 'unknown'
+
+
 def wait_for_hardware(timeout=60, camera_socket=Path('/run/camd.sock'), state=service_state,
                       clock=time.monotonic, sleep=time.sleep):
     if state('egorecord.service') == 'active':
@@ -41,13 +51,14 @@ def wait_for_hardware(timeout=60, camera_socket=Path('/run/camd.sock'), state=se
         sleep(.2)
 
 
-def wait_for_camera_start(timeout=60, state=service_state, clock=time.monotonic, sleep=time.sleep):
-    """camd's start job begins only after its existing clock-order barrier."""
+def wait_for_camera_start(timeout=60, state=service_state, clock=time.monotonic, sleep=time.sleep,
+                          time_service=clock_service_state):
+    """Allow imports/metadata preparation after clock alignment, alongside camd."""
     if state('egorecord.service') == 'active':
         raise RuntimeError('EgoRecord is running; cannot start another camera owner')
     deadline=clock()+timeout
     startup_status.phase('waiting_clock','正在准备设备时间和相机服务。')
-    while state('camd.service') not in ('activating','active'):
+    while time_service() not in (None,'active','failed') or state('camd.service') not in ('activating','active'):
         if clock() >= deadline:
             raise TimeoutError('Camera start job did not pass its dependency barrier')
         sleep(.2)
