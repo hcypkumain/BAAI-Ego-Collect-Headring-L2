@@ -1,9 +1,9 @@
-# BAAI Ego Collect · 脑电默认版
+# BAAI Ego Collect · 肌电默认版
 
 基于 Orange Pi / RK3588 运行程序整理的手机采集项目，已同步 **2026-11-06** 最新采集程序及三台设备验证过的 `headring-common-20261106-v3` 公共模块。
 包含主采集框架、手机控制页、六路视频、肌电/IMU、任务 ZIP 导入、QC、云端上传及配套服务。
 本次版本的功能、质检规则、环境迁移和验证范围见 [11 月 6 日版本说明](docs/RELEASE_2026-11-06.md)。
-本分支为 `feat/eeg-include`；GitHub 默认分支 `feat/emg-only` 默认采肌电。手机总览支持实际切换脑电 / 肌电配置，数据、图库、进度和上传队列隔离。详见 [版本切换与手动流程](docs/COLLECTION_PROFILES.md)。
+本分支为 GitHub 默认分支 `feat/emg-only`，默认采肌电；`feat/eeg-include` 默认包含脑电。手机总览支持实际切换脑电 / 肌电配置，数据、图库、进度和上传队列隔离。详见 [版本切换与手动流程](docs/COLLECTION_PROFILES.md)。
 脑电、阻抗检查及原有通道/滤波协议保留，并合并公共 QC、肌电错误说明、任务切换和预览修复。详见 [脑电版更新说明](docs/EEG_RELEASE_2026-11-06.md)。
 
 | 路径 | 内容 |
@@ -39,7 +39,7 @@
 先阅读 [部署说明](docs/DEPLOYMENT.md)。仓库不包含整个操作系统镜像或完整 EgoRecord GUI。
 
 ```bash
-git clone --branch feat/eeg-include https://github.com/hcypkumain/BAAI-Ego-Collect-Headring-L2.git
+git clone --branch feat/emg-only https://github.com/hcypkumain/BAAI-Ego-Collect-Headring-L2.git
 cd BAAI-Ego-Collect-Headring-L2
 python3 tools/configure_station.py --collector-id L3-001
 bash orangepi/scripts/setup_envs.sh

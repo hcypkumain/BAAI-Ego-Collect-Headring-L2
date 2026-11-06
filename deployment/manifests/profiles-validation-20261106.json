@@ -1,7 +1,7 @@
 {
   "version": 1,
   "release": "headring-profiles-20261106-v1",
-  "tested_default_mode": "eeg",
+  "tested_default_mode": "emg",
   "python_cases": {
     "framework": 95,
     "hardware": 94,

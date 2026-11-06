@@ -1423,7 +1423,7 @@
       "current_path": "README.md",
       "action": "moved-or-modified",
       "baseline_sha256": "f982001f8b1dacbb845f5f1103e96f7fb7fb33533aa45a86e505ac047d828146",
-      "published_sha256": "52bdc8f4f45ff171e6de97759a2e57621cba38533cbb3d8bf1573c7f5bf3d037",
+      "published_sha256": "c32e9f0308b3dcebef16cf2c9f7cff75f4b3069665949d16a94fa5e6083b175b",
       "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
     },
     {

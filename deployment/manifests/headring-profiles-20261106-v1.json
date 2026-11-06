@@ -1,6 +1,6 @@
 {
   "version": "headring-profiles-20261106-v1",
-  "edition": "EEG-default",
+  "edition": "EMG-default",
   "base_commit": "f836bbfb10a9e93d1ab2443dbd12c38652f90f7a",
   "files": {
     "orangepi/src/orangepi_collect/__init__.py": "a2955148cff6dd02e1cf74026ad7d6a49c7df7bcdca7593cc26d7da6fee370e7",
@@ -221,7 +221,7 @@
     "deployment/lan-time/chrony-server.example.conf": "80d5398457a252d92d54386b764f766b77a1c08e9c43fba3e01e7f4e5d9f27b4",
     "deployment/lan-time/headring-lan-time.example.json": "942e68caceabeaedb971ba98799c7a21d2cb82a2aa7dbb33b770d51167e66767",
     "deployment/lan-time/headring_lan_time.py": "16357d86fe8ea3d6b37578f22c3d1e6e7e257cfcfdd63bfd8ed6d9b1e00f55d8",
-    "orangepi/configs/collection_mode.json": "97d61ac13f24f8d165d3dcd52ae974e85e433488f8b034629c4354a153b60a33",
+    "orangepi/configs/collection_mode.json": "8072e50728634d962a66f7a77cdd1f3148a18eb71d7812cc2d3f7888693a2f5a",
     "tools/configure_collection_profiles.py": "4f409002fd4e7325cf6de2ceb36c8d386c1adf8a6a7c75bf34d6e60e65fcd115"
   }
 }
