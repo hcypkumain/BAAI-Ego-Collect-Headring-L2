@@ -64,3 +64,5 @@
 # Old editable backups are not a second production source tree.
 **/*.before-*
 **/*.pyc
+# Capture profiles contain station settings, private runtime and reference data.
+/profiles/

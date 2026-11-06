@@ -258,8 +258,9 @@ class NpzReader:
 
 
 class RecordingReplay:
-    def __init__(self, root, video_decoder=None, active_check=None):
+    def __init__(self, root, video_decoder=None, active_check=None, allow_missing_root=False):
         self.root = Path(root).absolute()
+        self.allow_missing_root = allow_missing_root
         self.video_decoder = video_decoder
         self.active_check = active_check
         self.lock = threading.RLock()
@@ -337,6 +338,11 @@ class RecordingReplay:
 
     def _refresh(self, force=False):
         with self.lock:
+            if self.allow_missing_root and not self.root.exists() and not self.root.is_symlink():
+                # ReplayRuntime has already verified the configured SD mount
+                # and UUID. A profile with no takes has no data directory yet.
+                self._catalog={};self._ordered=[];self._truncated=False;self._refreshed=time.monotonic()
+                return
             if not self.root.is_dir() or self.root.is_symlink():
                 raise ReplayError('recording_storage_unavailable', 503)
             if not force and time.monotonic() - self._refreshed < 5.0:

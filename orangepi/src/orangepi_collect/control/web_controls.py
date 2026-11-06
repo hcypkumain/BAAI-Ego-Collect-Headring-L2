@@ -208,7 +208,8 @@ class WebControls:
             notices.append('音频提示：'+audio_warning[:160])
         if calibration.get('warnings'):
             notices.append('头环标定文件的适用性待核对，请查看本段标定记录。')
-        dashboard.publish(dict(state=self.state,revision=getattr(self,'ui_revision',0),audio=audio,
+        from project_paths import COLLECTION_MODE,COLLECTION_CONTEXT
+        dashboard.publish(dict(collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,state=self.state,revision=getattr(self,'ui_revision',0),audio=audio,
             countdown=getattr(self,'countdown_status',None) if self.state=='countdown' else None,
             collector_id=getattr(self,'collector_id',''),preparation_cancelled_at=getattr(self,'preparation_cancelled_at',None),
             task_list=getattr(self,'reference_task_state',lambda:{})(),reference_image_state=getattr(self,'reference_image_state',lambda:{})(),
@@ -307,6 +308,8 @@ class WebControls:
         self._reference_cli_image=None;self._reference_cli_force=False;self.selected_image=None
         self._reference_manual_id=None
         self.path=None;self.image=None;self.selected_devices=None
+        self.last_completed=None;self.last_help=[];self.owner_command_error=None
+        self.countdown_status=None;self._worker_status_cache=None
         self.reference_refresh(force=True);self.preparation_cancelled_at=time.time()
         self.scan_devices(announce=True,quiet=True)
         self.state='device_confirm';self.state_write()
@@ -361,6 +364,11 @@ class WebControls:
                     self.release_prepared();self.stop_preview()
                 if action=='abandon':
                     self.abandon_preparation()
+                elif action=='discard_recording':
+                    if self.discard_recording() is False:
+                        raise ValueError(getattr(self,'owner_command_error',None) or '设备停止尚未确认，本段尚未清理')
+                elif action=='collection_mode':
+                    self.switch_collection_mode(job['value'])
                 elif action=='delete_recording':
                     self.delete_recording(job['value'])
                 elif action=='retain_error_recording':

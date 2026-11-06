@@ -18,7 +18,10 @@ class _NoRedirect(HTTPRedirectHandler):
 
 class ReplayRuntime:
     def __init__(self, base, token=''):
-        self.base = Path(base)
+        self.code_base = Path(base).resolve()
+        self.base = self.code_base
+        self.profile_context = None
+        self.allow_missing_root = False
         self.token = token
         self.lock = threading.RLock()
         self.instance = None
@@ -32,10 +35,21 @@ class ReplayRuntime:
         self.monitor = None
 
     def _storage(self):
+        selector=self.code_base/'runtime/collection_profile.json'
+        if selector.exists():
+            value=json.loads(selector.read_text(encoding='utf-8'))
+            if value.get('active_mode') not in ('emg','eeg') or value.get('legacy_mode') not in ('emg','eeg'):raise ReplayUnavailable('采集模式无效')
+            key=(value['active_mode'],value['generation'])
+            if key!=self.profile_context:
+                if self.instance is not None:self.instance.release()
+                self.instance=None;self.root=None;self.storage_until=self.controller_until=0.
+                self.base=self.code_base if value['active_mode']==value['legacy_mode'] else self.code_base.parent/'profiles'/value['active_mode']/'orangepi'
+                self.profile_context=key
         if time.monotonic() < self.storage_until and self.root is not None:
             return self.root
         import yaml
         config = yaml.safe_load((self.base/'configs/storage.yaml').read_text())
+        self.allow_missing_root = config.get('capture_profile') in ('emg','eeg')
         if config.get('mode') != 'sd':
             raise ReplayUnavailable('回看需要已配置的采集SD卡')
         mount = Path(config['mount_point']).resolve()
@@ -52,7 +66,11 @@ class ReplayRuntime:
                 raise ValueError()
         except (KeyError, IndexError, TypeError, ValueError):
             raise ReplayUnavailable('采集SD卡未挂载或身份不符') from None
-        root = (mount/config['directory']/config['device_id']/'data').resolve()
+        volume=mount/config['directory']/config['device_id']
+        if config.get('capture_profile'):
+            if config['capture_profile'] not in ('emg','eeg'):raise ReplayUnavailable('存储模式无效')
+            volume=volume/'profiles'/config['capture_profile']
+        root = (volume/'data').resolve()
         try:
             root.relative_to(mount)
         except ValueError:
@@ -103,9 +121,10 @@ class ReplayRuntime:
                 if self.instance is None:
                     from recording_replay import RecordingReplay
                     from replay_video import VideoDecoder
-                    self.instance = RecordingReplay(root, video_decoder=VideoDecoder(), active_check=self.active_check)
-                    self.monitor = threading.Thread(target=self._watch_capture, daemon=True)
-                    self.monitor.start()
+                    self.instance = RecordingReplay(root, video_decoder=VideoDecoder(), active_check=self.active_check,allow_missing_root=self.allow_missing_root)
+                    if self.monitor is None:
+                        self.monitor = threading.Thread(target=self._watch_capture, daemon=True)
+                        self.monitor.start()
                 self.last_error = None
                 return self.instance
             except Exception as exc:

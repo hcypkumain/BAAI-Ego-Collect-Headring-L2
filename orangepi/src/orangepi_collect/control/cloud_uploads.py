@@ -100,9 +100,10 @@ class UploadManager:
             result=[]
             for path,meta in ids:
                 meta=dict(meta,day=datetime.datetime.fromtimestamp(meta['created_unix'],CST).date().isoformat())
-                identifier=uuid.uuid4().hex;remote=config['target_parent']+'/'+meta['day']+'/'+meta['id']+'-'+identifier[:8]
+                from project_paths import COLLECTION_MODE
+                identifier=uuid.uuid4().hex;remote=config['target_parent']+'/'+COLLECTION_MODE+'/'+meta['day']+'/'+meta['id']+'-'+identifier[:8]
                 snapshot={k:meta.get(k) for k in ('id','token','reference_name','qc_level','day','duration','retained','reference_state')}
-                job=dict(id=identifier,session_id=meta['id'],source=str(path),allowed_root=str(root),volume=str(volume),source_token=meta['token'],
+                job=dict(collection_mode=COLLECTION_MODE,id=identifier,session_id=meta['id'],source=str(path),allowed_root=str(root),volume=str(volume),source_token=meta['token'],
                     daily_report=reports.get(meta['day']),recording=snapshot,settings=dict(config),remote_path=remote,state='queued',phase='等待上传',created_at=time.time(),
                     total_files=0,total_bytes=0,completed_files=0,completed_bytes=0,current_file='',error='',local_deleted=False)
                 self.state['jobs'].append(job);result.append(identifier)
@@ -178,10 +179,11 @@ class UploadManager:
                     with self.lock:
                         if self.state['paused']:continue
                         job=next((j for j in self.state['jobs'] if j['state'] in ('queued','cleanup_queued')),None)
-                    if job and not self.collection_busy():
-                        try:self._launch(job)
-                        except Exception as error:
-                            with self.lock:job.update(state='failed',phase='需要重试',error=str(error) if isinstance(error,CloudError) else '上传进程未能启动，请重试');self._save()
+                    with self.lock:
+                        if job and not self.stop.is_set() and not self.collection_busy():
+                            try:self._launch(job)
+                            except Exception as error:
+                                job.update(state='failed',phase='需要重试',error=str(error) if isinstance(error,CloudError) else '上传进程未能启动，请重试');self._save()
             except Exception as error:
                 with self.lock:
                     if self.active:

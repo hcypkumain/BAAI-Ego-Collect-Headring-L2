@@ -22,7 +22,8 @@ def volume_root(check_write=False):
     if not re.fullmatch(r'[A-Za-z0-9_-]+',cfg['device_id']):raise StorageError('设备编号只能包含英文字母、数字、下划线或连接号')
     for key in ('directory','shift'):
         if not cfg[key] or Path(cfg[key]).name!=cfg[key] or cfg[key] in ('.','..'):raise StorageError('SD 卡目录配置不合法')
-    root=mount/cfg['directory']/cfg['device_id']
+    from collection_profiles import storage_root
+    root=storage_root(mount/cfg['directory']/cfg['device_id'],cfg)
     try:root.resolve().relative_to(mount)
     except ValueError as exc:raise StorageError('SD 卡目录指向挂载点外部，禁止写入') from exc
     if check_write:

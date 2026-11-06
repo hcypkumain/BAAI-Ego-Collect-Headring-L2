@@ -86,7 +86,7 @@ def preparation_state(state):
 def actions_for(state, impedance=None):
     actions=_base_actions_for(state,impedance)
     if preparation_state(state):actions=actions+['abandon']
-    if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['delete_recording','retain_error_recording']+['qc_mode','usb_task_import']
+    if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['collection_mode']+['delete_recording','retain_error_recording']+['qc_mode','usb_task_import']
     if state in ('device_confirm','idle','failed_wait','exhausted','ready'):actions=actions+['select_reference','switch_reference']
     return actions
 
@@ -100,7 +100,7 @@ def _base_actions_for(state, impedance=None):
     table = {'device_confirm':['confirm_devices','rescan','calibrate_wrist','calibrate_emg','volume'],
         'idle':['prepare','rescan','calibrate_wrist','calibrate_emg','volume'],
         'ready':['start','repeat','rescan','calibrate_wrist','calibrate_emg','volume'],
-        'recording':['stop','volume'], 'confirm_stop':['keep','retry','volume'],
+        'recording':['stop','discard_recording','volume'], 'confirm_stop':['keep','retry','discard_recording','volume'],
         'scanning':['volume'], 'preparing':['volume'], 'countdown':['volume'], 'finalizing':['volume'],
         'failed_wait':['prepare','rescan','calibrate_wrist','calibrate_emg','volume','repeat'],
         'exhausted':['prepare','rescan','calibrate_wrist','calibrate_emg','volume']}
@@ -128,10 +128,12 @@ def _base_actions_for(state, impedance=None):
 
 def snapshot_actions(snapshot):
     actions=actions_for(snapshot.get('state',''),snapshot.get('eeg_impedance'))
+    if snapshot.get('collection_mode')=='emg':
+        actions=[action for action in actions if action!='eeg_filter' and not action.startswith('impedance_')]
     if snapshot.get('task_list',{}).get('manual_task_switch') and not snapshot.get('task_list',{}).get('can_switch'):
         actions=[x for x in actions if x not in ('select_reference','switch_reference','reference_list')]
     if (snapshot.get('privacy',{}).get('required') or (snapshot.get('worker') or {}).get('recording_active')):
-        actions=[action for action in actions if action not in ('abandon','delete_recording','retain_error_recording','select_reference','switch_reference','usb_task_import')]
+        actions=[action for action in actions if action not in ('abandon','delete_recording','retain_error_recording','select_reference','switch_reference','usb_task_import','collection_mode')]
     if snapshot.get('wrist_camera_settings',{}).get('can_change') is False:
         actions=[action for action in actions if action!='wrist_camera_settings']
     if (snapshot.get('state') in ('device_confirm','idle','failed_wait','exhausted')
@@ -194,6 +196,8 @@ class Dashboard:
             def setup(self):
                 super().setup();self.connection.settimeout(5)
             def send(self,status,data,content='application/json; charset=utf-8',extra_headers=None):
+                if isinstance(data,dict):
+                    data=dict(data,collection_context=owner.snapshot.get('collection_context'),collection_mode=owner.snapshot.get('collection_mode'))
                 if not isinstance(data,bytes):data=json.dumps(data,ensure_ascii=False).encode()
                 self.send_response(status);self.send_header('Content-Type',content)
                 self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
@@ -293,6 +297,12 @@ class Dashboard:
                             self.wfile.write(chunk);remaining-=len(chunk)
                     except (BrokenPipeError,ConnectionResetError,TimeoutError):pass
             def do_POST(self):
+                current=owner.snapshot.get('collection_context')
+                supplied=self.headers.get('X-Collection-Context')
+                if current and supplied!=current and urlsplit(self.path).path!='/api/action':
+                    self.send(409,{'error':'采集模式已变化，请刷新页面后操作','message':'采集模式已变化，请刷新页面后操作'});return
+                if supplied and current and supplied!=current:
+                    self.send(409,{'error':'采集模式已变化，请刷新页面后操作'});return
                 if handle_phone_request(self,owner,'POST'):return
                 if handle_reference_request(self,owner,'POST'):return
                 if urlsplit(self.path).path!='/api/action':self.send(404,{});return
@@ -312,9 +322,12 @@ class Dashboard:
                     owner.submit(data)
                     self.send(202,{'accepted':True})
                 except (ValueError,TypeError,json.JSONDecodeError) as exc:self.send(409,{'error':str(exc)})
+        import startup_status
+        startup_status.handoff()
         self.server=DashboardHTTPServer((settings.get('host','0.0.0.0'),int(settings.get('port',8765))),Handler)
         self.server.daemon_threads=True
         self.thread=threading.Thread(target=self.server.serve_forever,daemon=True);self.thread.start()
+        startup_status.live()
 
     def publish(self,value):
         value=dict(value);root=value.pop('review_session',None)
@@ -322,6 +335,11 @@ class Dashboard:
         with self.lock:self.snapshot=copy.deepcopy(value);self.review_root=root
 
     def submit(self,data):
+        if data.get('action') not in ('privacy_display','privacy_ack'):
+            with self.lock:
+                current=self.snapshot.get('collection_context')
+                if current and data.get('collection_context')!=current:
+                    raise ValueError('采集模式已变化，请刷新页面后操作')
         if data.get('action')=='start' and not self.camera_checks.approved():
             raise ValueError('请先完成全部相机同屏检查并确认画面方向')
         # Display ACKs must remain reachable while the main thread waits for them.
@@ -331,9 +349,13 @@ class Dashboard:
             self.privacy.acknowledge(data.get('value'));return
         if data.get('action')=='stop' and self.privacy.cancel_request():return
         with self.lock:
+            if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
+                raise ValueError('采集模式已变化，请刷新页面后操作')
             if (self.busy and not self.prompting) or self.pending is not None:raise ValueError('正在执行上一步，请等待')
             if data.get('revision')!=self.snapshot.get('revision'):raise ValueError('流程已变化，请刷新后操作')
             if data.get('action') not in snapshot_actions(dict(self.snapshot,privacy=self.privacy.snapshot())):raise ValueError('当前步骤不允许这个操作')
+            if data['action']=='collection_mode' and data.get('value') not in ('emg','eeg'):
+                raise ValueError('请选择脑电或肌电')
             if data['action']=='reference_list':
                 value=data.get('value')
                 if (not isinstance(value,dict) or set(value)!={'list_id','catalog_revision'}
@@ -398,7 +420,7 @@ class Dashboard:
     def display_state(self):
         """Authoritative display gate without disk, QC, media or impedance parsing."""
         with self.lock:
-            value={key:self.snapshot.get(key) for key in ('state','session','preview_id','image','selected_devices','revision')}
+            value={key:self.snapshot.get(key) for key in ('state','session','preview_id','image','selected_devices','revision','collection_mode','collection_context')}
             value['busy']=self.busy or self.pending is not None
             value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state')}
         value['privacy']=self.privacy.snapshot()

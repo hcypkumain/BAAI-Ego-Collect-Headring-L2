@@ -219,11 +219,12 @@ def resolve(config, candidates, registry):
     if eeg and eeg.get('enabled', True):
         serial = eeg.get('serial', '')
         matches = [c for c in candidates if c['kind'] == 'eeg' and
-                   serial and c.get('serial', '').upper() == serial.upper()]
+                   (not serial or c.get('serial', '').upper() == serial.upper())]
         present = len(matches) == 1
         eeg['discovery'] = dict(present=present, role_confirmed=True, serial=serial,
             reason=None if present else 'ambiguous' if matches else 'missing', binding='serial')
         if present:
+            eeg['serial'] = matches[0].get('serial','')
             eeg['port'] = matches[0]['path']
             eeg['discovery'].update(path=eeg['port'], topology=matches[0].get('topology', ''))
             bindings['eeg'] = dict(matches[0], role_confirmed=True)

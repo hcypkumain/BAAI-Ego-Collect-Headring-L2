@@ -2,9 +2,9 @@
 (function(global){
  'use strict';
  global.piPrepareLabel=function(s){
-  if(s?.last_completed?.outcome==='pending_qc'&&s?.state==='idle')return '采集下一段';
+  if(s?.last_completed?.outcome==='pending_qc'&&s?.state==='idle')return '准备下一段';
   if(s?.reference_image_state?.manual&&s.reference_image_state.collected)return '重采所选图';
-  if(s?.state==='idle'&&s.last_completed?.outcome==='success')return '采集下一段';
+  if(s?.state==='idle'&&s.last_completed?.outcome==='success')return '准备下一段';
   return s?.state==='failed_wait'?'重新准备本段':'准备本段';
  };
  global.describePiCaptureState=function(s,options={}){
@@ -33,8 +33,8 @@
    title='停止请求已发送 · 等待 Pi 确认';detail='发送请求不代表已经停止，请等待设备回执。';
   }else if(s?.state==='recording'||p?.phase==='recording'||s?.worker?.recording_active===true){
    title='采集中';detail='Pi 确认仍在录制。';
-  }else if(stopped&&s?.state==='idle'&&s.last_completed?.outcome==='success'){
-   title='本段已保存 · 可采集下一段';detail='点击“采集下一段”抽取并准备下一任务，完成检查后再开始正式录制。';
+  }else if(stopped&&s?.state==='idle'&&['success','pending_qc'].includes(s.last_completed?.outcome)){
+   title='本段已保存 · 可采集下一段';detail='点击“准备下一段”抽取并准备下一任务，完成检查后再开始正式录制。';
   }
   return {title,detail,stopped:!options.stale&&stopped};
  };
@@ -50,9 +50,11 @@
   qcCard.innerHTML='<b id="qc-stage-title"></b><p id="qc-stage-detail"></p><progress id="qc-stage-progress" style="width:100%"></progress>';
   document.querySelector('header').insertAdjacentElement('afterend',qcCard);
   cover.setAttribute('aria-label','正在同步采集状态');
-  cover.innerHTML='<div id="recording-countdown" aria-live="polite">正在同步采集状态</div><svg id="recording-stop-ring" width="180" height="180" viewBox="0 0 180 180" hidden aria-hidden="true"><circle cx="90" cy="90" r="78" fill="none" stroke="#263336" stroke-width="8"/><circle id="recording-stop-progress" cx="90" cy="90" r="78" pathLength="1" fill="none" stroke="#8edcc9" stroke-width="8" stroke-dasharray="1" stroke-dashoffset="1" transform="rotate(-90 90 90)"/></svg><p id="recording-hold-hint" hidden>长按 3 秒结束采集</p>';
+  cover.innerHTML='<div id="recording-countdown" aria-live="polite">正在同步采集状态</div><svg id="recording-stop-ring" width="180" height="180" viewBox="0 0 180 180" hidden aria-hidden="true"><circle cx="90" cy="90" r="78" fill="none" stroke="#263336" stroke-width="8"/><circle id="recording-stop-progress" cx="90" cy="90" r="78" pathLength="1" fill="none" stroke="#8edcc9" stroke-width="8" stroke-dasharray="1" stroke-dashoffset="1" transform="rotate(-90 90 90)"/></svg><p id="recording-hold-hint" hidden>长按 3 秒结束采集</p><button id="recording-discard" data-no-hold hidden style="position:relative;z-index:2;margin-top:36px;background:#392328;color:#ffe7e7;border:1px solid #a67777;padding:14px 20px;border-radius:10px">停止并放弃本段</button>';
   let latest=null,view=null,receivedAt=0,stopping=false,renderFault='',previousNumber='',lastDraw=0,animation=null;
   const title=document.getElementById('recording-countdown'),ring=document.getElementById('recording-stop-ring'),progress=document.getElementById('recording-stop-progress');
+  const discard=document.getElementById('recording-discard');
+  discard.onclick=event=>{event.stopPropagation();if(!discard.disabled)options.discard?.(view?.snapshot||latest);};
   function paint(){
    const s=view?.snapshot||latest,p=s?.privacy,canStop=view?.canStop===true;let value='正在同步采集状态';
    if(p?.stop_confirmed)stopping=false;
@@ -82,6 +84,7 @@
    if(view?.stale===false&&s?.revision!==latest?.revision){
     document.querySelectorAll('[data-action],#phone-overview-actions button').forEach(button=>button.disabled=true);
    }
+   discard.hidden=!canStop||s?.state!=='recording';discard.disabled=!!view?.stale||stopping;
    const hint=document.getElementById('recording-hold-hint');hint.hidden=!canStop;
    cover.setAttribute('role',canStop?'button':'status');cover.setAttribute('tabindex',canStop?'0':'-1');
    cover.setAttribute('aria-label',canStop?'长按三秒结束采集':value);

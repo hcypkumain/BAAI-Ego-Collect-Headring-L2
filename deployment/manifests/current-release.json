@@ -1,4 +1,4 @@
 {
-  "edition": "EEG",
-  "manifest": "headring-eeg-cp13-20261106-v1.json"
+  "edition": "EEG-default",
+  "manifest": "headring-profiles-20261106-v1.json"
 }

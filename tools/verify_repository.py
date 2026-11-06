@@ -45,7 +45,7 @@ def main():
         relative=path.relative_to(ROOT)
         assert not path.is_symlink(),'Unexpected symbolic link: '+str(relative)
         assert relative.parts[:2] not in (('orangepi','runtime'),('orangepi','private')),'Private runtime file: '+str(relative)
-        assert relative.parts[0] not in ('data','delivery_backups','deleted-recordings','archives'),'Recording/archive content: '+str(relative)
+        assert relative.parts[0] not in ('profiles','data','delivery_backups','deleted-recordings','archives'),'Recording/archive content: '+str(relative)
         assert path.suffix.lower() not in ('.mp4','.mkv','.npz','.npy','.h264','.h265','.hevc','.sqlite','.sqlite3'),str(relative)
         if path.suffix=='.py':compile(path.read_bytes(),str(relative),'exec');syntax+=1
     process=subprocess.run([sys.executable,str(ROOT/'tools/audit_secrets.py'),str(ROOT)],

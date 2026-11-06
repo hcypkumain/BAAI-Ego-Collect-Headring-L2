@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 """A/B voice controller; no GUI and no dependency on the existing launcher."""
+import os as _startup_os
+if __name__=='__main__' and _startup_os.environ.pop('ORANGEPI_EARLY_WEB','')=='1':
+    from service_entry import main as _startup_main
+    _startup_main()
+    raise SystemExit(0)
+
 import sys as _sys
 from pathlib import Path as _Path
 _sys.path.insert(0,str(_Path(__file__).resolve().parents[1]/'common'))
@@ -21,7 +27,7 @@ import yaml
 import ledger
 import storage_paths
 
-from project_paths import BASE, PROJECT, SRC, devices
+from project_paths import BASE, PROJECT, SRC, devices, CODE_BASE, PROFILE, COLLECTION_MODE, COLLECTION_CONTEXT
 from device_discovery import fingerprint
 import wrist_calibration
 import emg_calibration
@@ -103,10 +109,35 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.voice.silent=self.state=='recording' or self.quit
         atomic_json(BASE/'runtime'/'controller.json',dict(pid=os.getpid(),state=self.state,
             session=str(self.path) if self.path else None,image=str(self.image) if self.image else None,
+            collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,
             success_count=self.success_count,selected_image=self.selected_image,selected_devices=getattr(self,'selected_devices',None),
             wrist_calibration_phase=getattr(getattr(self,'wrist_wizard',None),'phase',None),
             emg_calibration_phase=getattr(getattr(self,'emg_wizard',None),'phase',None),time=time.time()))
+        if BASE!=CODE_BASE:
+            atomic_json(CODE_BASE/'runtime/controller.json',json.loads((BASE/'runtime/controller.json').read_text()))
         self.ui_publish()
+
+    def switch_collection_mode(self,mode):
+        from collection_profiles import provision
+        if mode not in ('emg','eeg'):raise ValueError('请选择脑电或肌电')
+        if mode==COLLECTION_MODE:return
+        if self.state not in ('device_confirm','idle','failed_wait','exhausted') or self.worker:
+            raise ValueError('请先结束或放弃当前段，再切换采集模式')
+        privacy=self.dashboard.privacy.snapshot()
+        if privacy.get('required') or privacy.get('stop_confirmed') is not True:
+            raise ValueError('请等待设备确认停止后切换')
+        uploads=getattr(self.dashboard,'cloud_uploads',None)
+        previous=self.state
+        if uploads is not None:
+            with uploads.lock:
+                if uploads.active:raise ValueError('请等待当前上传结束或先暂停上传，再切换模式')
+                self.state='mode_switching';self.state_write()
+        else:self.state='mode_switching';self.state_write()
+        try:provision(CODE_BASE,PROFILE,mode)
+        except Exception:
+            self.state=previous;self.state_write();raise
+        self.stop_preview();self.switch_requested=mode
+        self.quit=True
 
     def worker_status(self):
         if not self.path:return {}
@@ -254,8 +285,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.path,identity=self.reference_reserve_directory(root);new_path=self.path
             # Freeze resolved devices and the exact task/queue identity for this owner.
             self.session_devices=resolved
-            atomic_json(self.path/'device_selection.json',dict(selected=list(self.selected_devices),device_config=resolved))
-            metadata=dict(identity,reference_image=selection['asset']['relative_path'],
+            atomic_json(self.path/'device_selection.json',dict(selected=list(self.selected_devices),device_config=resolved,collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT))
+            metadata=dict(identity,collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,reference_image=selection['asset']['relative_path'],
                 reference_sha256=selection['asset']['sha256'],reference_selection=selection,
                 test=bool(self.smoke),stim=False,pygame=False,
                 device_config=resolved,selected_devices=list(self.selected_devices),storage_config=storage_paths.config(),
@@ -432,6 +463,13 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         mode=qc_execution(BASE)['mode']
         self.voice.say('采集已停止，正在保存并'+('完成肌电检查，其余待主机质检。' if mode=='emg_only' else '标记待主机质检。' if mode=='deferred' else '检验，请等待。'))
 
+    def discard_recording(self):
+        if self.state == 'recording':
+            if not self.stop_before_prompt():return False
+        if self.state != 'confirm_stop':raise ValueError('当前没有可放弃的录制')
+        self.discard_return_overview=True
+        return self.discard_and_retry()
+
     def discard_and_retry(self):
         if self.state!='confirm_stop':raise ValueError('请先停止采集，再选择重采本段')
         privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
@@ -444,7 +482,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.state='discarding';self.discard_deadline=time.monotonic()+60
         if self.worker.poll() is None:self.command('DISCARD')
         self.state_write()
-        self.voice.say('本段已放弃，正在关闭设备并删除本段文件，随后重新准备同一任务。')
+        self.voice.say('正在停止设备并清理本段文件，请等待。清理后由您手动准备下一段。')
         self.poll()
 
     def poll_discard(self):
@@ -462,12 +500,18 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.state='failed_wait';self.last_help=['本段文件未能清理：'+str(error)+'。请处理存储问题后重试。']
             self.state_write();self.voice.say(self.last_help[0]);return
         self.discard_requested=False;self.retry_requested=False;self.path=None
+        self.last_completed=None
+        if getattr(self,'discard_return_overview',False):
+            self.reference_release_pin();self._reference_active=None;self._reference_retry=None
+            self._reference_manual_id=None;self.image=None;self.selected_image=None
+        self.discard_return_overview=False
+        self.preparation_cancelled_at=time.time()
         if getattr(self,'last_review_path',None)==path:
             import recording_review
             self.last_review_path=recording_review.latest_recording(self.recording_store.roots()[0])
         self.reference_refresh(force=True)
         self.state='idle';self.exit_code=0;self.state_write()
-        if not self.quit:self.prepare()
+        self.voice.say('本段已放弃，文件已清理。请手动点击准备本段。')
 
     def stop_before_prompt(self):
         privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
@@ -879,6 +923,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 meta=yaml.safe_load((PROJECT/'configs/meta.yaml').read_text(encoding='utf-8')) or {}
                 meta.update(session_dir=str(self.path),environment=raw.get('reference_image','').replace('configs/environments/','',1),pi=raw)
             meta.update(self.reference_session_metadata())
+            meta.update(collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT)
             meta['status']=outcome
             meta['retention_state']='kept_pending_qc' if outcome=='pending_qc' else 'kept' if outcome=='success' else outcome
             meta['retained_at_unix']=time.time() if outcome in ('success','pending_qc') else None
@@ -891,7 +936,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             if outcome=='success':
                 self.success_count+=1
                 self.retained_created_ids=getattr(self,'retained_created_ids',set());self.retained_created_ids.add(self.path.name)
-            elif not self.notified_error and not retry and summary.get('status')!='cancelled':
+            elif outcome!='pending_qc' and not self.notified_error and not retry and summary.get('status')!='cancelled':
                 self.error_voice(summary.get('errors',['采集进程异常退出，请检查日志']))
             self.exit_code=0 if (ok or summary.get('status')=='cancelled') and not owner_error else 1
             self._reference_reap_outcome=outcome
@@ -902,18 +947,17 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             if self.smoke:
                 self.quit=True;self.state='idle';self.state_write();return
             if retry:
-                self.voice.say('本条已标记失败并保留，重新准备当前图像。')
-                self.prepare();return
+                self.state='idle';self.state_write()
+                self.voice.say('本条已标记失败并保留。请手动点击重新准备本段。');return
             if not ok:
                 self.state='failed_wait';self.state_write()
                 self.voice.say('本条未标记已用。请点击重采本段，或重复播报错误排查提示。')
                 return
             self.state='idle';self.state_write()
             if pending:
-                self.voice.say('本段已保存，等待主机质检。正在准备下一任务，尚未开始正式录制。')
-                self.prepare();return
+                self.voice.say('本段已保存，等待主机质检。请手动点击准备下一段。');return
             hint='本段存在质量提示，请在网页查看详情。' if summary.get('warnings') or summary.get('qc_level')=='WARN' else ''
-            self.voice.say('本段已保存并完成检验。'+hint+'可以回看录像，或点击准备本段开始下一段任务。')
+            self.voice.say('本段已保存并完成检验。'+hint+'可以回看录像，或手动点击准备下一段。')
 
     def key(self,key):
         if self.state in ('usb_importing','usb_import_recovery') and key!='q':return False
@@ -1125,7 +1169,7 @@ if __name__=='__main__':
             sys.stdout.close()
         sys.exit(0)
     (BASE/'runtime').mkdir(exist_ok=True)
-    lock=(BASE/'runtime'/'launcher.lock').open('w')
+    lock=(CODE_BASE/'runtime'/'launcher.lock').open('w')
     try:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:
@@ -1141,4 +1185,12 @@ if __name__=='__main__':
         try:Speaker().say('启动失败。'+str(exc))
         except Exception:pass
         sys.exit(1)
-    sys.exit(controller.run())
+    result=controller.run()
+    if getattr(controller,'switch_requested',None):
+        from collection_profiles import activate
+        activate(CODE_BASE,controller.switch_requested,PROFILE)
+        # All owners, previews and HTTP workers have closed before re-importing
+        # the new profile. Keep systemd's main process and global lock.
+        lock.close()
+        os.execv(sys.executable,[sys.executable,'-u',str(SRC/'control/launcher.py')]+sys.argv[1:])
+    sys.exit(result)

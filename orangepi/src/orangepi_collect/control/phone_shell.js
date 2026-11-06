@@ -74,6 +74,8 @@
   legacy.append($('review-card'),$('device-rows').closest('.card'),$('phone-install'),$('phone-awake'));
   pages.overview.innerHTML='<section class="card phone-home-state"><div><h2 id="phone-home-title">等待 Pi 状态</h2><p id="phone-home-detail">连接后显示真实采集流程</p></div><div class="phone-home-entries"></div></section><div id="phone-native-metrics"></div><div id="phone-device-list"></div><div id="phone-overview-actions" class="actions"></div><p id="phone-home-hint" class="phone-hint"></p>';
   const taskCard=document.createElement('section');taskCard.className='card phone-task-card';taskCard.innerHTML='<div class="phone-task-heading"><small>当前采集任务</small><span>每段随机抽图</span></div><b id="phone-task-name">等待任务列表</b><div class="phone-task-progress"><progress id="phone-task-progress" aria-label="参考图完成进度"></progress><small id="phone-task-counts"></small></div><p id="phone-next-step" class="phone-hint"></p>';
+  const profileCard=document.createElement('section');profileCard.className='card';profileCard.innerHTML='<h3>采集版本</h3><div class="actions"><button id="phone-mode-emg">肌电</button><button id="phone-mode-eeg">脑电</button></div><p id="phone-mode-note" class="phone-hint"></p>';pages.overview.prepend(profileCard);
+  for(const mode of ['emg','eeg'])$('phone-mode-'+mode).onclick=()=>options.action('collection_mode',mode);
   pages.overview.insertBefore(taskCard,$('phone-native-metrics'));
   const dailyCard=document.createElement('section');dailyCard.className='card phone-task-card';dailyCard.id='phone-daily-collection';dailyCard.innerHTML='<small>今日合格采集时长（北京时间）</small><b id="phone-daily-duration">正在读取…</b><p id="phone-daily-detail" class="phone-hint">确认保存且通过/WARN 后累计</p>';
   const dailyExport=button('导出今日汇总（TXT）',()=>downloadDaily().catch(error=>{text($('phone-daily-detail'),error.message);}));dailyExport.id='phone-daily-export';dailyCard.append(dailyExport);pages.overview.insertBefore(dailyCard,$('phone-native-metrics'));
@@ -100,7 +102,7 @@
   pages.connections.innerHTML='<section class="card phone-connections-card"><h3>连接设置</h3><div id="phone-link-switch"></div><div id="phone-connection-detail"></div></section>';
   const workflowBar=document.createElement('div');workflowBar.className='phone-workflow-bar';workflowBar.append(button('返回总览',()=>navigate('overview',true)),button('更多控制',()=>openSettings()));
   const workflowBody=document.createElement('div');workflowBody.id='phone-workflow-body';workflowBody.append(step,referenceCard,wristCard,emgCard,eegCard);pages.workflow.append(workflowBar,workflowBody);
-  const referenceEntry=button('查看本段参考图',()=>openReference?.());referenceEntry.id='phone-open-reference';const abandon=button('放弃本次采集',()=>options.action('abandon'));abandon.id='phone-abandon';workflowBar.prepend(referenceEntry,abandon);
+  const referenceEntry=button('查看本段参考图',()=>openReference?.());referenceEntry.id='phone-open-reference';const abandon=button('放弃本次采集',()=>options.action(snapshot?.actions?.includes('discard_recording')?'discard_recording':'abandon'));abandon.id='phone-abandon';workflowBar.prepend(referenceEntry,abandon);
   const setupProgress=document.createElement('ol');setupProgress.id='phone-setup-progress';setupProgress.setAttribute('aria-label','采集准备步骤');setupProgress.hidden=true;
   for(const label of ['检查阻抗','查看参考图','开始采集']){const item=document.createElement('li');item.textContent=label;setupProgress.append(item);}pages.workflow.insertBefore(setupProgress,workflowBody);
   const impedanceTabs=document.createElement('div');impedanceTabs.id='phone-impedance-tabs';impedanceTabs.className='phone-subnav';impedanceTabs.hidden=true;
@@ -178,6 +180,7 @@
 
   function restoreWaves(){for(const [id,node] of Object.entries(waves))if(node.parentElement!==waveParents[id])waveParents[id].append(node);}
   function selectSignal(id){
+   if(id==='eeg'&&snapshot?.collection_mode==='emg')id='emg_left';
    signalId=id;restoreWaves();waveHost.append(waves[id]);
    text($('phone-wave-hint'),id==='eeg'?'脑电单位：µV · 近 2 秒逐点波形；可切换原始电压与显示滤波，纵轴使用实际单位。':'肌电单位：ADC counts · 20 ms 包络，尚未换算成电压；纵轴刻度与通道数值可查看。');
    for(const b of signalTabs.children){const selected=String(b.dataset.signal===id);if(b.getAttribute('aria-pressed')!==selected)b.setAttribute('aria-pressed',selected);}
@@ -189,7 +192,7 @@
   }
   function openSettings(){if(!safe())return;settingsOpen=true;settings.hidden=false;stopLive();}
   function updateWorkflow(){
-   abandon.hidden=!snapshot?.actions?.includes('abandon')||['device_confirm','idle','exhausted'].includes(snapshot?.state);abandon.disabled=!safe()||snapshot?.busy||options.pending?.();referenceEntry.disabled=!safe()||!snapshot?.image||!['ready','preparing'].includes(snapshot?.state);
+   abandon.hidden=!(snapshot?.actions?.includes('abandon')||snapshot?.actions?.includes('discard_recording'))||['device_confirm','idle','exhausted'].includes(snapshot?.state);abandon.disabled=!safe()||snapshot?.busy||options.pending?.();referenceEntry.disabled=!safe()||!snapshot?.image||!['ready','preparing'].includes(snapshot?.state);
    text($('phone-reference-state-text'),global.describeReferenceState(snapshot?.reference_image_state)+((snapshot?.task_list?.tags||[]).length?' · 标签：'+snapshot.task_list.tags.join(' / '):''));
    $('phone-pick-reference').disabled=referenceChoicesBusy||!safe()||!snapshot?.actions?.includes('select_reference')||snapshot?.busy;
    $('phone-use-reference').disabled=referenceChoicesBusy||!referenceChoiceRevision||!safe()||!snapshot?.actions?.includes('select_reference')||snapshot?.busy;
@@ -258,11 +261,14 @@
   }
 
   function updateContent(value){
+   const muscleOnly=value.collection_mode==='emg';
+   for(const tab of signalTabs.children)if(tab.dataset.signal==='eeg')tab.hidden=muscleOnly;
+   if(muscleOnly&&signalId==='eeg'){signalId='emg_left';if(pageId==='signals')selectSignal(signalId);}
    const daily=value.daily_collection||{};text($('phone-daily-duration'),daily.ready?clock(daily.total_seconds):'正在读取…');
    text($('phone-daily-detail'),daily.error?'统计更新异常，显示上次结果：'+daily.error:daily.ready?(daily.day+' · '+daily.qualified_count+' 段（通过 '+daily.pass_count+' / WARN '+daily.warn_count+'） · 确认保存后计入'):'正在核对已保存数据');
    dailyExport.disabled=!safe()||!['device_confirm','idle','failed_wait','exhausted','confirm_stop'].includes(value.state);
    const label=$('title').textContent;text($('phone-home-title'),label);text(stateLabel,label);
-   const deviceHint=value.state==='device_confirm'?'确认将使用当前扫描到的已连接设备，请先核对下方清单':value.state==='discarding'?'正在删除本段文件，随后重新准备同一任务':value.busy?'Pi 正在执行流程，请等待':value.state==='finalizing'?'文件收尾与 QC：'+(value.worker?.progress?.completed||0)+' / '+(value.worker?.progress?.total||'—'):'采集流程由 Orange Pi 统一管理';
+   const deviceHint=value.state==='device_confirm'?'确认将使用当前扫描到的已连接设备，请先核对下方清单':value.state==='discarding'?'正在停止设备并清理本段文件，完成后等待手动准备':value.busy?'Pi 正在执行流程，请等待':value.state==='finalizing'?'文件收尾与 QC：'+(value.worker?.progress?.completed||0)+' / '+(value.worker?.progress?.total||'—'):'采集流程由 Orange Pi 统一管理';
    const truth=global.describePiCaptureState(value);
    text($('phone-home-detail'),['finalizing','confirm_stop','recording'].includes(value.state)?truth.detail:deviceHint);
    const devices=value.devices||[],chosen=value.selected_devices||[];
@@ -324,7 +330,10 @@
    },
    update(value){
     snapshot=value;const state=value.state||'';updateContent(value);
-    if(value.preparation_cancelled_at&&value.preparation_cancelled_at!==lastPreparationCancel){lastPreparationCancel=value.preparation_cancelled_at;referenceReadKey='';navigate('overview');}
+    const mode=value.collection_mode||'eeg';
+    for(const id of ['emg','eeg']){const b=$('phone-mode-'+id);b.setAttribute('aria-pressed',String(mode===id));b.classList.toggle('primary',mode===id);b.disabled=mode===id||!safe()||!value.actions?.includes('collection_mode')||value.busy||options.pending?.();}
+    text($('phone-mode-note'),'当前：'+(mode==='eeg'?'脑电版（含肌电）':'肌电版')+' · 数据、参考图库、任务进度和上传队列按版本分别保存。'+(!value.actions?.includes('collection_mode')?'结束或放弃本段后可切换。':''));
+    if(value.preparation_cancelled_at&&value.preparation_cancelled_at!==lastPreparationCancel){lastPreparationCancel=value.preparation_cancelled_at;referenceReadKey='';setupContext='';setupStage='';manualWrist=false;auxOpen=settingsOpen=false;aux.hidden=settings.hidden=true;stopLive();stopWrists();fit?.suspend();navigate('overview');}
     fit?.update(value);
     if(!auxOpen&&!settingsOpen&&state!==lastState){
      const guide=state.startsWith('wrist_')||['emg_manual','emg_pairing','preparing','ready'].includes(state);
