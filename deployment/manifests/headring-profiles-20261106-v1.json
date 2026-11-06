@@ -80,7 +80,7 @@
     "orangepi/src/orangepi_collect/control/reference_controls.py": "6fba532ac9bd34e9a1fc3e9620f47e02749f0fe663bcf69bbe0f407f458ddecd",
     "orangepi/src/orangepi_collect/control/reference_credentials.py": "27aba75cda754e106e10ab16e907524d13387c17defc6a938bd812b22f9cc8ab",
     "orangepi/src/orangepi_collect/control/reference_library_http.py": "7e70bc4968c3ac0ef16f946fbb74718b47ad26210aba8a89189b2153d768bc90",
-    "orangepi/src/orangepi_collect/control/service_entry.py": "271b9643d5653e0fefe1ac8dfdf679bddc682c1ecaecf17a0bb88f9306aadb53",
+    "orangepi/src/orangepi_collect/control/service_entry.py": "c45ba78341e4b2ac1fe2b2934d69eabbd2332086a08145f6ee9edf5bb0f2cf91",
     "orangepi/src/orangepi_collect/control/signal_quality.js": "67f38beadc727a633b9b799a5823a593312f7b208e735af4de34c88adc188cd6",
     "orangepi/src/orangepi_collect/control/standard_bridge.py": "c27b26582c65511ae02b3a21e997b66de3a7af11ddd64a0e0a4b02ae28c48743",
     "orangepi/src/orangepi_collect/control/startup_status.py": "a86aa96f9f0bb8ded18891dfe4196e24eaf9174e85fd219400ef7d6f5b5983af",

@@ -4,9 +4,9 @@
   "tested_default_mode": "emg",
   "python_cases": {
     "framework": 95,
-    "hardware": 94,
+    "hardware": 95,
     "eeg_sdk": 24,
-    "total": 213
+    "total": 214
   },
   "browser": {
     "manual_and_profile_flows": 5,
@@ -25,7 +25,8 @@
       "alternate_history_empty": true,
       "stale_action_rejected": true,
       "station_settings_preserved": true,
-      "no_formal_recording_started": true
+      "no_formal_recording_started": true,
+      "eeg_impedance_clock_guard": true
     },
     "11": {
       "default_mode": "emg",
@@ -35,7 +36,8 @@
       "alternate_history_empty": true,
       "stale_action_rejected": true,
       "station_settings_preserved": true,
-      "no_formal_recording_started": true
+      "no_formal_recording_started": true,
+      "eeg_impedance_clock_guard": true
     },
     "13": {
       "default_mode": "eeg",
@@ -45,7 +47,8 @@
       "alternate_history_empty": true,
       "stale_action_rejected": true,
       "station_settings_preserved": true,
-      "no_formal_recording_started": true
+      "no_formal_recording_started": true,
+      "eeg_impedance_clock_guard": true
     },
     "14": {
       "default_mode": "emg",
@@ -55,8 +58,10 @@
       "alternate_history_empty": true,
       "stale_action_rejected": true,
       "station_settings_preserved": true,
-      "no_formal_recording_started": true
+      "no_formal_recording_started": true,
+      "eeg_impedance_clock_guard": true
     }
   },
-  "validation_limit": "Device round trips are idle configuration switches. No real collection was initiated; long-wear capture requires field validation."
+  "validation_limit": "Device round trips are idle configuration switches. No real collection was initiated; long-wear capture requires field validation.",
+  "early_startup_clock_barrier": true
 }
