@@ -8,7 +8,7 @@ from qc_explanations import explain_finding
 
 LEVELS={'INFO':0,'WARN':1,'ERROR':2}
 LABELS={'cam_ros_left':'头环前左','cam_ros_right':'头环前右','cam_ros_bleft':'头环后左','cam_ros_bright':'头环后右',
-        'cam_left_wrist':'左腕相机','cam_right_wrist':'右腕相机','cam_third':'第三视角','emg_left':'左臂肌电',
+        'cam_left_wrist':'左腕相机','cam_right_wrist':'右腕相机','cam_third':'第三视角','eeg':'脑电','emg_left':'左臂肌电',
         'emg_right':'右臂肌电','board_imu':'头环惯性','marker':'起止标记'}
 
 def summarize_qc(report):

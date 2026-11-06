@@ -3,9 +3,9 @@
   "version": "headring-eeg-cp13-20261106-v1",
   "python_tests": {
     "framework": 50,
-    "hardware": 45,
+    "hardware": 49,
     "eeg": 24,
-    "total": 119
+    "total": 123
   },
   "screen_sync_scenarios": 17,
   "recording_overlay": "passed",
@@ -31,5 +31,7 @@
   "shell_syntax": "passed",
   "live_release_files_verified": 120,
   "station_configuration_and_calibrations_preserved": true,
-  "real_recording_started": false
+  "real_recording_started": false,
+  "shared_report_voice_and_action_regressions": "passed",
+  "qc_browser_regressions": 6
 }

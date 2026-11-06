@@ -119,7 +119,7 @@
       "current_path": "services/phone-media/qc_details.py",
       "action": "moved-or-modified",
       "baseline_sha256": "5246f2aeefc442308fcf20fe67ee896b89415dfcd656778081abc21cbee51811",
-      "published_sha256": "19836f91c833d234ce9066f1bfe4cdffefba9c457c6ab46bbba28dbaebc65dc7",
+      "published_sha256": "676364ac8b075116dee375b1f576ed3d937b4dc5a30513911a44620e4248b781",
       "reason": "Restore CP13 EEG support and integrate verified common runtime fixes"
     },
     {
@@ -227,7 +227,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/phone_app.js",
       "action": "moved-or-modified",
       "baseline_sha256": "b896d9a3c8256bfc841242e4aa8af7bd2e6acfbe575f9aa8da07a5a8fceb17fe",
-      "published_sha256": "d129296b217b0e7e27349fa04d8eea799b8b06f6f981d5de468c948f51be4739",
+      "published_sha256": "be0b84b9e77e418d2075a41591993bb6c456eec52e996374f503f0cbd261995b",
       "reason": "Restore CP13 EEG support and integrate verified common runtime fixes"
     },
     {
@@ -267,7 +267,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/dashboard.py",
       "action": "moved-or-modified",
       "baseline_sha256": "bc974ad84705e96f657f23be08328e788850eb866bf7d1050a62fdc7c8ccf0a1",
-      "published_sha256": "94186ab3516986923448ab88e3efc8983936e87653f06bbe8a12524b14cbdcf7",
+      "published_sha256": "3fd67bd407d705f46d759a7f0de7a5402055b2b14b9a3ab4c647832473893f57",
       "reason": "Restore CP13 EEG support and integrate verified common runtime fixes"
     },
     {
@@ -585,7 +585,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/launcher.py",
       "action": "moved-or-modified",
       "baseline_sha256": "1cf9edb98a65ba9f2ad060109d484036ada14e9a97a690b9a6103e5438b176e8",
-      "published_sha256": "352ea330c8e194d074a3b0a3e7becba3b5a3d2c5a21ea1ef299b0bfd9b669e90",
+      "published_sha256": "29372ea67c138cddd61a4f2a32ea4429ccd5394fab7a503ea0226d7110c6bed1",
       "reason": "Restore CP13 EEG support and integrate verified common runtime fixes"
     },
     {
@@ -625,7 +625,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/qc_details.py",
       "action": "moved-or-modified",
       "baseline_sha256": "5246f2aeefc442308fcf20fe67ee896b89415dfcd656778081abc21cbee51811",
-      "published_sha256": "28c29a806aba6ce2fc5f4aba2523b67cda850afd6d1a431c8263aca6e5802a08",
+      "published_sha256": "676364ac8b075116dee375b1f576ed3d937b4dc5a30513911a44620e4248b781",
       "reason": "Restore CP13 EEG support and integrate verified common runtime fixes"
     },
     {
@@ -665,7 +665,7 @@
       "current_path": "orangepi/src/orangepi_collect/control/web_controls.py",
       "action": "moved-or-modified",
       "baseline_sha256": "18841f57c83970645ae4449406d3b11b27286e4de0abde3a2d09cf303c198704",
-      "published_sha256": "22efe820f8ed52c40a536a891715f3066c6834f5cb70010e9322a8e899336ca0",
+      "published_sha256": "7734f4a9c83a3f46d76429b9700f9684512a1987154a100852ff47ba2fa0c07b",
       "reason": "Restore CP13 EEG support and integrate verified common runtime fixes"
     },
     {

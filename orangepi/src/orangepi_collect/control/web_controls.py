@@ -219,6 +219,7 @@ class WebControls:
             emg_serial_roles=emg_roles,emg_calibration=emg_status,emg_assignment=emg_assignment,
             emg_pairing=getattr(self,'emg_pairing_status',lambda:None)(),
             headband_calibration=calibration,
+            qc_execution=__import__('qc_deferred').load(BASE),
             eeg_config=cfg.get('eeg',{}),eeg_filter_presets=PRESETS,
             wrist_camera_settings=self.wrist_settings_status(),
             selected_devices=self.selected_devices,worker=worker,
@@ -344,7 +345,7 @@ class WebControls:
             try:
                 impedance = self.worker_status().get('eeg_impedance', {}) if 'eeg' in (getattr(self,'selected_devices',None) or ()) else dict(required=False)
                 allowed=list(actions_for(self.state,impedance))
-                if getattr(self,'reference_can_change',lambda:False)():allowed.append('reference_list')
+                if getattr(self,'reference_can_switch_list',getattr(self,'reference_can_change',lambda:False))():allowed.append('reference_list')
                 if job['revision']!=getattr(self,'ui_revision',0) or job['action'] not in allowed:
                     raise ValueError('流程已经变化，本次点击未执行，请重新选择')
                 action=job['action']
@@ -368,6 +369,11 @@ class WebControls:
                     self.select_reference_image(job.get('value'),next_image=action=='switch_reference')
                 elif action=='reference_list':
                     self.select_reference_list(job['value'])
+                elif action=='usb_task_import':
+                    self.start_usb_task_import(job['value'])
+                elif action=='qc_mode':
+                    if getattr(self,'worker',None):raise ValueError('请在新一段准备前切换质检模式')
+                    __import__('qc_deferred').save(BASE,job['value']);self.state_write()
                 elif action in ('impedance_start','impedance_end','impedance_review'):
                     command = {'impedance_start':'IMPEDANCE_START','impedance_end':'IMPEDANCE_END',
                                'impedance_review':'IMPEDANCE_REVIEW'}[action]

@@ -129,6 +129,12 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
 
     def error_voice(self, errors):
         text=' '.join(errors)
+        if '即时质检' in text:
+            # This is a saved-data verdict, not an unidentified device crash.
+            self.last_help=list(dict.fromkeys(getattr(self,'last_help',[])+list(errors)))
+            reasons=[str(item).split('处理建议：',1)[0] for item in errors[:2]]
+            self.voice.say('。'.join(reasons)+'。具体原因和处理建议已在录制结果中按左右侧显示。')
+            return
         labels=[]
         for key,label in [('emg_left','左臂肌电'),('emg_right','右臂肌电'),
                           ('cam_ros_bleft','后左相机'),('cam_ros_bright','后右相机'),
@@ -255,6 +261,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 device_config=resolved,selected_devices=list(self.selected_devices),storage_config=storage_paths.config(),
                 keyboard_flow='Touch workflow: prepare and view reference without time limit, impedance, manual camera check, return to preparation, separate formal start, 5-to-1 countdown, hold 3s to stop, save or retry same task',
                 timestamp_note='Shared host start gate; camera ROS source stamps and EMG host arrival stamps retained. No hardware synchronization is claimed.')
+            from qc_deferred import load as qc_execution
+            metadata['qc_mode']=qc_execution(BASE)['mode']
             self.reference_set_raw_metadata(metadata)
             atomic_json(self.path/'meta.json',metadata)
             atomic_json(self.path/'reference_queue.json',self._reference_active['entry']['snapshot'])

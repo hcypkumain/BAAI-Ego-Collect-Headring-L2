@@ -86,7 +86,7 @@ def preparation_state(state):
 def actions_for(state, impedance=None):
     actions=_base_actions_for(state,impedance)
     if preparation_state(state):actions=actions+['abandon']
-    if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['delete_recording','retain_error_recording']
+    if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['delete_recording','retain_error_recording']+['qc_mode','usb_task_import']
     if state in ('device_confirm','idle','failed_wait','exhausted','ready'):actions=actions+['select_reference','switch_reference']
     return actions
 
@@ -128,8 +128,10 @@ def _base_actions_for(state, impedance=None):
 
 def snapshot_actions(snapshot):
     actions=actions_for(snapshot.get('state',''),snapshot.get('eeg_impedance'))
+    if snapshot.get('task_list',{}).get('manual_task_switch') and not snapshot.get('task_list',{}).get('can_switch'):
+        actions=[x for x in actions if x not in ('select_reference','switch_reference','reference_list')]
     if (snapshot.get('privacy',{}).get('required') or (snapshot.get('worker') or {}).get('recording_active')):
-        actions=[action for action in actions if action not in ('abandon','delete_recording','retain_error_recording','select_reference','switch_reference')]
+        actions=[action for action in actions if action not in ('abandon','delete_recording','retain_error_recording','select_reference','switch_reference','usb_task_import')]
     if snapshot.get('wrist_camera_settings',{}).get('can_change') is False:
         actions=[action for action in actions if action!='wrist_camera_settings']
     if (snapshot.get('state') in ('device_confirm','idle','failed_wait','exhausted')

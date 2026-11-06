@@ -53,6 +53,7 @@ sudo python3 scripts/install_pi_services.py --apply   # 安装配置，不自动
 脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
 脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
 脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
+脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
 现有 SD 卡不会被格式化；UUID 与挂载点不匹配会阻止录制。
 
 手机入口：`http://<Pi当前IP>:8765/phone`。热点 DHCP 变化后使用新 IP；
