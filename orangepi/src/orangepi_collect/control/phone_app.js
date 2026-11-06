@@ -192,18 +192,19 @@
      const entry=button(label,()=>chooseStream(item));entry.classList.add(qc.level==='ERROR'?'phone-qc-error':qc.level==='WARN'?'phone-qc-warn':'phone-qc-neutral');entry.dataset.stream=item.id;$('phone-list').append(entry);
     }
     $('phone-qc').hidden=false;qcStream='';qcOffset=0;await loadQC();
-    message((data.warnings || []).join('；'));
+    const impedance = data.impedance || {};
+    message([...(data.warnings || []), impedance.summary || '', ...(impedance.channels || []).map(c => c.label + ': ' + (c.value_kohm ?? '缺值') + ' kΩ')].join('；'));
    } catch (error) { report(error); }
   }
   function renderQC(data){
-   $('phone-qc-summary').textContent=data.unavailable?'本段未取得可读取的 QC 结果':(qcStream?({'emg_left':'左臂肌电','emg_right':'右臂肌电'}[qcStream]||qcStream)+'：':(data.scope==='emg_only'?'肌电即时质检（其余待主机检查）：':'本段所有检查：'))+'ERROR '+(data.error_count||0)+' 条 / WARN '+(data.warn_count||0)+' 条';
+   $('phone-qc-summary').textContent=data.unavailable?'本段未取得可读取的 QC 结果':(qcStream?(stream?.label||qcStream)+'：':'全部模态：')+'ERROR '+(data.error_count||0)+' 条 / WARN '+(data.warn_count||0)+' 条';
    const container=$('phone-qc-findings');container.replaceChildren();
    for(const finding of data.findings||[]){
     const row=document.createElement('article');row.className='phone-qc-finding '+(finding.level==='ERROR'?'phone-qc-error':'phone-qc-warn');
-    const head=document.createElement('b');head.textContent=finding.level+' · '+(finding.label||finding.modality||'会话')+' · '+(finding.title||(finding.check==='acquisition'?'采集进程':finding.check||'质量检查'));
-    const message=document.createElement('p');message.textContent=finding.reason||finding.message;
-    const detail=document.createElement('small');detail.textContent=[finding.field&&'字段 '+finding.field,Number.isFinite(finding.threshold)&&'阈值 '+finding.threshold,Number.isFinite(finding.observed)&&'实测 '+finding.observed,...(finding.spans||[]).slice(0,5).map(span=>(Number.isFinite(finding.offset_seconds)?'开录后 '+finding.offset_seconds.toFixed(2)+' 秒':'记录中的时间 '+span.t)+' / '+(span.dur??span.duration??0)+' 秒'+((span.msg||span.label)?' · '+(span.msg||span.label):''))].filter(Boolean).join('；');
-    row.append(head,message);if(finding.action){const action=document.createElement('p');action.textContent='处理建议：'+finding.action;row.append(action);}row.append(detail);container.append(row);
+    const head=document.createElement('b');head.textContent=finding.level+' · '+(finding.label||finding.modality||'会话')+' · '+(finding.check||'质量检查');
+    const message=document.createElement('p');message.textContent=finding.message;
+    const detail=document.createElement('small');detail.textContent=[finding.field&&'字段 '+finding.field,Number.isFinite(finding.threshold)&&'阈值 '+finding.threshold,Number.isFinite(finding.observed)&&'实测 '+finding.observed,...(finding.spans||[]).slice(0,5).map(span=>'时间 '+span.t+' / '+(span.dur??span.duration??0)+' 秒'+((span.msg||span.label)?' · '+(span.msg||span.label):''))].filter(Boolean).join('；');
+    row.append(head,message,detail);container.append(row);
    }
    if(!(data.findings||[]).length){const note=document.createElement('p');note.textContent=data.unavailable?'本段未保存可读取的 QC 报告。':'此筛选范围没有 WARN／ERROR 条目。';container.append(note);}
    qcNext=data.next_offset;$('phone-qc-previous').disabled=qcOffset===0;$('phone-qc-next').disabled=qcNext==null;
@@ -282,7 +283,7 @@
    $('phone-player').hidden = false; const video = item.kind === 'video';
    for(const id of ['phone-play','phone-back','phone-forward','phone-timeline'])$(id).disabled=!item.available;
    $('phone-replay-image').hidden = !video; $('phone-plot').hidden = video; $('phone-play').hidden = !video; $('phone-speed').hidden = !video;
-   $('phone-signal-options').hidden = video; $('phone-filter').disabled = true; $('phone-filter').textContent = '原始信号';
+   $('phone-signal-options').hidden = video; $('phone-filter').disabled = item.id !== 'eeg'; $('phone-filter').textContent = '原始信号';
    $('phone-back').textContent = video?'上一帧':'前一窗'; $('phone-forward').textContent = video?'下一帧':'后一窗';
    $('phone-stream-title').textContent = item.label;
    loadQC(0,item.id);

@@ -28,7 +28,10 @@ def main():
         assert hashlib.sha256(path.read_bytes()).hexdigest()==expected,'Changed source: '+row['path']
         if change:modified+=1
         verified+=1
-    release=json.loads((ROOT/'deployment/manifests/headring-common-20261106-v3.json').read_text(encoding='utf-8'))
+    pointer=ROOT/'deployment/manifests/current-release.json'
+    release_name=json.loads(pointer.read_text(encoding='utf-8'))['manifest'] if pointer.is_file() else 'headring-common-20261106-v3.json'
+    assert Path(release_name).name==release_name,'Invalid release manifest name'
+    release=json.loads((ROOT/'deployment/manifests'/release_name).read_text(encoding='utf-8'))
     for relative,expected in release['files'].items():
         assert hashlib.sha256((ROOT/relative).read_bytes()).hexdigest()==expected,'Fleet release drift: '+relative
     syntax=0

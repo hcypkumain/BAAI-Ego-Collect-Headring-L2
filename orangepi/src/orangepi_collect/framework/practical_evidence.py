@@ -79,7 +79,7 @@ def _gate_clock(root, filename, key):
 
 @dataclass(frozen=True)
 class PiTimingEvidence(BaseCheck):
-    """Per-series actual intervals from the recorded timestamps."""
+    """Per-series actual intervals; EEG fallback is explicitly host-batch timing."""
 
     def run(self, ctx):
         out=CheckOutput()
@@ -103,7 +103,26 @@ class PiTimingEvidence(BaseCheck):
             out.stats['available']=any(v.get('available') for v in out.stats['series'].values())
             if not out.stats['available']:out.stats['reason']='no_usable_registered_series'
             return out
-        out.stats['reason']='no_registered_continuous_series'
+        if Path(ctx.dir).name != 'eeg':
+            out.stats['reason']='no_registered_continuous_series'
+            return out
+        start=_gate_clock(Path(ctx.dir).parent,'start_gate.json','start_monotonic_ns')
+        stop=_gate_clock(Path(ctx.dir).parent,'stop_gate.json','stop_monotonic_ns')
+        host_window={'t0':start,'t1':stop} if start is not None and stop is not None and stop>=start else None
+        out.stats.update(clock_basis='host_monotonic_batch_read_clocks_not_hardware_sample_timing',
+                         window=({'t0':start/1e9,'t1':stop/1e9} if host_window else None))
+        for key in ('read_begin_monotonic_ns','arrival_monotonic_ns','sdk_received_monotonic_ns'):
+            values=ctx.arr(key)
+            if values is None:
+                facts={'available':False,'reason':'host_batch_clock_missing'}
+            else:
+                facts=_facts(values,host_window,nanoseconds=True,batch_clock=True)
+            facts['clock_basis']='host_monotonic_batch_read_clocks_not_hardware_sample_timing'
+            facts['window']=out.stats['window']
+            out.stats['series'][key]=facts
+        out.stats['available']=any(v.get('available') for v in out.stats['series'].values())
+        if not host_window:out.stats['window_reason']='start_stop_monotonic_gates_unavailable_or_invalid'
+        if not out.stats['available']:out.stats['reason']='no_usable_host_batch_clocks'
         return out
 
 

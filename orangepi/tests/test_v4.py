@@ -75,7 +75,7 @@ class ContinuousTests(unittest.TestCase):
    self.assertEqual(c.state,'idle')
  def test_all_guidance_categories_can_be_spoken(self):
   c=launcher.Controller.__new__(launcher.Controller);c.voice=Mock()
-  c.troubleshooting('emg eye hand_pose position ego_headband wristband cam marker')
+  c.troubleshooting('eeg emg eye hand_pose position ego_headband wristband cam marker')
   self.assertEqual(c.voice.say.call_count,9)
  def test_console_q_exits(self):
   keyboard=launcher.ConsoleKeyboard()

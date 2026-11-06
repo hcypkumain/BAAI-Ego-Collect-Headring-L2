@@ -1,19 +1,14 @@
 """Structured, read-only QC findings shared by summary and replay adapters."""
 import math
-import sys
-from pathlib import Path
-_common=Path(__file__).resolve().parents[1]/'common'
-if _common.is_dir():sys.path.insert(0,str(_common))
-from qc_explanations import explain_finding
 
 LEVELS={'INFO':0,'WARN':1,'ERROR':2}
 LABELS={'cam_ros_left':'头环前左','cam_ros_right':'头环前右','cam_ros_bleft':'头环后左','cam_ros_bright':'头环后右',
-        'cam_left_wrist':'左腕相机','cam_right_wrist':'右腕相机','cam_third':'第三视角','emg_left':'左臂肌电',
+        'cam_left_wrist':'左腕相机','cam_right_wrist':'右腕相机','cam_third':'第三视角','eeg':'脑电','emg_left':'左臂肌电',
         'emg_right':'右臂肌电','board_imu':'头环惯性','marker':'起止标记'}
 
 def summarize_qc(report):
     report=report if isinstance(report,dict) else {}
-    result={'scope':report.get('scope','full'),'level':str(report.get('level','UNKNOWN')),'error_count':0,'warn_count':0,'findings':[],'modalities':{}}
+    result={'level':str(report.get('level','UNKNOWN')),'error_count':0,'warn_count':0,'findings':[],'modalities':{}}
     def add(raw,stream):
         if not isinstance(raw,dict):return
         level=str(raw.get('level','INFO')).upper()

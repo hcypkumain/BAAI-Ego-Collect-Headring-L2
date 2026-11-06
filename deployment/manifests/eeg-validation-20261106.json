@@ -1,0 +1,35 @@
+{
+  "edition": "EEG",
+  "version": "headring-eeg-cp13-20261106-v1",
+  "python_tests": {
+    "framework": 50,
+    "hardware": 45,
+    "eeg": 24,
+    "total": 119
+  },
+  "screen_sync_scenarios": 17,
+  "recording_overlay": "passed",
+  "eeg_task_browser": {
+    "passed": true,
+    "errors": [],
+    "action": {
+      "action": "select_reference",
+      "value": {
+        "image_id": "b1",
+        "catalog_revision": 7,
+        "list_id": "task_b"
+      },
+      "revision": 17
+    },
+    "task_text": "任务B",
+    "new_reference_requested": true,
+    "session_preserved": true,
+    "impedance_preserved": true
+  },
+  "repository_and_secret_audit": "passed",
+  "javascript_syntax_files": 14,
+  "shell_syntax": "passed",
+  "live_release_files_verified": 120,
+  "station_configuration_and_calibrations_preserved": true,
+  "real_recording_started": false
+}

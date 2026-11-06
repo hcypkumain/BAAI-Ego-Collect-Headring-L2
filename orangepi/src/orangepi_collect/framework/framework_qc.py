@@ -29,6 +29,7 @@ from embodied_brain_collect.recorders.emg.timestamp_rebuild import rebuild
 from embodied_brain_collect.session.config import load_checker
 from embodied_brain_collect.stim.marker_codes import RUN_START,RUN_END
 from embodied_brain_collect.visualizers.qc_page import build_page,Options
+from eeg_qc import PiEegChecker,standardize_eeg
 from mpp_qc import video_backend
 from practical_evidence import PiTimingEvidence, PiVideoEvidence
 from capture_integrity import checks_for_stream
@@ -92,7 +93,7 @@ class BoardImuChecker(BaseChecker):
 
 
 PI_QC_STREAMS = frozenset(('cam_ros_left','cam_ros_right','cam_ros_bright','cam_ros_bleft',
-                         'board_imu','cam_left_wrist','cam_right_wrist','emg_left','emg_right'))
+                         'board_imu','cam_left_wrist','cam_right_wrist','emg_left','emg_right','eeg'))
 PI_ROS_STREAMS = frozenset(('cam_ros_left','cam_ros_right','cam_ros_bright','cam_ros_bleft','board_imu'))
 HEADBAND_QC_FILES = ('camera-camchain.yaml','camera_imu-camchain-imucam.yaml','camera_imu-imu.yaml')
 
@@ -509,10 +510,11 @@ def standardize(path):
             orientation_covariance=values('orientation_covariance_',list(map(str,range(9)))),
             angular_velocity_covariance=values('angular_velocity_covariance_',list(map(str,range(9)))),
             linear_acceleration_covariance=values('linear_acceleration_covariance_',list(map(str,range(9)))))
+    standardize_eeg(path,summary,atomic_npz)
     timestamps=standardize_marker(path,summary)
     old_meta=json.loads((path/'meta.json').read_text(encoding='utf-8')) if (path/'meta.json').exists() else {}
-    names={name:('WLEMGUV2A' if name.startswith('emg_') else 'Pi ROS IMU' if name=='board_imu' else 'Pi USB wrist camera' if name in ('cam_left_wrist','cam_right_wrist') else 'Pi ROS fisheye')
-           for name in summary if name.startswith(('cam_ros_','emg_','board_imu')) or name in ('cam_left_wrist','cam_right_wrist')}
+    names={name:('OmniBCI ADS1299' if name=='eeg' else 'WLEMGUV2A' if name.startswith('emg_') else 'Pi ROS IMU' if name=='board_imu' else 'Pi USB wrist camera' if name in ('cam_left_wrist','cam_right_wrist') else 'Pi ROS fisheye')
+           for name in summary if name.startswith(('cam_ros_','emg_','board_imu')) or name in ('cam_left_wrist','cam_right_wrist','eeg')}
     _write_pi_session_metadata(path,summary,timestamps,old_meta,names)
     return summary
 
@@ -567,7 +569,7 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None):
     count=max(1,min(16 if os.environ.get('ORANGEPI_HOST_QC')=='1' else 3,count))
     report=SessionReport(session_dir=str(root),window=window)
     report.findings.extend(Finding(**item) for item in inputs['findings'])
-    classes=(BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in framework.CHECKERS if c not in (CameraChecker,PiCameraChecker,BoardImuChecker) and c.__name__ != 'EegChecker')
+    classes=(PiEegChecker,BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in framework.CHECKERS if c not in (CameraChecker,PiCameraChecker,BoardImuChecker,PiEegChecker) and c.__name__ != 'EegChecker')
     def check(directory):
         cls=next((c for c in classes if directory.name.startswith(c.matches)),None)
         if cls is None:
@@ -613,7 +615,7 @@ def check_session(path,html=False,progress=None):
     import cv2
     cv2.setNumThreads(1)
     original=framework.CHECKERS
-    framework.CHECKERS=(BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in original if c not in (CameraChecker,PiCameraChecker,BoardImuChecker) and c.__name__ != 'EegChecker')
+    framework.CHECKERS=(PiEegChecker,BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in original if c not in (CameraChecker,PiCameraChecker,BoardImuChecker,PiEegChecker) and c.__name__ != 'EegChecker')
     try:
         cfg=load_checker()
         settings=performance()

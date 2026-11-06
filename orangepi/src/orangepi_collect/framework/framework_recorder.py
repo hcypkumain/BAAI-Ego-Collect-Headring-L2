@@ -21,6 +21,16 @@ from embodied_brain_collect.recorders.base import BaseRecorder,BaseRecorderConfi
 from framework_qc import atomic_json,standardize,check_session,performance
 
 
+def impedance_request(line):
+    """Bounded control envelope; measurement END is never the global STOP."""
+    if not isinstance(line,str) or not line.startswith('{') or len(line)>512:return None
+    try:value=json.loads(line)
+    except ValueError:return None
+    if (not isinstance(value,dict) or set(value)-{'command','request_id'}
+            or value.get('command') not in ('IMPEDANCE_START','IMPEDANCE_END','IMPEDANCE_REVIEW')
+            or not isinstance(value.get('request_id'),str) or not 0<len(value['request_id'])<=64):return None
+    return json.dumps(value)
+
 @dataclass
 class PiBundleConfig(BaseRecorderConfig):
     hardware_python: str = str(BASE/'.venvs/hardware/bin/python')
@@ -107,6 +117,10 @@ class PiBundleRecorder(BaseRecorder):
                 if command=='START':
                     committed=True;self._committed=True;commit_at=time.monotonic()
                 if command=='STOP':sent_stop=True
+            elif not committed and not sent_stop:
+                request=impedance_request(command)
+                if request is not None:
+                    self.process.stdin.write(request+'\n');self.process.stdin.flush()
         code=self.process.returncode
         path=Path(self.config.session_dir)
         summary_path=path/'capture_summary.json'

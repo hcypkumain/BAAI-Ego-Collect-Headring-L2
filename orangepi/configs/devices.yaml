@@ -65,4 +65,11 @@ wrist_cameras:
     fps: 30
     fourcc: MJPG
 
-# The current Pi acquisition entry point excludes EEG/impedance devices.
+# OmniBCI uses an independent Python 3.11 SDK owner managed by this controller.
+eeg:
+  enabled: true
+  # Temporary operator-selected policy: retain impedance results as advisory.
+  impedance_acceptance_policy: advisory
+  serial: ''  # Fill the local EEG USB serial/MAC before enabling this station.
+  filter_preset: general
+  # Fixed profile in eeg_settings.py: active CH1-8 FC3 C3 O1 Pz Oz O2 C4 FC4.

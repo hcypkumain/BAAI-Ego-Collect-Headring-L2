@@ -54,6 +54,7 @@ class ConsoleKeyboard:
 from keyboard_input import Keyboard
 from web_controls import WebControls
 from emg_insertion_controls import EmgInsertionControls
+from dashboard import impedance_allows_recording
 from reference_controls import ReferenceControlsMixin,reference_cli_queue
 
 def image_queue(selected=None):
@@ -121,18 +122,13 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
 
     def device_label(self,name,fallback):
         config=getattr(self,'session_devices',None) or devices()
+        if name=='eeg':return config.get('eeg',{}).get('label',fallback)
         for section in ('emg','wrist_cameras'):
             if name in config.get(section,{}):return config[section][name]['label']
         return fallback
 
     def error_voice(self, errors):
         text=' '.join(errors)
-        if '即时质检' in text:
-            # This is a saved-data verdict, not an unidentified device crash.
-            self.last_help=list(dict.fromkeys(getattr(self,'last_help',[])+list(errors)))
-            reasons=[str(item).split('处理建议：',1)[0] for item in errors[:2]]
-            self.voice.say('。'.join(reasons)+'。具体原因和处理建议已在录制结果中按左右侧显示。')
-            return
         labels=[]
         for key,label in [('emg_left','左臂肌电'),('emg_right','右臂肌电'),
                           ('cam_ros_bleft','后左相机'),('cam_ros_bright','后右相机'),
@@ -167,7 +163,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             category=module.slot_category(token)
             if category and category not in categories:categories.append(category)
         if 'serial' in text.lower() and 'emg' not in categories:categories.append('emg')
-        messages=[module.SLOT_GUIDES[category] for category in categories if category in module.SLOT_GUIDES]
+        messages=[('脑电数据已中断。请确认脑电帽电源和 USB 连接，再点击重新准备本段。'
+                   if category=='eeg' else module.SLOT_GUIDES[category]) for category in categories]
         if 'cam_ros' in text:messages.append('板载相机请同时检查 ROS 相机驱动服务。')
         if 'board_imu' in text:messages.append('请检查板载惯性传感器驱动服务是否持续发布数据。')
         if not messages:messages=['请查看当前会话日志中的错误详情，排查后点击重新准备。']
@@ -256,10 +253,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 reference_sha256=selection['asset']['sha256'],reference_selection=selection,
                 test=bool(self.smoke),stim=False,pygame=False,
                 device_config=resolved,selected_devices=list(self.selected_devices),storage_config=storage_paths.config(),
-                keyboard_flow='Touch workflow: prepare and view reference without time limit, manual camera check, return to preparation, separate formal start, 5-to-1 countdown, hold 3s to stop, save or retry same task',
+                keyboard_flow='Touch workflow: prepare and view reference without time limit, impedance, manual camera check, return to preparation, separate formal start, 5-to-1 countdown, hold 3s to stop, save or retry same task',
                 timestamp_note='Shared host start gate; camera ROS source stamps and EMG host arrival stamps retained. No hardware synchronization is claimed.')
-            from qc_deferred import load as qc_execution
-            metadata['qc_mode']=qc_execution(BASE)['mode']
             self.reference_set_raw_metadata(metadata)
             atomic_json(self.path/'meta.json',metadata)
             atomic_json(self.path/'reference_queue.json',self._reference_active['entry']['snapshot'])
@@ -315,6 +310,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if not self.worker or self.worker.poll() is not None or self.worker_status().get('state')!='ready':
             self.voice.say('设备尚未就绪，请先准备本段。')
             return False
+        if 'eeg' in (self.selected_devices or ()) and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
+            self.voice.say('请先结束阻抗检查、确认结果，并等待普通脑电采样恢复。')
+            return False
         checks=getattr(dashboard,'camera_checks',None)
         if checks is not None and not checks.approved():
             self.voice.say('请先完成全部相机同屏检查，并确认头环和腕部相机方向。')
@@ -345,6 +343,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.ui_publish(force=True)
 
     def _begin_after_privacy(self):
+        if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
+            self.voice.say('请先完成脑电阻抗检查，并确认检测已结束、设备配置已恢复。')
+            return
         if self.worker_status().get('state')!='ready':
             self.voice.say('设备尚未就绪，请等待准备完成后再点击开始采集。')
             return
@@ -363,6 +364,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             if self.worker.poll() is not None or self.worker_status().get('state')!='ready':
                 self.poll()
                 return
+            if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
+                self.state='ready';self.state_write()
+                self.voice.say('脑电阻抗检查状态已变化，请检查后再开始。')
+                return
             started=time.monotonic()
             self.countdown_status['remaining']=remaining
             self.countdown_status['tick_unix_ms']=round(time.time()*1000)
@@ -379,8 +384,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.keyboard.discard()
         interrupt=getattr(self.voice,'interrupt',None)
         if callable(interrupt):interrupt()
+        if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
+            self.state='ready';self.state_write();return
         # A cancellation or owner failure can arrive during the final countdown sleep.
-        # Recheck the worker immediately before START.
+        # Keep the impedance gate above, and recheck immediately before START.
         if self.quit:
             return
         if not self.worker or self.worker.poll() is not None or self.worker_status().get('state')!='ready':

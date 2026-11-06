@@ -1,9 +1,10 @@
-# BAAI Ego Collect · Headring L2
+# BAAI Ego Collect · 脑电采集版（CP13）
 
 基于 Orange Pi / RK3588 运行程序整理的手机采集项目，已同步 **2026-11-06** 最新采集程序及三台设备验证过的 `headring-common-20261106-v3` 公共模块。
 包含主采集框架、手机控制页、六路视频、肌电/IMU、任务 ZIP 导入、QC、云端上传及配套服务。
 本次版本的功能、质检规则、环境迁移和验证范围见 [11 月 6 日版本说明](docs/RELEASE_2026-11-06.md)。
-本分支维护肌电版本；脑电版本后续通过独立分支维护，不合并到当前采集入口。
+本分支 `feat/eeg-cp13-sync-20261106` 维护 13 号脑电版本；`main` 继续维护肌电版本。
+脑电、阻抗检查及原有通道/滤波协议保留，并合并公共 QC、肌电错误说明、任务切换和预览修复。详见 [脑电版更新说明](docs/EEG_RELEASE_2026-11-06.md)。
 
 | 路径 | 内容 |
 |---|---|
@@ -23,7 +24,7 @@
   当前配置输出为 1920×1200、30 fps；这不是对传感器原生最大分辨率的声明。
 - 两只 USB 腕相机使用独立的 USB 拓扑路径，当前配置 1920×1080、30 fps。
   实际保存尺寸和帧数会再核验；预览降画质不改变录制分辨率。
-- 板载 IMU 从 `/dev/icm20602` 获取；双臂肌电按开机插入顺序确认左右。当前 Pi 程序已停用脑电/阻抗采集入口。
+- 板载 IMU 从 `/dev/icm20602` 获取；双臂肌电按开机插入顺序确认左右。OmniBCI 脑电由独立 Python 3.11 SDK 进程采集，保留 CH1–8、250 Hz 及阻抗检查。
 - 保持现有采集模态，不额外录制麦克风音频；语音文件用于流程播报。
 - 每段手动开始，黑屏确认后倒计时。停止后等用户选择：确认保存才整理与 QC；重采会删除当前放弃段并重新准备同一任务。
 - 信号数据保留原始异常证据，不伪造硬件同步精度。已验证的稀疏肌电拼接修复保留原文件并重新执行原始框架检查，WARN 可继续，ERROR 保留。
@@ -38,15 +39,20 @@
 先阅读 [部署说明](docs/DEPLOYMENT.md)。仓库不包含整个操作系统镜像或完整 EgoRecord GUI。
 
 ```bash
-git clone https://github.com/hcypkumain/BAAI-Ego-Collect-Headring-L2.git
+git clone --branch feat/eeg-cp13-sync-20261106 https://github.com/hcypkumain/BAAI-Ego-Collect-Headring-L2.git
 cd BAAI-Ego-Collect-Headring-L2
-python3 tools/configure_station.py --collector-id L2-001
+python3 tools/configure_station.py --collector-id L3-001
 bash orangepi/scripts/setup_envs.sh
 python3 scripts/install_pi_services.py                # 先查看安装计划
 sudo python3 scripts/install_pi_services.py --apply   # 安装配置，不自动启停采集
 ```
 
 使用工作站自己的采集员/设备编号，并核对 `orangepi/configs/devices.yaml`、`storage.yaml`。
+脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
+脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
+脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
+脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
+脑电设备的本地 `eeg.serial` 必须按本机填写；仓库示例留空，升级现有站点时保留原 devices.yaml、标定和运行偏好。
 现有 SD 卡不会被格式化；UUID 与挂载点不匹配会阻止录制。
 
 手机入口：`http://<Pi当前IP>:8765/phone`。热点 DHCP 变化后使用新 IP；

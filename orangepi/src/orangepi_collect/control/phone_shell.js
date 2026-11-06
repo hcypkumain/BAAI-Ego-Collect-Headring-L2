@@ -34,8 +34,8 @@
    const tab=document.createElement('button');tab.textContent=label;tab.id='phone-tab-'+id;tab.setAttribute('role','tab');tab.setAttribute('aria-controls',page.id);tab.setAttribute('aria-selected','false');tab.onclick=()=>navigate(id,true);tabs[id]=tab;nav.append(tab);
   }
   const button=(label,fn)=>{const b=document.createElement('button');b.textContent=label;b.onclick=fn;return b;};
-  const step=document.querySelector('.step-card'),referenceCard=document.querySelector('.reference-card'),wristCard=$('wrists').closest('.card'),emgCard=$('emg-card');
-  const waves={emg_left:$('emg_left'),emg_right:$('emg_right')};
+  const step=document.querySelector('.step-card'),referenceCard=document.querySelector('.reference-card'),wristCard=$('wrists').closest('.card'),emgCard=$('emg-card'),eegCard=$('eeg').closest('.card');
+  const waves={eeg:$('eeg'),emg_left:$('emg_left'),emg_right:$('emg_right')};
   const referenceStatus=document.createElement('section');referenceStatus.id='phone-reference-status';referenceStatus.innerHTML='<p id="phone-reference-state-text"></p><small>ERROR 可保留但不算成功；WARN 不判失败。多个启用列表合并随机抽取，优先从未采集；重采保持同一张。</small><div class="phone-row"><button id="phone-pick-reference">自选任务与参考图</button><button id="phone-switch-reference">切换下一张</button><button id="phone-manage-current">管理已拍录像</button></div><div class="phone-row" id="phone-task-choice-row" hidden><label>任务列表 <select id="phone-task-choice" aria-label="选择任务列表"></select></label><button id="phone-use-task">使用此任务列表</button></div><div class="phone-row"><select id="phone-reference-choice" hidden aria-label="选择要采集的参考图"></select><button id="phone-use-reference" hidden>使用所选图</button><button id="phone-more-references" hidden>加载更多</button></div><p id="phone-reference-choice-message" class="phone-hint"></p>';referenceCard.querySelector('.reference').append(referenceStatus);
   let referenceChoiceRevision=0,referenceChoicesNext=null,referenceChoicesBusy=false,referenceChoiceGeneration=0;
   let referenceTaskRevision=0,referenceSelectionContext='';
@@ -85,7 +85,7 @@
    const card=document.createElement('div');card.className='card phone-native-metric';const small=document.createElement('small');small.textContent=label;const value=document.createElement('b');value.id='phone-metric-'+id;value.textContent='--';card.append(small,value);$('phone-native-metrics').append(card);
   }
   const signalTabs=document.createElement('div');signalTabs.className='phone-subnav';
-  for(const [id,label] of [['emg_left','左臂肌电'],['emg_right','右臂肌电']]){const b=button(label,()=>selectSignal(id));b.dataset.signal=id;signalTabs.append(b);}
+  for(const [id,label] of [['eeg','脑电 EEG'],['emg_left','左臂肌电'],['emg_right','右臂肌电']]){const b=button(label,()=>selectSignal(id));b.dataset.signal=id;signalTabs.append(b);}
   const waveHost=document.createElement('div');waveHost.id='phone-wave-host';waveHost.className='card';
   const waveHint=document.createElement('p');waveHint.id='phone-wave-hint';waveHint.className='phone-hint';
   pages.signals.append(signalTabs,waveHost,waveHint);
@@ -99,11 +99,12 @@
   $('phone-history').textContent='历史回看 · 各设备';$('phone-result-history').append($('phone-history'),$('phone-recordings'));
   pages.connections.innerHTML='<section class="card phone-connections-card"><h3>连接设置</h3><div id="phone-link-switch"></div><div id="phone-connection-detail"></div></section>';
   const workflowBar=document.createElement('div');workflowBar.className='phone-workflow-bar';workflowBar.append(button('返回总览',()=>navigate('overview',true)),button('更多控制',()=>openSettings()));
-  const workflowBody=document.createElement('div');workflowBody.id='phone-workflow-body';workflowBody.append(step,referenceCard,wristCard,emgCard);pages.workflow.append(workflowBar,workflowBody);
+  const workflowBody=document.createElement('div');workflowBody.id='phone-workflow-body';workflowBody.append(step,referenceCard,wristCard,emgCard,eegCard);pages.workflow.append(workflowBar,workflowBody);
   const referenceEntry=button('查看本段参考图',()=>openReference?.());referenceEntry.id='phone-open-reference';const abandon=button('放弃本次采集',()=>options.action('abandon'));abandon.id='phone-abandon';workflowBar.prepend(referenceEntry,abandon);
-  const switchTaskList=button('更换任务列表',()=>openTasks());switchTaskList.id='phone-switch-task-list';switchTaskList.hidden=true;workflowBar.prepend(switchTaskList);
   const setupProgress=document.createElement('ol');setupProgress.id='phone-setup-progress';setupProgress.setAttribute('aria-label','采集准备步骤');setupProgress.hidden=true;
-  for(const label of ['设备准备','查看参考图','开始采集']){const item=document.createElement('li');item.textContent=label;setupProgress.append(item);}pages.workflow.insertBefore(setupProgress,workflowBody);
+  for(const label of ['检查阻抗','查看参考图','开始采集']){const item=document.createElement('li');item.textContent=label;setupProgress.append(item);}pages.workflow.insertBefore(setupProgress,workflowBody);
+  const impedanceTabs=document.createElement('div');impedanceTabs.id='phone-impedance-tabs';impedanceTabs.className='phone-subnav';impedanceTabs.hidden=true;
+  for(const [id,label] of [['results','阻抗数值'],['waveform','脑电波形']]){const tab=button(label,()=>{impedanceView=id;updateWorkflow();options.refresh?.();});tab.dataset.impedanceView=id;impedanceTabs.append(tab);}pages.workflow.insertBefore(impedanceTabs,workflowBody);
   const setupDetails=document.createElement('details');setupDetails.id='phone-setup-details';setupDetails.hidden=true;const detailsLabel=document.createElement('summary');detailsLabel.textContent='更多操作与语音提示';setupDetails.append(detailsLabel);workflowBody.append(setupDetails);
   const startSummary=document.createElement('section');startSummary.id='phone-start-summary';startSummary.className='card';startSummary.hidden=true;startSummary.innerHTML='<h3>准备完成</h3><p id="phone-start-checks"></p><p class="phone-hint">确认佩戴与场景已准备好，再点击下方按钮开始正式采集。</p>';workflowBody.insertBefore(startSummary,setupDetails);
   const preflight=document.createElement('section');preflight.id='phone-preflight';preflight.className='card';preflight.innerHTML='<h3 id="phone-preflight-title">查看参考图</h3><p id="phone-preflight-note">请先准备本段。</p><div class="actions"><button id="phone-back-reference" hidden>返回查看参考图</button><button id="phone-check-cameras">我已看明白，检查相机</button><button id="phone-formal-start" class="primary" disabled hidden>开始正式采集</button></div><small id="phone-preflight-help">参考图可点击放大，不限查看时间。</small>';pages.workflow.append(preflight);
@@ -119,12 +120,12 @@
   const header=document.querySelector('header');header.querySelector('h1').textContent='采集控制终端';
   const stateLabel=document.createElement('small');stateLabel.id='phone-header-state';header.querySelector('.brand>div:last-child').append(stateLabel);
   const linkButton=button('连接',()=>navigate('connections',true));linkButton.id='phone-transport-status';header.append(linkButton,button('设置',()=>openSettings()));
-  let pageId='overview',lastState='',signalId='emg_left',snapshot=null,manualWrist=false,auxOpen=false,settingsOpen=false,fit=null;
+  let pageId='overview',lastState='',signalId='eeg',snapshot=null,manualWrist=false,auxOpen=false,settingsOpen=false,fit=null;
   let setupStage='',setupContext='',referenceReadKey='';
+  let impedanceView='results';
   let problemSignature='',lastPreparationCancel=null;
   let diagnostics=null;
   let liveEpoch=0,liveController=null,liveTimer=null,liveURL='',frameId='',selectedByUser=false,pendingFrame=null,painting=false;
-  let liveHandoff=Promise.resolve();
   let shownFrames=0,measuredAt=performance.now(),rate=0,currentCamera=$('phone-camera').value,lastPresentedAt=0;
   let wristController=null,wristKey='',wristVersion=0;const wristURLs=new Map();
   function stopWrists(){wristVersion++;wristController?.abort();wristController=null;wristKey='';for(const url of wristURLs.values())URL.revokeObjectURL(url);wristURLs.clear();}
@@ -140,21 +141,10 @@
   }
   const viewQuery=new URLSearchParams(location.search);
   if(cameraNames[viewQuery.get('camera')]){currentCamera=viewQuery.get('camera');selectedByUser=true;}
-  if(['emg_left','emg_right'].includes(viewQuery.get('signal')))signalId=viewQuery.get('signal');
+  if(['eeg','emg_left','emg_right'].includes(viewQuery.get('signal')))signalId=viewQuery.get('signal');
   if(['fast','balanced','source'].includes(viewQuery.get('quality')))$('phone-live-rate').value=viewQuery.get('quality');
   function safe(){return !document.hidden&&options.unlocked();}
-  function release(){
-   const identity=liveEpoch;
-   // A late release from an old selection must never tear down the new stream.
-   // All new readers wait for this barrier, including those started by update().
-   liveHandoff=liveHandoff.catch(()=>{}).then(async()=>{
-    if(identity!==liveEpoch)return;
-    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),2000);
-    try{const response=await fetch('/api/phone/preview/release',{headers:options.headers(),cache:'no-store',signal:controller.signal});await response.arrayBuffer();}
-    catch(error){}finally{clearTimeout(timeout);}
-   });
-   return liveHandoff;
-  }
+  function release(){fetch('/api/phone/preview/release',{headers:options.headers(),cache:'no-store'}).catch(()=>{});}
   function stopLive(clear=true){
    liveEpoch++;pendingFrame=null;clearTimeout(liveTimer);liveTimer=null;liveController?.abort();liveController=null;frameId='';
    if(clear){$('phone-live-image').hidden=true;$('phone-live-image').removeAttribute('src');if(liveURL)URL.revokeObjectURL(liveURL);liveURL='';$('phone-live-empty').textContent='等待相机画面';$('phone-live-empty').hidden=false;$('phone-live-stage').classList.remove('phone-live-stale');}
@@ -177,41 +167,28 @@
    }}catch(error){if(active())$('phone-live-stats').textContent='画面解码失败，正在同步';}finally{painting=false;}
   }
   async function readFrame(){
-   if(!active()||liveController)return;const identity=liveEpoch,controller=new AbortController();liveController=controller;let nextDelay=350,watchdog=null;
+   if(!active()||liveController)return;const identity=liveEpoch,controller=new AbortController();liveController=controller;let nextDelay=350;
    try{
-    await liveHandoff;
-    if(identity!==liveEpoch||!active()||controller.signal.aborted)return;
-    let receivedAt=performance.now();
-    // HTTP 200 without any further JPEG records used to leave liveController
-    // non-null forever. Reconnect a silent stream, not just HTTP failures/EOF.
-    watchdog=setInterval(()=>{if(identity===liveEpoch&&performance.now()-receivedAt>5000){clearInterval(watchdog);release();controller.abort();}},500);
     await global.readPhoneFrames('/api/phone/stream/'+currentCamera+'.jpg?quality='+$('phone-live-rate').value,{headers:options.headers(),signal:controller.signal,onFrame(meta,blob){
-     if(identity!==liveEpoch||!active()){controller.abort();return;}receivedAt=performance.now();nextDelay=0;pendingFrame={blob,meta,identity};paintLive();
-     }});
+     if(identity!==liveEpoch||!active()){controller.abort();return;}nextDelay=0;pendingFrame={blob,meta,identity};paintLive();
+    }});
    }catch(error){if(identity===liveEpoch&&active()&&error.name!=='AbortError'){$('phone-live-stats').textContent=error.message;$('phone-live-stage').classList.add('phone-live-stale');}nextDelay=350;}
-   finally{clearInterval(watchdog);if(liveController===controller)liveController=null;if(identity===liveEpoch)schedule(nextDelay);}
+   finally{if(liveController===controller)liveController=null;if(identity===liveEpoch)schedule(nextDelay);}
   }
 
   function restoreWaves(){for(const [id,node] of Object.entries(waves))if(node.parentElement!==waveParents[id])waveParents[id].append(node);}
   function selectSignal(id){
    signalId=id;restoreWaves();waveHost.append(waves[id]);
-   text($('phone-wave-hint'),'肌电单位：ADC counts · 20 ms 包络，尚未换算成电压；纵轴刻度与通道数值可查看。');
+   text($('phone-wave-hint'),id==='eeg'?'脑电单位：µV · 近 2 秒逐点波形；可切换原始电压与显示滤波，纵轴使用实际单位。':'肌电单位：ADC counts · 20 ms 包络，尚未换算成电压；纵轴刻度与通道数值可查看。');
    for(const b of signalTabs.children){const selected=String(b.dataset.signal===id);if(b.getAttribute('aria-pressed')!==selected)b.setAttribute('aria-pressed',selected);}
    options.drawSignal?.(id);
   }
   function selectCamera(id,user=true){
    selectedByUser=selectedByUser||user;currentCamera=id;$('phone-camera').value=id;stopLive();rate=shownFrames=0;measuredAt=performance.now();
-   for(const [name,b] of Object.entries(cameraButtons))b.setAttribute('aria-pressed',String(name===id));if(active())release();schedule();
+   for(const [name,b] of Object.entries(cameraButtons))b.setAttribute('aria-pressed',String(name===id));schedule();
   }
   function openSettings(){if(!safe())return;settingsOpen=true;settings.hidden=false;stopLive();}
   function updateWorkflow(){
-   const selectionContext=[snapshot?.session,snapshot?.task_list?.block_task_id,snapshot?.reference_image_state?.id].join('|');
-   if(selectionContext!==referenceSelectionContext){referenceSelectionContext=selectionContext;referenceChoiceGeneration++;referenceChoiceRevision=0;referenceChoicesNext=null;$('phone-reference-choice').replaceChildren();$('phone-reference-choice').hidden=true;$('phone-use-reference').hidden=true;$('phone-more-references').hidden=true;const task=$('phone-task-choice'),active=snapshot?.task_list?.block_task_id;if([...task.options].some(x=>x.value===active))task.value=active;}
-   $('phone-use-task').disabled=referenceChoicesBusy||!safe()||!snapshot?.actions?.includes('reference_list')||snapshot?.busy;
-   $('phone-task-choice').disabled=referenceChoicesBusy||!safe()||snapshot?.busy;
-
-
-   switchTaskList.hidden=!snapshot?.task_list?.manual_task_switch;switchTaskList.disabled=!safe()||!(snapshot?.actions||[]).includes('reference_list')||snapshot?.busy||options.pending?.();
    abandon.hidden=!snapshot?.actions?.includes('abandon')||['device_confirm','idle','exhausted'].includes(snapshot?.state);abandon.disabled=!safe()||snapshot?.busy||options.pending?.();referenceEntry.disabled=!safe()||!snapshot?.image||!['ready','preparing'].includes(snapshot?.state);
    text($('phone-reference-state-text'),global.describeReferenceState(snapshot?.reference_image_state)+((snapshot?.task_list?.tags||[]).length?' · 标签：'+snapshot.task_list.tags.join(' / '):''));
    $('phone-pick-reference').disabled=referenceChoicesBusy||!safe()||!snapshot?.actions?.includes('select_reference')||snapshot?.busy;
@@ -220,24 +197,30 @@
    $('phone-manage-current').disabled=!safe()||!['device_confirm','idle','failed_wait','exhausted','confirm_stop'].includes(snapshot?.state);
    const state=snapshot?.state||'',emg=state==='emg_manual'||state==='emg_pairing';manualWrist=state.startsWith('wrist_');
    const check=snapshot?.camera_check||{},ready=state==='ready'&&check.eligible===true;
-   const setup=['preparing','ready'].includes(state);
+   const setup=['preparing','ready'].includes(state),imp=snapshot?.eeg_impedance||{};
+   // Use the existing backend readiness gate; do not redefine impedance QC.
+   const impedanceDone=ready&&(!imp.required||imp.can_record===true&&!imp.active&&!imp.pending&&!imp.error);
    const context=[snapshot?.system?.controller_pid,snapshot?.session,snapshot?.image,check.context].join('|');
-   if(!setup||!ready||context!==setupContext)referenceReadKey='';
+   if(!setup||!impedanceDone||context!==setupContext)referenceReadKey='';
    setupContext=context;
-   const stage=setup?(!ready?'preparing':referenceReadKey===context?'start':'reference'):'';
+   const stage=setup?(!impedanceDone?'impedance':referenceReadKey===context?'start':'reference'):'';
    if(stage!==setupStage&&pageId==='workflow'){workflowBody.scrollTop=0;pages.workflow.scrollTop=0;}setupStage=stage;
    if(setup)pages.workflow.dataset.setupStage=stage;else delete pages.workflow.dataset.setupStage;
+   impedanceTabs.hidden=!(stage==='impedance'&&imp.required);
+   if(stage==='impedance')pages.workflow.dataset.impedanceView=impedanceView;else delete pages.workflow.dataset.impedanceView;
+   for(const tab of impedanceTabs.children)tab.setAttribute('aria-pressed',String(tab.dataset.impedanceView===impedanceView));
    setupProgress.hidden=!setup;setupDetails.hidden=!setup;startSummary.hidden=stage!=='start';
-   const current=stage==='preparing'?0:stage==='reference'?1:2;
+   const current=stage==='impedance'?0:stage==='reference'?1:2;
    [...setupProgress.children].forEach((item,index)=>{item.classList.toggle('is-complete',index<current);if(index===current)item.setAttribute('aria-current','step');else item.removeAttribute('aria-current');});
+   setupProgress.children[0].textContent=imp.required?'检查阻抗':'设备准备';
    // Keep the original controls and event handlers available, collapsed below
    // the focused step. Calibration and all non-preparation pages retain them.
    if(setup&&step.parentElement!==setupDetails)setupDetails.append(step);
    else if(!setup&&step.parentElement!==workflowBody){workflowBody.insertBefore(step,referenceCard);setupDetails.open=false;}
-   wristCard.hidden=!manualWrist;emgCard.hidden=!emg;referenceCard.hidden=setup?stage!=='reference':manualWrist||emg;
+   wristCard.hidden=!manualWrist;emgCard.hidden=!emg;eegCard.hidden=!(setup&&stage==='impedance'&&imp.required);referenceCard.hidden=setup?stage!=='reference':manualWrist||emg;
    if(pageId==='workflow')restoreWaves();
-   preflight.hidden=!setup||stage==='preparing';
-   $('phone-check-cameras').hidden=stage==='preparing'||stage==='start'&&!check.required;
+   preflight.hidden=!setup||stage==='impedance';
+   $('phone-check-cameras').hidden=stage==='impedance'||stage==='start'&&!check.required;
    text($('phone-check-cameras'),stage==='start'?'重新检查相机':check.required&&!check.confirmed?'我已看明白，检查相机':'我已看明白，下一步');
    $('phone-check-cameras').disabled=!safe()||!ready||!snapshot?.image||snapshot?.busy||options.pending?.();
    $('phone-back-reference').hidden=stage!=='start';$('phone-formal-start').hidden=stage!=='start';
@@ -245,7 +228,7 @@
    text($('phone-preflight-title'),stage==='start'?'可以开始采集':'查看任务参考图');
    text($('phone-preflight-note'),stage==='start'?'点击“开始正式采集”才进入黑屏倒计时。':'先看清任务内容、布置好场景，再继续下一步。');
    text($('phone-preflight-help'),stage==='start'?'需要再看任务时，可返回参考图。':'参考图可点击放大，不限查看时间；继续后不会自动开录。');
-   text($('phone-start-checks'),'设备准备已完成'+' · 参考图已确认'+(check.required?(check.confirmed?' · 相机方向已确认':' · 等待相机方向确认'):''));
+   text($('phone-start-checks'),(imp.required?(imp.impedance_acceptance_policy==='advisory'?'阻抗结果已确认':'阻抗检查已通过'):'设备准备已完成')+' · 参考图已确认'+(check.required?(check.confirmed?' · 相机方向已确认':' · 等待相机方向确认'):''));
   }
   function navigate(id,user=false){
    if(!pages[id]||(user&&!safe()))return;const previous=pageId;pageId=id;main.dataset.phonePage=id;document.body.classList.toggle('phone-fit-open',id==='fitcheck');
@@ -305,11 +288,11 @@
    overviewActions(value);text($('phone-home-hint'),(value.errors||[]).join('；')||(!value.actions?.some(a=>['confirm_devices','prepare','start','stop','keep','retry'].includes(a))?'请进入当前采集步骤，按提示继续设置或标定。':value.selected_devices?'本段已选 '+chosen.length+' 台；未选设备不参与本段。':'预览独立于录制；停止后还需完成收尾与保存确认。'));
    const result=global.describePhoneRecordingResult(value,label);
    text($('phone-result-badge'),result.title);$('phone-result-badge').classList.toggle('phone-qc-error',result.qc_level==='ERROR');$('phone-result-badge').classList.toggle('phone-qc-warn',result.qc_level==='WARN');text($('phone-result-text'),result.text);
-   text($('phone-wave-hint'),'肌电单位：ADC counts · 20 ms 包络，尚未换算成电压；纵轴刻度与通道数值可查看。');
-   for(const b of signalTabs.children)text(b,value.emg_calibration?.valid?(b.dataset.signal==='emg_left'?'左臂肌电':'右臂肌电'):(b.dataset.signal==='emg_left'?'肌电候选 A':'肌电候选 B'));
-   text($('phone-connection-detail'),'Pi 地址：'+location.origin+'\n\n连接：'+(safe()?'在线':'未连接或过期')+'\n\n权限：控制已启用\n\n认证：'+(options.requiresCode?'已配置访问码':'当前设备无需访问码')+'\n\n左右确认与肌电插序请进入总览的当前采集步骤。');
+   text($('phone-wave-hint'),signalId==='eeg'?'脑电单位：µV · 近 2 秒逐点波形；可切换原始电压与显示滤波，纵轴使用实际单位。':'肌电单位：ADC counts · 20 ms 包络，尚未换算成电压；纵轴刻度与通道数值可查看。');
+   for(const b of signalTabs.children)if(b.dataset.signal!=='eeg')text(b,value.emg_calibration?.valid?(b.dataset.signal==='emg_left'?'左臂肌电':'右臂肌电'):(b.dataset.signal==='emg_left'?'肌电候选 A':'肌电候选 B'));
+   text($('phone-connection-detail'),'Pi 地址：'+location.origin+'\n\n连接：'+(safe()?'在线':'未连接或过期')+'\n\n权限：控制已启用\n\n认证：'+(options.requiresCode?'已配置访问码':'当前设备无需访问码')+'\n\n左右确认、肌电插序与阻抗请进入总览的当前采集步骤。');
   }
-  $('phone-camera').onchange=()=>selectCamera($('phone-camera').value);$('phone-live-rate').onchange=()=>{stopLive();release();schedule();};$('phone-wrist-mode').onclick=openSettings;
+  $('phone-camera').onchange=()=>selectCamera($('phone-camera').value);$('phone-live-rate').onchange=()=>{stopLive();schedule();};$('phone-wrist-mode').onclick=openSettings;
   const initial=new URLSearchParams(location.search).get('page');navigate(pages[initial]?initial:'overview');selectCamera(currentCamera,false);
   const fitEntry=button('全部相机同屏检查',()=>navigate('fitcheck',true));fitEntry.id='phone-fit-entry';live.querySelector('.phone-preview-toolbar').append(fitEntry);
   fit=global.createCameraFitCheck?.({root:pages.fitcheck,active:()=>pageId==='fitcheck',...options,back:()=>navigate('workflow',true),refresh:options.refresh,confirmed:()=>navigate('workflow',true)});

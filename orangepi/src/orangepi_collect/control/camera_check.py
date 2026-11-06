@@ -18,19 +18,22 @@ class CameraChecks:
 
     def context(self):
         with self.owner.lock:
-            s=copy.deepcopy({k:self.owner.snapshot.get(k) for k in ('state','session','selected_devices','devices','worker','wrist_calibration')})
+            s=copy.deepcopy({k:self.owner.snapshot.get(k) for k in ('state','session','selected_devices','devices','worker','eeg_impedance','wrist_calibration')})
         selected=s.get('selected_devices');devices=s.get('devices') or []
         cameras=[d for d in devices if NAME.fullmatch(str(d.get('name',''))) and (d['name'] in selected if selected is not None else d.get('connected'))]
         order=list(LABELS)
         cameras.sort(key=lambda d:order.index(d['name']) if d['name'] in order else len(order))
         if len(cameras)>12:raise CameraCheckError('启用的相机数量超过检查页上限')
-        worker=s.get('worker') or {}
+        imp=s.get('eeg_impedance') or {};worker=s.get('worker') or {}
         raw=[s.get('session'),worker.get('pid'),[(d['name'],d.get('config')) for d in cameras],
-             s.get('wrist_calibration')]
+             imp.get('measurement_generation'),imp.get('reviewed_at'),imp.get('completed_at'),s.get('wrist_calibration')]
         key=hashlib.sha256(json.dumps(raw,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         p=self.owner.privacy.snapshot()
         visible=p.get('phase')=='idle' and p.get('stop_confirmed') is True and not worker.get('recording_active')
         eligible=visible and s.get('state')=='ready' and worker.get('state')=='ready'
+        if eligible and imp.get('required'):
+            from dashboard import impedance_allows_recording
+            eligible=impedance_allows_recording(imp)
         return key,s,cameras,visible,eligible
 
     def status(self):

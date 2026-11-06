@@ -1,7 +1,7 @@
 """Short display leases; affects derived previews only, never raw capture."""
 import json,os,threading,time
 from pathlib import Path
-SIGNALS=frozenset(('emg_left','emg_right'))
+SIGNALS=frozenset(('eeg','emg_left','emg_right'))
 CAMERAS=frozenset(('cam_left_wrist','cam_right_wrist','cam_ros_left','cam_ros_right','cam_ros_bleft','cam_ros_bright'))
 
 class DisplayDemand:

@@ -196,7 +196,7 @@ def apply_policy(report, config=None):
     """Return (effective_report, audit), without mutating the original report.
 
     Only positively verified timing/full-frame evidence can lower raw ERROR.
-    Unknown ERROR and required format/marker findings remain ERROR.
+    Unknown ERROR and required impedance/format/marker findings remain ERROR.
     Full-frame black or actual long no-data intervals may raise raw WARN/INFO.
     """
     if config is None:

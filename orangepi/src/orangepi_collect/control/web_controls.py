@@ -8,8 +8,9 @@ import tempfile
 import time
 import uuid
 from project_paths import BASE, SRC, devices
-from dashboard import Dashboard, SAFE, actions_for
+from dashboard import Dashboard, SAFE, actions_for, impedance_presentation
 import recording_review
+from eeg_settings import PRESETS
 from wrist_calibration import SLOTS
 from emg_calibration import SLOTS as EMG_SLOTS
 import wrist_camera_settings as wrist_settings
@@ -218,9 +219,11 @@ class WebControls:
             emg_serial_roles=emg_roles,emg_calibration=emg_status,emg_assignment=emg_assignment,
             emg_pairing=getattr(self,'emg_pairing_status',lambda:None)(),
             headband_calibration=calibration,
-            qc_execution=__import__('qc_deferred').load(BASE),
+            eeg_config=cfg.get('eeg',{}),eeg_filter_presets=PRESETS,
             wrist_camera_settings=self.wrist_settings_status(),
             selected_devices=self.selected_devices,worker=worker,
+            eeg_impedance=impedance_presentation(self.state, self.selected_devices, worker,
+                getattr(self,'worker',None) is not None and self.worker.poll() is None),
             last_voice=getattr(self.voice,'last_text',''),errors=notices,
             recording_since=getattr(self,'recording_since',None),
             keyboard_names=getattr(keyboard,'names',[]),storage=storage,
@@ -339,12 +342,13 @@ class WebControls:
         if job:
             error=None
             try:
-                allowed=list(actions_for(self.state))
-                if getattr(self,'reference_can_switch_list',self.reference_can_change)():allowed.append('reference_list')
+                impedance = self.worker_status().get('eeg_impedance', {}) if 'eeg' in (getattr(self,'selected_devices',None) or ()) else dict(required=False)
+                allowed=list(actions_for(self.state,impedance))
+                if getattr(self,'reference_can_change',lambda:False)():allowed.append('reference_list')
                 if job['revision']!=getattr(self,'ui_revision',0) or job['action'] not in allowed:
                     raise ValueError('流程已经变化，本次点击未执行，请重新选择')
                 action=job['action']
-                if action not in ('volume','wrist_camera_settings'):
+                if action not in ('volume','eeg_filter','wrist_camera_settings'):
                     interrupt=getattr(self.voice,'interrupt',None)
                     if callable(interrupt):interrupt()
                 if action=='wrist_camera_settings':
@@ -352,7 +356,7 @@ class WebControls:
                     if 'value' not in job or (value is not None and type(value) is not bool):
                         raise ValueError('无效的腕部相机帧率选项')
                     if not self.wrist_settings_available():raise ValueError('设备正在采集或交接，暂不可更改腕部相机设置')
-                if action in ('rescan','calibrate_wrist','calibrate_emg','wrist_camera_settings'):
+                if action in ('rescan','calibrate_wrist','calibrate_emg','eeg_filter','wrist_camera_settings'):
                     self.release_prepared();self.stop_preview()
                 if action=='abandon':
                     self.abandon_preparation()
@@ -364,8 +368,11 @@ class WebControls:
                     self.select_reference_image(job.get('value'),next_image=action=='switch_reference')
                 elif action=='reference_list':
                     self.select_reference_list(job['value'])
-                elif action=='usb_task_import':
-                    self.start_usb_task_import(job['value'])
+                elif action in ('impedance_start','impedance_end','impedance_review'):
+                    command = {'impedance_start':'IMPEDANCE_START','impedance_end':'IMPEDANCE_END',
+                               'impedance_review':'IMPEDANCE_REVIEW'}[action]
+                    self.command(json.dumps(dict(command=command,request_id=uuid.uuid4().hex)))
+                    self.state_write()
                 elif action=='wrist_camera_settings':
                     with wrist_settings.preference_lock(BASE),wrist_settings.capture_guard(BASE):
                         self.wrist_camera_last_reports=wrist_settings.configure_devices(devices(),value)
@@ -373,9 +380,13 @@ class WebControls:
                         self.web_config=devices()
                     self.wrist_camera_last_change=dict(ok=True,error=None,time=time.time(),devices=self.wrist_camera_last_reports)
                     self.state_write()
-                elif action=='qc_mode':
-                    if getattr(self,'worker',None):raise ValueError('请在新一段准备前切换质检模式')
-                    __import__('qc_deferred').save(BASE,job['value']);self.state_write()
+                elif action=='eeg_filter':
+                    if job.get('value') not in PRESETS:raise ValueError('无效的脑电滤波选项')
+                    from eeg_settings import apply as apply_eeg
+                    path=BASE/'runtime/eeg_preferences.json';temp=path.with_suffix('.json.tmp')
+                    temp.write_text(json.dumps({'filter_preset':job['value']}));temp.replace(path)
+                    self.web_config=apply_eeg(getattr(self,'web_config',{}) or devices(),BASE)
+                    self.state_write()
                 elif action=='rescan':
                     if self.scan_devices() is False:raise ValueError(self.last_help[0])
                 elif action=='calibrate_wrist':

@@ -27,7 +27,7 @@ class DiagnosticTests(unittest.TestCase):
             'privacy':{'instance':'controller','generation':0,'phase':'idle','required':False,'stop_confirmed':True}}
         self.owner=SimpleNamespace(lock=threading.Lock(),snapshot={'state':'device_confirm','devices':[
             {'name':'cam_ros_left','label':'头环前左','connected':True,'config':{'topic':'/fisheye/left/image_raw/compressed'}},
-            {'name':'emg_right','connected':False,'config':{'port':'/dev/missing'}}],
+            {'name':'eeg','connected':False,'config':{'port':'/dev/missing'}}],
             'worker':{},'selected_devices':['cam_ros_left'],'errors':[]},preview=self.preview,review_root=self.review)
         self.owner.privacy=Mock();self.owner.privacy.snapshot.side_effect=lambda:self.state['privacy'].copy()
         self.owner.display_state=lambda:self.state.copy()
@@ -87,13 +87,13 @@ class DiagnosticTests(unittest.TestCase):
         value=self.diag.snapshot();self.assertIn('超时',value['kernel_log_note']);self.assertEqual(value['usb']['warnings'],[])
 
     def test_preview_files_are_summarized_without_raw_samples(self):
-        (self.preview/'emg_right.json').write_text(json.dumps({'time':99,'count':25,'trace':[['sensitive-raw']],'rows':[['raw']],'units':'uV'}))
-        value=self.diag.snapshot();self.assertEqual(value['signals']['emg_right']['age_seconds'],1)
-        self.assertNotIn('trace',value['signals']['emg_right']);self.assertNotIn('sensitive-raw',json.dumps(value))
+        (self.preview/'eeg.json').write_text(json.dumps({'time':99,'count':25,'trace':[['sensitive-raw']],'rows':[['raw']],'units':'uV'}))
+        value=self.diag.snapshot();self.assertEqual(value['signals']['eeg']['age_seconds'],1)
+        self.assertNotIn('trace',value['signals']['eeg']);self.assertNotIn('sensitive-raw',json.dumps(value))
 
     def test_export_has_manifest_qc_and_no_secrets_images_or_raw_signals(self):
         (self.review/'qc_report.json').write_text(json.dumps({'level':'WARN','api_key':'secret_qc','nonce':'secret_nonce'}))
-        (self.review/'frame.jpg').write_bytes(b'sensitive-image');(self.review/'emg_right.bin').write_bytes(b'sensitive-raw')
+        (self.review/'frame.jpg').write_bytes(b'sensitive-image');(self.review/'eeg.bin').write_bytes(b'sensitive-raw')
         self.runner.return_value.stdout=b'normal log\npassword=secret_password\nX-Access-Token: secret_token\n'
         before={str(p.relative_to(self.root)):p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
         payload=self.diag.bundle(self.diag.snapshot())
