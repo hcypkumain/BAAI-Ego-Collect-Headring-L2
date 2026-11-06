@@ -169,7 +169,7 @@ class DeviceDiagnostics:
                 device['preview_age_seconds']=round(age,3) if age is not None else None
                 device['preview_fresh']=age is not None and 0<=age<3
         signals={}
-        for name in ('eeg','emg_left','emg_right'):
+        for name in ('emg_left','emg_right'):
             raw=read_small(self.owner.preview/(name+'.json'),192*1024)
             if raw is None:signals[name]={'available':False};continue
             try:

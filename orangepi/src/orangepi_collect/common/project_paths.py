@@ -15,12 +15,14 @@ def devices():
     if snapshot:
         selection = json.loads(Path(snapshot).read_text(encoding='utf-8'))
         if 'device_config' in selection:
-            return selection['device_config']
-    from eeg_settings import apply as apply_eeg
+            config = selection['device_config']
+            config.pop('eeg', None)
+            return config
     from device_discovery import discover
     from wrist_calibration import apply
     from emg_calibration import apply as apply_emg
     from wrist_camera_settings import apply as apply_wrist_settings
-    config = apply_eeg(yaml.safe_load((BASE/'configs/devices.yaml').read_text(encoding='utf-8')), BASE)
+    config = yaml.safe_load((BASE/'configs/devices.yaml').read_text(encoding='utf-8'))
+    config.pop('eeg', None)
     config = apply(discover(config, BASE), BASE)
     return apply_wrist_settings(apply_emg(config, BASE), BASE)

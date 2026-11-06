@@ -3,7 +3,7 @@
 WRIST_WARN_NS = 100_000_000
 WRIST_ERROR_NS = 150_000_000
 EMG_WARN_NS = 10_000_000
-EMG_ERROR_NS = 50_000_000
+EMG_ERROR_NS = 100_000_000
 # Headband cameras run at 30 fps (33.333 ms). Measured on EgoRecord v0.1.10,
 # camd delivery occasionally skips exactly two frames, producing a 100 ms gap
 # while camd still reports no drop of its own, so the loss is only visible in

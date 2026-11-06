@@ -47,8 +47,7 @@ def camera_publish_interval(name):
     return (WRIST_PUBLISH_INTERVAL if name in ('cam_left_wrist', 'cam_right_wrist')
             else HEADBAND_PUBLISH_INTERVAL)
 EMGS = ('emg_left', 'emg_right')
-EEGS = ('eeg',)
-SIGNALS = EMGS + EEGS
+SIGNALS = EMGS
 STREAMS = CAMERAS + SIGNALS
 
 
@@ -185,47 +184,6 @@ class Publisher:
             if now >= legacy_at:
                 self._publish_once()
                 legacy_at = time.monotonic() + FILE_PUBLISH_PERIOD
-
-    def eeg(self, values, valid, labels, preset, wall, *, sample_indices=None,
-            generation=None, raw_values=None, mode='eeg', adc_counts=None):
-        if not self.directory: return
-        if self.demand is not None and 'eeg' not in self.demand.signals:return
-        bounds = []
-        for ch in range(8):
-            column = [float(row[ch]) for row, ok in zip(values, valid) if ok and math.isfinite(float(row[ch]))]
-            bounds.append([min(column), max(column)] if column else [None, None])
-        # A bounded, derived 250Hz trace makes the 31.25Hz test excitation
-        # visible. Never alter the raw recorder or the impedance estimator.
-        trace=[];count=len(values);start=max(0,count-500)
-        adc_bounds=[]
-        if adc_counts is not None:
-            for ch in range(8):
-                column=[int(row[ch]) for row,ok in zip(adc_counts,valid) if ok and math.isfinite(float(row[ch]))]
-                adc_bounds.append([min(column),max(column)] if column else [None,None])
-        for i in range(start,count):
-            def channel_values(source):
-                return [round(float(source[i][ch]),3) if bool(valid[i]) and math.isfinite(float(source[i][ch])) else None for ch in range(8)]
-            trace.append([round(wall-(count-1-i)/250.,6),channel_values(values),
-                channel_values(raw_values) if raw_values is not None else None,
-                int(sample_indices[i]) if sample_indices is not None else None])
-        if not self.lock.acquire(False):
-            self.skipped_updates['eeg'] += 1
-            return
-        try:
-            item = self.signals.setdefault('eeg', dict(rows=collections.deque(maxlen=20), count=0, updated=wall))
-            previous=item.get('metadata',{})
-            if (previous.get('mode'),previous.get('generation'),previous.get('filter_preset'))!=(mode,generation,preset):
-                item['rows'].clear();item['trace']=collections.deque(maxlen=500)
-            item.setdefault('trace',collections.deque(maxlen=500)).extend(trace)
-            item['count'] += len(values); item['updated'] = wall
-            item['rows'].append([wall, bounds])
-            item['metadata'] = dict(units='uV', envelope_ms=100, channel_labels=list(labels),
-                physical_channels=list(range(1, 9)), filter_preset=preset, disabled_channels=[],
-                mode=mode,generation=generation,sample_rate_hz=250,
-                adc_count_bounds=adc_bounds or None,adc_bounds_scope='latest_preview_batch',
-                trace_format=['unix_seconds','display_uv','raw_uv_or_null','sample_index_or_null'])
-        finally:
-            self.lock.release()
 
     def close(self):
         self.stop.set()

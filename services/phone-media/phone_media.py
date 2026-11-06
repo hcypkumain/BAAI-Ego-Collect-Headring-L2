@@ -46,7 +46,10 @@ def encode_phone_preview(raw, quality='fast'):
     if quality == 'source':return raw
     if quality not in ('fast','balanced'):raise ValueError('Unknown phone quality')
     from PIL import Image
-    bound=(960,600) if quality=='fast' else (1280,800)
+    # The hotspot can stall on ~90 KB frames even with a strong Wi-Fi signal.
+    # Keep the default display profile light; balanced/source retain their
+    # existing resolution and bytes. This never changes the recorded video.
+    bound=(480,300) if quality=='fast' else (1280,800)
     with Image.open(BytesIO(raw)) as image:
         if (image.format!='JPEG' or max(image.size)>MAX_DIMENSION or
                 image.width*image.height>MAX_PIXELS):raise ValueError('Invalid source JPEG')
@@ -58,7 +61,7 @@ def encode_phone_preview(raw, quality='fast'):
         image.thumbnail(target,getattr(Image,'Resampling',Image).BILINEAR)
         output=BytesIO()
         if image.mode!='RGB':image=image.convert('RGB')
-        image.save(output,'JPEG',quality=82,subsampling=2,optimize=False)
+        image.save(output,'JPEG',quality=65 if quality=='fast' else 82,subsampling=2,optimize=False)
         return output.getvalue()
 
 
@@ -430,6 +433,7 @@ class PreviewHTTPServer(ThreadingMixIn, HTTPServer):
         self.replay = None
         self.slots = threading.BoundedSemaphore(3)
         self.stream_slot=threading.BoundedSemaphore(2)
+        self.preview_stream_epoch=0
         self.overloaded = 0
         super().__init__(address, PreviewHandler)
 
@@ -520,6 +524,7 @@ class PreviewHandler(BaseHTTPRequestHandler):
             value['http_overloaded'] = self.server.overloaded
             value['phone_source_preview'] = self.server.phone_core is not None
             value['phone_continuous_source']=True
+            value['phone_stream_takeover']=True
             if self.server.phone_core is not None:
                 value['phone_preview'] = self.server.phone_core.health()
             self.send(200, value)
@@ -538,14 +543,22 @@ class PreviewHandler(BaseHTTPRequestHandler):
         if url.path.startswith('/phone/stream/'):
             name=url.path[len('/phone/stream/'):];query=parse_qs(url.query,keep_blank_values=True);quality=query.get('quality',['fast'])[0];core=self.server.phone_core
             if core is None or name not in {n+'.jpg' for n in CAMERAS} or set(query)-{'quality'} or any(len(v)!=1 for v in query.values()) or quality not in ('fast','balanced','source'):self.send(400);return
-            if not self.server.stream_slot.acquire(False):self.send(429);return
+            # A refreshed/switching viewer must be able to retire the previous
+            # stream even when both old slots are waiting for camera frames.
+            with self.server.phone_profile_lock:
+                self.server.preview_stream_epoch+=1
+                stream_epoch=self.server.preview_stream_epoch
+                if getattr(core,'phone_quality','fast')!=quality:core.release();core.phone_quality=quality
+                generation=core.select(name[:-4])
+            acquired=False
             try:
-                with self.server.phone_profile_lock:
-                    if getattr(core,'phone_quality','fast')!=quality:core.release();core.phone_quality=quality
-                    generation=core.select(name[:-4])
+                acquired=self.server.stream_slot.acquire(timeout=.4)
+                if not acquired:self.send(429);return
+                if stream_epoch!=self.server.preview_stream_epoch:self.send(409);return
                 begin(self);after='';deadline=time.monotonic()+20;last_sent=time.monotonic()
-                while time.monotonic()<deadline:
+                while time.monotonic()<deadline and stream_epoch==self.server.preview_stream_epoch:
                     status,body,frame=core.frame(name[:-4],generation,after,150)
+                    if stream_epoch!=self.server.preview_stream_epoch:break
                     if status==304:continue
                     if status==503:
                         with core.condition:valid=core.selected==name[:-4] and core.generation==generation
@@ -554,7 +567,8 @@ class PreviewHandler(BaseHTTPRequestHandler):
                     if status!=200:break
                     self.wfile.write(packet(dict(frame_id=frame,server_ms=round(core.encode_ms,2)),body));after=frame;last_sent=time.monotonic()
             except (OSError,ValueError,RuntimeError):pass
-            finally:self.server.stream_slot.release()
+            finally:
+                if acquired:self.server.stream_slot.release()
             return
         if url.path.startswith('/phone/preview/'):
             core = self.server.phone_core

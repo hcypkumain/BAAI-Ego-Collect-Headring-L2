@@ -223,10 +223,6 @@ def main(config):
                 print('PREVIEW '+name+': '+str(exc),flush=True)
         for name,item in config.get('emg',{}).items():
             t=threading.Thread(target=serial_reader,args=(name,item),daemon=True);t.start();threads.append(t)
-        if config.get('eeg',{}).get('enabled') and config['eeg'].get('discovery',{}).get('present'):
-            from eeg_bridge import EegProcess
-            try:sources.append(EegProcess(config['eeg']))
-            except Exception as exc:print('PREVIEW eeg: '+str(exc),flush=True)
         # Sleep only for the time left in the round. A fixed 50 ms pause used to
         # be added on top of each round, and because PREVIEW_INTERVAL is measured
         # from the previous round's start the two did not overlap: rounds of

@@ -104,7 +104,7 @@ def reference_cli_queue(base,project,ledger,selected=None):
     catalog=ReferenceCatalog(base,project=project)
     catalog.import_legacy(_legacy_paths(project,ledger))
     preferences=_preferences(base)
-    identifier='all' if selected else preferences['selected_list_id']
+    identifier='all' if selected and not catalog.single_list_mode else preferences['selected_list_id']
     snapshot=catalog.freeze_list(identifier,catalog.revision,include_completed=True)
     completed=set(_completed_paths(project,ledger));first=_first_image_index(snapshot,selected,project)
     return [Path(project)/item['relative_path'] for index,item in enumerate(snapshot['items'])
@@ -127,17 +127,25 @@ class ReferenceControlsMixin:
         self._deferred_catalog_revision=None
         self._reference_task=dict(id='all',name='参考图列表',total=0,remaining=0,position=0,catalog_revision=0)
         self.images=[];self.selected_image=None
+        self.usb_task_importer=None
         try:
+            from usb_task_import import recover_replace
+            recover_replace(BASE,PROJECT)
             from recording_store import RecordingStore
             self.recording_store=RecordingStore(BASE,PROJECT,ledger)
             self.recording_store.recover()
             self.reference_catalog=ReferenceCatalog(BASE,project=PROJECT)
+            from task_block_sampling import TaskBlocks
+            settings=self.reference_catalog.task_block_policy
+            self._reference_task_blocks=TaskBlocks(BASE,settings) if settings else None
             self.reference_catalog.import_legacy(_legacy_paths(PROJECT,ledger))
             self._reference_preferences=_preferences(BASE)
             self.collector_id=self._reference_preferences['collector_id']
             identifier=self._reference_preferences['selected_list_id']
             if selected_image and (explicit_image or identifier=='all'):
-                self._reference_cli_image=selected_image;self._reference_cli_force=True;identifier='all';self.selected_image=selected_image
+                self._reference_cli_image=selected_image;self._reference_cli_force=True
+                if not self.reference_catalog.single_list_mode:identifier='all'
+                self.selected_image=selected_image
             self._reference_completed=_completed_paths(PROJECT,ledger)
             self.refresh_reference_histories()
             snapshot=self.reference_catalog.freeze_list(identifier,self.reference_catalog.revision,include_completed=True)
@@ -150,11 +158,89 @@ class ReferenceControlsMixin:
             self.reference_access=ReferenceAccess(self.reference_credentials,collector_provider=lambda:self.collector_id)
         except Exception as error:
             self.reference_access_error='图片管理入口暂不可用：'+str(error)
+        if self.reference_catalog is not None:
+            from usb_task_import import UsbTaskImporter
+            self.usb_task_importer=UsbTaskImporter(BASE,PROJECT,self.reference_catalog)
+
+    def start_usb_task_import(self,value):
+        privacy=self.dashboard.privacy.snapshot()
+        if (not self.reference_can_change() or privacy.get('required')
+                or privacy.get('stop_confirmed') is not True or privacy.get('phase')!='idle'):
+            raise ValueError('请先结束或放弃当前准备/采集，再替换任务库')
+        if self.usb_task_importer is None:raise ValueError('U盘导入暂未就绪')
+        self.usb_task_importer.start(value)
+        self._usb_import_previous_state=self.state
+        self.state='usb_importing';self.state_write()
+
+    def poll_usb_task_import(self):
+        manager=getattr(self,'usb_task_importer',None)
+        if manager is None or self.state!='usb_importing':return
+        state=manager.status()['state']
+        if state=='ready':
+            try:
+                preferences=manager.commit()
+                self._reference_preferences=preferences
+                self._reference_retry=None;self._reference_manual_id=None
+                self._reference_cli_image=None;self._reference_cli_force=False
+                self.selected_image=None;self.image=None
+                self.reference_error=None;self._reference_preferences_error=None
+                self.reference_refresh(force=True)
+            except Exception as error:
+                pending=manager.root/'pending.json'
+                if pending.exists():
+                    manager.update(state='needs_recovery',error=str(error),message='任务库提交结果待恢复，暂时禁止采集：'+str(error))
+                    self.state='usb_import_recovery';self.state_write();return
+                manager.update(state='failed',error=str(error),message='旧列表未替换：'+str(error))
+            state=manager.status()['state']
+        if state in ('complete','failed'):
+            self.state=getattr(self,'_usb_import_previous_state','device_confirm')
+            if self.state=='exhausted' and self.images:self.state='idle'
+            self.state_write()
 
     def reference_can_change(self):
         return (getattr(self,'state',None) in SAFE_STATES and getattr(self,'worker',None) is None
                 and not getattr(self,'quit',False) and getattr(self,'reference_catalog',None) is not None
                 and getattr(self,'_reference_preferences',None) is not None)
+
+    def reference_can_switch_list(self):
+        from manual_reference import can_select
+        return can_select(self)
+
+    def _select_task_block_list(self,value):
+        blocks=self._reference_task_blocks
+        if not self.reference_can_switch_list():raise ValueError('请先结束正式采集并处理结果，再更换列表')
+        if blocks.size!='all':raise ValueError('当前分组模式仍按原规则自动切换')
+        if (not isinstance(value,dict) or set(value)!={'list_id','catalog_revision'}
+                or not valid_id(value['list_id']) or type(value['catalog_revision']) is not int
+                or not 0<=value['catalog_revision']<=9007199254740991):raise ValueError('参考图列表选择无效')
+        identifier=value['list_id']
+        if identifier not in blocks.ids:raise ValueError('请选择本机场景中的具体任务列表')
+        # Check the target and the full enabled scene before releasing any preparation.
+        self.reference_catalog.freeze_list(identifier,value['catalog_revision'],include_completed=True)
+        snapshot=self.reference_catalog.freeze_list('pool',value['catalog_revision'],include_completed=True)
+        completed=_completed_paths(self._reference_project,self._reference_ledger)
+        candidates=[item for item in snapshot['items'] if any(row['id']==identifier for row in item.get('source_lists',[]))]
+        if not candidates:raise ValueError('此列表未启用，请先勾选该列表参与抽取')
+        if all(item['relative_path'] in set(completed) for item in candidates):raise ValueError('这个列表已完成，请选择其他未完成列表')
+        if blocks.value['current_task']==identifier:
+            self._update_reference_task();self.state_write();return
+        if getattr(self,'worker',None):
+            path=self.path
+            if path and (path/'start_gate.json').exists():raise ValueError('本段已正式开录，不能更换列表')
+            self.release_prepared()
+            if path and path.is_dir():self.recording_store.abandon_preparation(path)
+        preferences=dict(self._reference_preferences,selected_list_id='pool')
+        if preferences!=self._reference_preferences:_save_preferences(self._reference_base,preferences)
+        try:blocks.switch_task(identifier,snapshot,completed)
+        except (OSError,ValueError) as error:
+            self.reference_error='任务列表切换未确认保存，请重新选择：'+str(error);raise
+        self._reference_preferences=preferences;self._reference_completed=completed
+        self._reference_retry=None;self._reference_manual_id=None;self._reference_cli_image=None;self._reference_cli_force=False
+        self._reference_active=None;self._deferred_catalog_revision=None;self.selected_image=None
+        self.path=None;self.image=None;self.reference_error=None;self._reference_preferences_error=None
+        self.refresh_reference_histories();self._apply_reference_snapshot(snapshot)
+        if self.state!='device_confirm':self.state='idle'
+        self.state_write()
 
     def reference_completed_paths(self):
         return getattr(self,'_reference_completed',())
@@ -162,6 +248,7 @@ class ReferenceControlsMixin:
     def reference_task_state(self):
         value=dict(getattr(self,'_reference_task',{}))
         value['can_change']=self.reference_can_change()
+        value['can_switch']=self.reference_can_switch_list()
         return value
 
     def reference_image_title(self):
@@ -183,9 +270,10 @@ class ReferenceControlsMixin:
             complete=entry is not None and self._reference_ledger.valid_used(entry)
             attempts=[v for v in document.get('attempts',{}).get(image.name,[]) if isinstance(v,dict) and v.get('has_data')]
             latest=attempts[-1] if attempts else None
-            state='collected' if complete else 'unattempted' if not attempts else 'attempted_uncollected'
+            pending=bool(isinstance(entry,dict) and entry.get('status')=='pending_qc' and complete)
+            state='pending_qc' if pending else 'collected' if complete else 'unattempted' if not attempts else 'attempted_uncollected'
             result[image.relative_to(self._reference_project).as_posix()]=dict(state=state,ever_recorded=bool(attempts),attempt_count=len(attempts),
-                collected=complete,latest_qc=latest.get('qc_level') if latest else None,
+                collected=complete and not pending,pending_qc=pending,latest_qc=latest.get('qc_level') if latest else None,
                 latest_deleted=bool(latest and latest.get('deleted')),latest_retained=bool(latest and latest.get('retained')),
                 history=attempts[-5:])
         self._reference_histories=result
@@ -208,13 +296,23 @@ class ReferenceControlsMixin:
         return value
 
     def _reference_entry_choice(self,entries):
+        blocks=getattr(self,'_reference_task_blocks',None)
+        if blocks:return blocks.choose(entries,self._reference_image_choice)
+        return self._reference_image_choice(entries)
+
+    def _reference_image_choice(self,entries):
         histories=getattr(self,'_reference_histories',{})
         fresh=[entry for entry in entries if not histories.get(entry['path'].relative_to(self._reference_project).as_posix(),{}).get('ever_recorded')]
         errors=[entry for entry in entries if histories.get(entry['path'].relative_to(self._reference_project).as_posix(),{}).get('latest_qc')=='ERROR']
         return secrets.choice(fresh or errors or entries)
 
     def select_reference_image(self,value=None,next_image=False):
+        if getattr(self,'_reference_task_blocks',None):
+            from manual_reference import choose
+            return choose(self,value,next_image=next_image)
         if self.state not in ('device_confirm','idle','failed_wait','exhausted','ready'):raise ValueError('请等待准备完成后再选择参考图')
+        if getattr(self,'_reference_task_blocks',None):
+            raise ValueError('请完成当前任务后自动切换；本任务内图片会随机且不重复')
         if self.dashboard.privacy.snapshot().get('required'):raise ValueError('采集状态未确认停止')
         snapshot=self.reference_catalog.freeze_list(self._reference_preferences['selected_list_id'],
             self.reference_catalog.revision if next_image else value['catalog_revision'],include_completed=True)
@@ -257,6 +355,10 @@ class ReferenceControlsMixin:
                  and ((index==first and self._reference_cli_force) or item['relative_path'] not in completed or item['id']==getattr(self,'_reference_manual_id',None))]
         if retry and retry['snapshot']['list_id']==snapshot['list_id']:
             entries=[retry]+[entry for entry in entries if entry['index']!=retry['index']]
+        blocks=getattr(self,'_reference_task_blocks',None)
+        if blocks:
+            blocks.reconcile(snapshot,self._reference_completed)
+            entries=[e for e in entries if blocks.task(e) not in blocks.value['finished_tasks']]
         self._reference_snapshot=snapshot;self._reference_entries=entries
         self.images=[entry['path'] for entry in entries]
         self._update_reference_task()
@@ -266,15 +368,27 @@ class ReferenceControlsMixin:
         entries=getattr(self,'_reference_entries',[])
         manual=next((v for v in entries if v['snapshot']['items'][v['index']]['id']==getattr(self,'_reference_manual_id',None)),None)
         entry=active.get('entry') if active else manual or (entries[0] if entries else None)
+        blocks=getattr(self,'_reference_task_blocks',None)
+        if blocks and not active and blocks.value['current_task']:
+            entry=next((v for v in entries if blocks.task(v)==blocks.value['current_task']),entry)
         snapshot=entry['snapshot'] if entry else getattr(self,'_reference_snapshot',None)
         if snapshot is None:return
         self._reference_task=dict(id=snapshot['list_id'],name=snapshot['list_name'],
             total=snapshot['total'],remaining=len(self.images),position=entry['index']+1 if entry else 0,
             catalog_revision=snapshot['catalog_revision'],selection_mode='random_without_replacement')
+        if getattr(self.reference_catalog,'single_list_mode',False):
+            self._reference_task['selection_scope']='single_list'
+        blocks=getattr(self,'_reference_task_blocks',None)
+        if blocks:self._reference_task.update(blocks.status())
         if entry:
             asset=snapshot['items'][entry['index']]
             self._reference_task.update(tags=asset.get('tags', []), source_lists=asset.get('source_lists', []))
-        if getattr(self,'_reference_manual_id',None):
+            if blocks and blocks.value['current_task']:
+                source=next((v for v in asset.get('source_lists',[]) if v['id']==blocks.value['current_task']),None)
+                if source:
+                    done=len(blocks.value['completed_ids']);target=blocks.value['target_size']
+                    self._reference_task.update(name=source['name'],total=target,remaining=target-done,position=done+1)
+        if not blocks and getattr(self,'_reference_manual_id',None):
             self._reference_task['remaining']=sum(v['path'].relative_to(self._reference_project).as_posix() not in set(self._reference_completed) for v in entries)
 
     def reference_refresh(self,force=False):
@@ -292,6 +406,8 @@ class ReferenceControlsMixin:
         try:snapshot=self.reference_catalog.freeze_list(identifier,self.reference_catalog.revision,include_completed=True)
         except CatalogError as error:
             if error.code not in ('hidden_list','deleted','not_found'):raise
+            if self.reference_catalog.single_list_mode:
+                raise CatalogError('当前列表不可用，请手动选择其他任务列表','list_selection_required',409) from error
             preferences=dict(self._reference_preferences,selected_list_id='pool')
             _save_preferences(self._reference_base,preferences);self._reference_preferences=preferences
             self._reference_retry=None;self._reference_manual_id=None
@@ -300,9 +416,15 @@ class ReferenceControlsMixin:
         return True
 
     def reference_tick(self):
+        self.poll_usb_task_import()
         if not self.reference_can_change():return
         try:
-            changed=self.reference_refresh()
+            signal=self._reference_base/'runtime/qc_results_revision.json'
+            try:revision=signal.stat().st_mtime_ns
+            except FileNotFoundError:revision=None
+            qc_changed=revision!=getattr(self,'_qc_results_revision',None)
+            changed=self.reference_refresh(force=qc_changed)
+            self._qc_results_revision=revision
             if changed:
                 if self.state in ('idle','exhausted'):self.state='idle' if self.images else 'exhausted'
                 self.state_write()
@@ -314,6 +436,10 @@ class ReferenceControlsMixin:
                 except (ValueError,OSError):pass
 
     def select_reference_list(self,value):
+        if getattr(self,'_reference_task_blocks',None):
+            from manual_reference import choose
+            return choose(self,value,list_only=True)
+        if getattr(self,'_reference_task_blocks',None):return self._select_task_block_list(value)
         if not self.reference_can_change():raise ValueError('当前正在准备或采集，结束本段后再选择列表')
         if (not isinstance(value,dict) or set(value)!={'list_id','catalog_revision'}
                 or not valid_id(value['list_id']) or type(value['catalog_revision']) is not int
@@ -420,14 +546,19 @@ class ReferenceControlsMixin:
     def reference_reaped(self):
         active=getattr(self,'_reference_active',None)
         outcome=getattr(self,'_reference_reap_outcome',None);self._reference_reap_outcome=None
-        if outcome=='success':self._reference_cli_force=False;self._reference_manual_id=None
+        if outcome in ('success','pending_qc'):self._reference_cli_force=False;self._reference_manual_id=None
+        if active and outcome in ('success','pending_qc'):
+            blocks=getattr(self,'_reference_task_blocks',None)
+            if blocks:blocks.success(active['entry'])
         if active:
-            self._reference_retry=None if outcome=='success' or getattr(self,'quit',False) else active['entry']
+            self._reference_retry=None if outcome in ('success','pending_qc') or getattr(self,'quit',False) else active['entry']
         self.reference_release_pin();self._reference_active=None
         try:self.reference_refresh(force=True)
         except (OSError,ValueError,RecursionError) as error:self.reference_error='参考图进度暂未更新：'+str(error)
 
     def reference_close(self):
+        manager=getattr(self,'usb_task_importer',None)
+        if manager is not None:manager.close()
         worker=getattr(self,'worker',None)
         if worker is None or worker.poll() is not None:
             self.reference_release_pin();self._reference_active=None

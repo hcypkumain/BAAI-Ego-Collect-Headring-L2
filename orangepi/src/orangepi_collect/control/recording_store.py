@@ -72,7 +72,7 @@ class RecordingStore:
         if path.is_symlink() or not path.is_dir() or path.resolve().parent!=root:raise ValueError('采集条目不存在或路径已变化')
         return path
 
-    def metadata(self,path):
+    def metadata(self,path,ledger_cache=None):
         path=Path(path);source=path/'meta.yaml'
         if source.exists() or source.is_symlink():raw=bounded(source);meta=yaml.safe_load(raw) or {}
         else:source=path/'meta.json';raw=bounded(source);meta=json.loads(raw)
@@ -94,14 +94,26 @@ class RecordingStore:
             summary_raw=bounded(path/'capture_summary.json');summary=json.loads(summary_raw)
             if not isinstance(summary,dict):raise ValueError('采集总结格式无效')
         signature=path.stat();token=hashlib.sha256(str((signature.st_dev,signature.st_ino)).encode()+raw+summary_raw).hexdigest()
-        used=self.ledger.read(image.parent/'used.yaml').get('used',{}).get(image.name) if image else None
+        used=None
+        if image:
+            ledger_path=image.parent/'used.yaml'
+            if ledger_cache is None:book=self.ledger.read(ledger_path)
+            else:
+                try:info=ledger_path.stat();signature=(info.st_mtime_ns,info.st_size)
+                except FileNotFoundError:signature=None
+                cached=ledger_cache.get(str(ledger_path))
+                if cached is None or cached[0]!=signature:
+                    cached=(signature,self.ledger.read(ledger_path));ledger_cache[str(ledger_path)]=cached
+                book=cached[1]
+            used=book.get('used',{}).get(image.name)
         collected=used is not None and self.ledger.valid_used(used)
         owns=bool(isinstance(used,dict) and str(used.get('session',''))==str(path))
         status=meta.get('status') or pi.get('status') or summary.get('status') or 'unconfirmed'
         if (path/'recording_deleted.json').exists():status='deleted'
         successful=status=='success' and summary.get('status','success')=='success' and collected and (owns or meta.get('retention_state')=='kept')
         failed_kept=status not in ('success','deleted','archived','cancelled') and meta.get('retention_state')=='kept_failed'
-        kept=successful or failed_kept
+        pending=status=='pending_qc' and summary.get('qc_state')=='pending' and meta.get('retention_state')=='kept_pending_qc'
+        kept=successful or failed_kept or pending
         stamp=summary.get('start_unix_ns',0)/1e9 or meta.get('start_time') or pi.get('session_created_unix') or meta.get('session_created_unix') or source.stat().st_mtime
         if not isinstance(stamp,(int,float)) or not math.isfinite(stamp):stamp=source.stat().st_mtime
         retained_at=meta.get('retained_at_unix') or summary.get('stop_unix_ns',0)/1e9 or stamp
@@ -113,9 +125,9 @@ class RecordingStore:
             reference_name=asset.get('name') or (image.stem if image else '参考图信息不可用'),
             reference_path=image.relative_to(self.project).as_posix() if image else None,
             reference_sha256=asset.get('sha256') or meta.get('reference_sha256') or pi.get('reference_sha256'),
-            status=status,retained=kept,reference_state='collected' if collected else 'uncollected',
-            retention_kind='successful' if successful else 'unsuccessful' if failed_kept else 'not_retained',reference_attempt_succeeded=successful,
-            upload_state='retained_for_upload' if successful else 'retained_unsuccessful_for_upload' if failed_kept else 'excluded',qc_level=meta.get('qc_level') or summary.get('qc_level') or ('ERROR' if status in ('error','qc_error') else None),
+            status=status,retained=kept,reference_state='pending_qc' if pending else 'collected' if collected else 'uncollected',
+            qc_state='pending' if pending else meta.get('qc_state','completed'),retention_kind='pending_qc' if pending else 'successful' if successful else 'unsuccessful' if failed_kept else 'not_retained',reference_attempt_succeeded=successful,
+            upload_state='pending_qc' if pending else 'retained_for_upload' if successful else 'retained_unsuccessful_for_upload' if failed_kept else 'excluded',qc_level=meta.get('qc_level') or summary.get('qc_level') or ('ERROR' if status in ('error','qc_error') else None),
             selected_devices=meta.get('selected_devices') or pi.get('selected_devices') or [],
             _image=image)
 
@@ -146,7 +158,7 @@ class RecordingStore:
         items,day=self.entries(day);root,_=self.roots()
         return dict(version=1,day=day,created_at_unix=self.clock(),scope='retained_local_takes_for_manual_cloud_upload',
             note='按确认保留日期分组；成功/WARN标记已采集，用户保留的ERROR或失败数据明确标记未成功，不代表云端上传结果。',
-            recordings=[dict(item,relative_directory='data/'+root.name+'/'+item['id']) for item in items if item['retained']])
+            recordings=[dict(item,relative_directory='data/'+root.name+'/'+item['id']) for item in items if item['retained'] and item.get('qc_state')!='pending'])
 
     def delete(self,identifier,token):
         from cloud_common import session_lock
@@ -210,6 +222,8 @@ class RecordingStore:
                 source=str(source),target=str(destination/(source.name+'--'+uuid.uuid4().hex)),
                 source_identity=[source.stat().st_dev,source.stat().st_ino],
                 reference_path=reference,created_at_unix=self.clock(),phase='prepared',files=files,bytes=total)
+            from daily_collection import take_snapshot
+            operation['daily_snapshot']=take_snapshot(self,source)
             journal=self.operations/(operation['id']+'.json');atomic_json(journal,operation)
             return self._finish_discard(journal,operation)
 

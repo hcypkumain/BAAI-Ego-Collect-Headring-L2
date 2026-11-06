@@ -260,6 +260,27 @@ def handle_phone_request(handler, owner, method):
     if path.startswith('/api/phone/stream/'):
         handle_preview_stream(handler,owner,url,method); return True
     snapshot = owner.display_state()
+    if path in ('/api/phone/usb-task-import/scan','/api/phone/usb-task-import/status'):
+        scanning=path.endswith('/scan')
+        if url.query or (scanning and method!='POST') or (not scanning and (method!='GET' or handler.headers.get('Content-Length','0')!='0')):
+            handler.send(400,{'error':'U盘导入请求无效'});return True
+        manager=getattr(owner,'usb_task_importer',None)
+        if manager is None:handler.send(503,{'error':'U盘导入功能暂不可用'});return True
+        from usb_task_import import allowed
+        if scanning and not allowed(snapshot):
+            handler.send(423,{'error':'请先结束或放弃当前准备/采集，再扫描U盘'});return True
+        if scanning:
+            try:
+                length=int(handler.headers.get('Content-Length','0'))
+                if not 1<=length<=64 or handler.headers.get('Content-Type','').split(';')[0]!='application/json':raise ValueError()
+                value=json.loads(handler.rfile.read(length))
+                if not isinstance(value,dict) or set(value)!={'scan'} or value['scan'] is not True:raise ValueError()
+                if handler.headers.get('X-Reference-Key') and not handler.headers.get('X-Access-Token'):
+                    handler.send(403,{'error':'请从采集控制页面扫描U盘'});return True
+            except (ValueError,TypeError):handler.send(400,{'error':'U盘扫描请求无效'});return True
+        try:handler.send(200,manager.scan() if scanning else manager.status())
+        except (ValueError,OSError,TimeoutError) as error:handler.send(getattr(error,'status',503),{'error':str(error)})
+        return True
     if path=='/api/phone/reference-options' and method=='GET':
         if not optional_read_allowed(snapshot):handler.send(423,{'error':'当前步骤不可选择参考图'});return True
         try:
@@ -317,7 +338,10 @@ def handle_phone_request(handler, owner, method):
     if path == '/api/phone/reference-access' and method == 'GET':
         if url.query or handler.headers.get('Content-Length', '0') != '0':
             handler.send(400, {'error': '图库请求无效'}); return True
-        if not optional_read_allowed(snapshot):
+        importing=(snapshot.get('state') in ('usb_importing','usb_import_recovery')
+                   and not snapshot.get('privacy',{}).get('required')
+                   and snapshot.get('privacy',{}).get('stop_confirmed') is True)
+        if not optional_read_allowed(snapshot) and not importing:
             handler.send(423, {'error': '当前步骤暂停图库管理，请结束本段后再操作'}); return True
         credentials = getattr(owner, 'reference_credentials', None)
         if credentials is None or getattr(owner, 'reference_catalog', None) is None:

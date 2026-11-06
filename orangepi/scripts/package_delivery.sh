@@ -4,7 +4,7 @@ set -euo pipefail
 BASE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$BASE/.."
 if [[ $# -gt 1 ]]; then echo 'Usage: package_delivery.sh [output-directory]' >&2; exit 2; fi
-OUTPUT_DIR="${1:-$("$BASE/.venvs/ros/bin/python" "$BASE/src/orangepi_collect/storage/storage_paths.py" export)}"
+OUTPUT_DIR="${1:-$("$BASE/.venvs/hardware/bin/python" "$BASE/src/orangepi_collect/storage/storage_paths.py" export)}"
 mkdir -p "$OUTPUT_DIR"
 OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
 python3 - "$OUTPUT_DIR" <<'PY'

@@ -24,7 +24,7 @@ class Native:
     def poll(self):return self.returncode
     def write(self,line):
         if line.strip()=='STOP':
-            (self.root/'capture_summary.json').write_text(json.dumps({'status':'success','errors':[],'eeg':{'samples':500}}))
+            (self.root/'capture_summary.json').write_text(json.dumps({'status':'success','errors':[],'emg_right':{'samples':500}}))
             self.returncode=0
 
 
@@ -39,7 +39,7 @@ class RecorderDecisionTests(unittest.TestCase):
             def record():
                 try:rec._record()
                 except BaseException as exc:errors.append(exc)
-            summary={'status':'success','errors':[],'eeg':{'samples':475}}
+            summary={'status':'success','errors':[],'emg_right':{'samples':475}}
             report=SimpleNamespace(level='INFO')
             with patch.object(fr.sys,'stdin',incoming),patch.object(fr,'standardize',return_value=summary) as standardize, \
                  patch.object(fr,'check_session',return_value=report) as qc, \
@@ -65,7 +65,7 @@ class RecorderDecisionTests(unittest.TestCase):
                     self.assertFalse(thread.is_alive());self.assertEqual(errors,[])
                     actual=json.loads((root/'capture_summary.json').read_text())
                     if decision=='KEEP':
-                        standardize.assert_called_once();qc.assert_called_once();self.assertEqual(actual['eeg']['samples'],475)
+                        standardize.assert_called_once();qc.assert_called_once();self.assertEqual(actual['emg_right']['samples'],475)
                         self.assertEqual(actual['status'],'success')
                     else:
                         standardize.assert_not_called();qc.assert_not_called();self.assertTrue(actual['qc_skipped'])

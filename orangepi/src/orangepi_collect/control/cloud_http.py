@@ -10,6 +10,15 @@ def handle_cloud(handler,owner,method):
     if manager is None:handler.send(503,{'error':'上传服务暂不可用，请检查服务状态'});return True
     try:
         path=url.path[len('/api/phone/cloud/'):]
+        if method=='GET' and path=='daily-report':
+            query=parse_qs(url.query,keep_blank_values=True)
+            if set(query)-{'day'} or any(len(v)!=1 for v in query.values()):raise CloudError('每日汇总请求无效')
+            daily=getattr(owner,'daily_collection',None)
+            if daily is None:raise CloudError('每日统计暂不可用')
+            try:target,raw=daily.export(query.get('day',['today'])[0])
+            except ValueError as error:raise CloudError(str(error))
+            handler.send(200,raw.encode('utf-8-sig'),'text/plain; charset=utf-8',{'Content-Disposition':'attachment; filename="'+target.name+'"'})
+            return True
         if method=='GET' and path=='status':
             query=parse_qs(url.query,keep_blank_values=True)
             if set(query)-{'day'} or any(len(v)!=1 for v in query.values()):raise CloudError('上传列表请求无效')

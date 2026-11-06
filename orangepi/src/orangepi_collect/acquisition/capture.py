@@ -31,7 +31,6 @@ from gi.repository import Gst
 from project_paths import BASE, PROJECT, SRC, devices
 from live_preview import publisher
 import headband_calibration
-from impedance_record import bind_start
 HEADER = b'\xd2\xd2\xd2'
 CONFIG=devices()
 PORTS={name:config['port'] for name,config in CONFIG['emg'].items()}
@@ -230,6 +229,9 @@ class BoardImu:
         self.count = 0
         self.accepted = 0
         self.previous = None
+        self.timestamp_duplicates = 0
+        self.timestamp_backsteps = 0
+        self.timestamp_anomaly_events = []
         self.jobs = queue.Queue(maxsize=1000)
         self.finishing = threading.Event()
         self.write_error = None
@@ -266,9 +268,18 @@ class BoardImu:
         with self.owner.gate:
             if self.finishing.is_set() or not self.owner.active or mono<self.owner.start_ns or stamp<self.owner.start_wall_ns:
                 return
-            if self.previous is not None and stamp<=self.previous:
-                self.owner.fail('board_imu: source timestamp is not increasing: previous=%d current=%d sequence=%d arrival=%d' % (self.previous,stamp,sequence,wall))
-                return
+            if self.previous is not None and stamp <= self.previous:
+                # Match original IMU TimestampSanity: retain exact samples and
+                # report WARN; the original offline checker makes the verdict.
+                kind = 'duplicate' if stamp == self.previous else 'backstep'
+                if kind == 'duplicate':self.timestamp_duplicates += 1
+                else:self.timestamp_backsteps += 1
+                if len(self.timestamp_anomaly_events) < 8:
+                    event = dict(kind=kind, previous_ns=self.previous,
+                                 current_ns=stamp, sequence=sequence,
+                                 arrival_unix_ns=wall)
+                    self.timestamp_anomaly_events.append(event)
+                    self.owner.warn('board_imu: QC_WARN source timestamp %s: previous=%d current=%d sequence=%d; original IMU rule retains sample' % (kind,self.previous,stamp,sequence))
             try:
                 row = ([stamp,wall,mono,sequence]+
                     [0.0,0.0,0.0,0.0]+
@@ -323,6 +334,10 @@ class BoardImu:
                     writer_queue_peak=self.queue_peak,writer_queue_capacity=self.jobs.maxsize,
                     max_write_seconds=self.max_write_seconds,
                     timestamp_basis='ICM20602 driver sampling instant (CLOCK_REALTIME domain)',
+                    timestamp_qc_rule='original-framework-v1',
+                    timestamp_duplicates=self.timestamp_duplicates,
+                    timestamp_backsteps=self.timestamp_backsteps,
+                    timestamp_anomaly_events=self.timestamp_anomaly_events,
                     orientation_basis='not reported by this hardware; stored as zero',
                     angular_velocity_units='rad/s',linear_acceleration_units='m/s^2')
 
@@ -347,7 +362,6 @@ class Capture:
         self.warning_list = []
         self.cameras, self.emgs = [], []
         self.board = None
-        self.eeg = None
         self.state = 'preparing'
         self.commands = queue.Queue()
         self.started = False
@@ -365,8 +379,7 @@ class Capture:
 
     def status(self, state, **kwargs):
         self.state = state
-        impedance = self.eeg.impedance_snapshot() if self.eeg else dict(required=False,supported=False,phase='not_selected',can_record=True)
-        atomic_json(self.path/'status.json', dict(state=state,time=time.time(),pid=os.getpid(),recording_active=self.active,samples_seen=sum(d.seen for d in self.cameras+self.emgs+([self.board] if self.board else [])+([self.eeg] if self.eeg else [])),warning_count=len(self.warning_list),last_warning=self.warning_list[-1] if self.warning_list else None,headband_calibration=getattr(self,'headband_calibration_status',None),eeg_impedance=impedance,**kwargs))
+        atomic_json(self.path/'status.json', dict(state=state,time=time.time(),pid=os.getpid(),recording_active=self.active,samples_seen=sum(d.seen for d in self.cameras+self.emgs+([self.board] if self.board else [])),warning_count=len(self.warning_list),last_warning=self.warning_list[-1] if self.warning_list else None,headband_calibration=getattr(self,'headband_calibration_status',None),**kwargs))
         print(json.dumps(dict(state=state,**kwargs),ensure_ascii=False),flush=True)
 
     def stop_gate(self):
@@ -404,7 +417,7 @@ class Capture:
         status=getattr(self,'headband_calibration_status',None)
         if status is not None:headband_calibration.verify_saved(self.path,status)
 
-    def execute(self, camera_names, with_emg=True, with_board=True, emg_names=None, wrist_names=(), with_eeg=False):
+    def execute(self, camera_names, with_emg=True, with_board=True, emg_names=None, wrist_names=()):
         Gst.init(None)
         # No ROS node is needed any more: headband cameras come from camd and
         # the board IMU from /dev/icm20602.
@@ -424,9 +437,6 @@ class Capture:
                         raise RuntimeError(name + ': ' + str(exc)) from exc
             if with_board:
                 self.board=BoardImu(self)
-            if with_eeg:
-                from eeg_bridge import EegProcess
-                self.eeg=EegProcess(CONFIG['eeg'],output=self.path,owner=self)
             for name in camera_names:
                 self.cameras.append(Camera(self,name))
             for name in wrist_names:
@@ -447,18 +457,16 @@ class Capture:
                 now = time.monotonic()
                 for camera in self.cameras:
                     camera.health()
-                if self.eeg:self.eeg.health()
                 # Surface a dead IMU reader thread directly instead of waiting
                 # for the generic "no data for 3 seconds" timeout.
                 if self.board:self.board.health()
-                devices = self.cameras + self.emgs + ([self.board] if self.board else []) + ([self.eeg] if self.eeg else [])
+                devices = self.cameras + self.emgs + ([self.board] if self.board else [])
                 if self.state == 'preparing' and all(d.ready for d in devices):
                     self.status('ready')
                 if self.state == 'preparing' and now > deadline:
                     raise RuntimeError('no first data: '+','.join(d.name for d in devices if not d.ready))
                 if self.state in ('ready','recording'):
                     for d in devices:
-                        if d is self.eeg and self.eeg.intentional_pause(now): continue
                         if now-d.last > 3:
                             raise RuntimeError(d.name+': no data for 3 seconds')
                 if now-last_heartbeat>1 and self.state in ('ready','recording'):
@@ -469,20 +477,10 @@ class Capture:
                     command = self.commands.get(timeout=.05)
                 except queue.Empty:
                     pass
-                if command and command.startswith('{'):
-                    request=json.loads(command)
-                    if self.started or self.active or self.state != 'ready' or self.stop_ns:
-                        raise RuntimeError('阻抗检查只允许在正式录制前执行')
-                    if not self.eeg: raise RuntimeError('本段未选择脑电设备')
-                    self.eeg.send_impedance(request)
-                    self.status(self.state)
-                    continue
                 if command == 'START':
                     if self.state != 'ready' or self.stop_ns:
                         raise RuntimeError('START before all devices ready')
                     self.verify_headband_calibration()
-                    if self.eeg and not self.eeg.can_record():
-                        raise RuntimeError('START blocked: EEG impedance check/recovery is not confirmed')
                     from screen_privacy import validate_screen_start
                     with self.gate:
                         if self.state!='ready' or self.stop_ns:
@@ -492,9 +490,6 @@ class Capture:
                         self.start_ns = time.monotonic_ns()
                         start_gate=dict(start_monotonic_ns=self.start_ns,start_unix_ns=self.start_wall_ns,
                             screen_privacy=screen_proof)
-                        if self.eeg:
-                            start_gate['eeg_impedance']=bind_start(self.path,start_gate,
-                                self.eeg.impedance_snapshot(),CONFIG['eeg'])
                         atomic_json(self.path/'start_gate.json',start_gate)
                         self.screen_privacy_start=screen_proof
                         self.active = self.started = True
@@ -515,11 +510,6 @@ class Capture:
             self.closing.set()
             if not self.error_list:
                 self.status('finalizing')
-            if self.eeg:
-                try:
-                    self.summary['eeg']=self.eeg.close()
-                    if self.started and not self.summary['eeg']['samples']:self.error_list.append('eeg: no recorded data')
-                except Exception as exc:self.error_list.append('eeg: '+str(exc))
             for e in self.emgs:
                 e.thread.join(20)
                 if e.thread.is_alive():
@@ -549,10 +539,10 @@ class Capture:
                     log.write(json.dumps(dict(time=time.time(),warning=warning))+'\n')
             for name,details in self.summary.items():
                 # The generic text-log scanner treats JSON "error": null as a
-                # warning. Keep EEG and wrist structured summaries as JSON;
+                # warning. Keep wrist structured summaries as JSON;
                 # real device faults remain in capture_summary/status and the
                 # original encoder/worker logs, which are still scanned.
-                filename=(name+'_summary.json' if name in ('eeg','cam_left_wrist','cam_right_wrist')
+                filename=(name+'_summary.json' if name in ('cam_left_wrist','cam_right_wrist')
                           else name+'.log')
                 (self.path/name/filename).write_text(json.dumps(details,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
             self.summary.update(start_unix_ns=self.start_wall_ns,start_monotonic_ns=self.start_ns,
@@ -576,7 +566,7 @@ if __name__ == '__main__':
     capture_lock=(BASE/'runtime'/'capture.lock').open('w')
     fcntl.flock(capture_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     selected=json.loads(args.selection.read_text(encoding='utf-8'))['selected'] if args.selection else list(PORTS)+['cam_ros_'+c for c in CAMERAS]+['board_imu']+list(WRIST_CAMERAS)
-    allowed=set(PORTS)|{'cam_ros_'+c for c in CAMERAS}|{'board_imu'}|set(WRIST_CAMERAS)|({'eeg'} if CONFIG.get('eeg',{}).get('enabled') else set())
+    allowed=set(PORTS)|{'cam_ros_'+c for c in CAMERAS}|{'board_imu'}|set(WRIST_CAMERAS)
     if not selected or not set(selected)<=allowed:raise ValueError('Invalid or empty device selection')
-    sys.exit(Capture(Path(args.output).resolve()).execute([c for c in args.cameras if 'cam_ros_'+c in selected],not args.without_emg,not args.without_board_imu and 'board_imu' in selected,[n for n in PORTS if n in selected],[n for n in WRIST_CAMERAS if n in selected],'eeg' in selected))
+    sys.exit(Capture(Path(args.output).resolve()).execute([c for c in args.cameras if 'cam_ros_'+c in selected],not args.without_emg,not args.without_board_imu and 'board_imu' in selected,[n for n in PORTS if n in selected],[n for n in WRIST_CAMERAS if n in selected]))
 

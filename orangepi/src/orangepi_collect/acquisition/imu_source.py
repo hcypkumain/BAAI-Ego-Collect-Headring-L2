@@ -10,6 +10,8 @@ timestamps; the offset fallback below covers a driver that reports a boot-
 relative clock instead, so alignment never silently drifts.
 """
 import math
+import json
+import sys
 import os
 import struct
 import threading
@@ -43,6 +45,9 @@ class Icm20602Source:
         self.frames = 0
         self.dropped_partial = 0
         self.time_offset = None
+        self.timestamp_anomaly_count = 0
+        self._previous_timestamp_evidence = None
+        self._read_batch_id = 0
         self.last_frame = time.monotonic()
         self._stop = threading.Event()
         try:
@@ -70,6 +75,41 @@ class Icm20602Source:
                                 else time.time() - raw)
         return int(round((raw + self.time_offset) * 1e9))
 
+    def _record_timestamp_evidence(self, seconds, nanoseconds, stamp, frame):
+        # Evidence only: retain the existing timestamp and failure policy.
+        sample = (int(seconds), int(nanoseconds), int(stamp), bytes(frame),
+                  self._read_batch_id, self.frames + 1)
+        previous = self._previous_timestamp_evidence
+        self._previous_timestamp_evidence = sample
+        if previous is None or sample[2] > previous[2]:
+            return
+        self.timestamp_anomaly_count += 1
+        if self.timestamp_anomaly_count > 8:
+            return
+        raw_ns = sample[0] * 1000000000 + sample[1]
+        previous_raw_ns = previous[0] * 1000000000 + previous[1]
+        delta = raw_ns - previous_raw_ns
+        kind = ('raw_driver_timestamp_duplicate' if delta == 0 else
+                'raw_driver_timestamp_backwards' if delta < 0 else
+                'timestamp_conversion_collision')
+        event = dict(event='imu_timestamp_evidence', classification=kind,
+                     device=self.device, anomaly_count=self.timestamp_anomaly_count,
+                     raw_delta_ns=delta, converted_delta_ns=sample[2]-previous[2],
+                     frame_identical=sample[3] == previous[3],
+                     previous=dict(seconds=previous[0], nanoseconds=previous[1],
+                                   converted_ns=previous[2], frame_hex=previous[3].hex(),
+                                   read_batch=previous[4], sequence=previous[5]),
+                     current=dict(seconds=sample[0], nanoseconds=sample[1],
+                                  converted_ns=sample[2], frame_hex=sample[3].hex(),
+                                  read_batch=sample[4], sequence=sample[5]),
+                     time_offset_seconds=self.time_offset,
+                     arrival_unix_ns=time.time_ns(), arrival_monotonic_ns=time.monotonic_ns())
+        try:
+            print('IMU_TIMESTAMP_EVIDENCE '+json.dumps(event,sort_keys=True),
+                  file=sys.stderr,flush=True)
+        except OSError:
+            pass
+
     def _run(self):
         buffer = bytearray()
         try:
@@ -77,6 +117,7 @@ class Icm20602Source:
                 chunk = os.read(self.fd, FRAME_BYTES * 16)
                 if not chunk:
                     raise ImuError('%s returned end of file' % self.device)
+                self._read_batch_id += 1
                 buffer.extend(chunk)
                 # Short reads are normal; accumulate until a frame is complete.
                 while len(buffer) >= FRAME_BYTES:
@@ -85,6 +126,7 @@ class Icm20602Source:
                     (seconds, nanoseconds, gyro_x, gyro_y, gyro_z,
                      accel_x, accel_y, accel_z, _temperature) = FRAME.unpack(frame)
                     stamp = self._stamp_ns(seconds, nanoseconds)
+                    self._record_timestamp_evidence(seconds, nanoseconds, stamp, frame)
                     self.frames += 1
                     self.last_frame = time.monotonic()
                     self.callback(

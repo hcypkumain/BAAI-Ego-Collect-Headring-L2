@@ -14,7 +14,7 @@
   async function load(reset=true){if(busy||!current())return;const id=version;lock(true);if(reset){offset=0;list.replaceChildren();summary.textContent='正在读取采集条目…';more.hidden=true;}
    try{const data=await(await request('/api/phone/recordings?'+new URLSearchParams({day,offset}))).json();if(!valid(id))return;
     if(reset)list.replaceChildren();summary.textContent=(day==='today'?'今日':'全部')+'：保留 '+data.retained_count+' 段 / 共 '+data.total+' 段。成功/WARN标记已采集；保留ERROR不计成功，删除会重新开放参考图。';
-    for(const item of data.items){const row=el('article','','phone-take'),title=el('b',item.reference_name),info=el('p',new Date(item.created_unix*1000).toLocaleString()+' · '+Math.max(0,Number(item.duration)||0).toFixed(1)+' 秒 · '+item.id),state=el('small',item.retention_kind==='unsuccessful'?'未成功数据已保留 · '+(item.qc_level||item.status)+' · 本段不计为参考图成功':item.retained?'已保留，晚间上传用 · 参考图已采集（WARN不判失败）':'未成功/未确认保留 · 可保留错误数据或删除');
+    for(const item of data.items){const row=el('article','','phone-take'),title=el('b',item.reference_name),info=el('p',new Date(item.created_unix*1000).toLocaleString()+' · '+Math.max(0,Number(item.duration)||0).toFixed(1)+' 秒 · '+item.id),state=el('small',item.retention_kind==='pending_qc'?'已保存 · 待主机质检 · 暂不重复抽取':item.retention_kind==='unsuccessful'?'未成功数据已保留 · '+(item.qc_level||item.status)+' · 本段不计为参考图成功':item.retained?'已保留，晚间上传用 · 参考图已采集（WARN不判失败）':'未成功/未确认保留 · 可保留错误数据或删除');
      const actions=el('div','','phone-row'),remove=button('作废并删除本段',()=>{
       actions.replaceChildren(el('p','删除本段的全部相机及同步数据？对应参考图将重新开放采集，本段移出上传清单。'),button('确认删除',()=>discard(item)),button('取消',()=>load(true)));
       for(const node of actions.querySelectorAll('button'))node.dataset.deleteTake='';controls();

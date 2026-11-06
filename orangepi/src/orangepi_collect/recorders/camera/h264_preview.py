@@ -90,15 +90,6 @@ class H264JpegPreview:
         self.pipeline.set_state(self.Gst.State.NULL);self.thread.join(2)
 
 
-class HeadbandPreviewSource:
-    """Idle preview owns one subscription and releases it before preparation."""
-    def __init__(self,name,callback,width=1920,height=1200):
-        from orangepi_collect.recorders.camera.camd_source import CamdH264Source
-        self.preview=H264JpegPreview(callback,width,height)
-        try:self.input=CamdH264Source(name,lambda payload,ts,key,*arrival:self.preview.offer(payload,ts,key))
-        except BaseException:self.preview.close();raise
-    def health(self):
-        self.input.health();self.preview.health()
-        if time.monotonic()-self.input.last_frame>3:
-            raise RuntimeError('headband preview receives no frames for 3 seconds')
-    def close(self):self.input.close();self.preview.close()
+# Idle MPP sessions live in short-lived children; process exit reclaims their
+# decoder/JPEG resources. The recording owner above is unchanged.
+from orangepi_collect.recorders.camera.turbojpeg_preview import SoftwareHeadbandPreviewSource as HeadbandPreviewSource

@@ -7,7 +7,7 @@ if __name__=='__main__':
     fd=os.open(devices()['emg']['emg_left']['port'],os.O_RDWR|os.O_NOCTTY|os.O_NONBLOCK)
     try:
         fcntl.ioctl(fd,0x540c)
-        result=subprocess.run([str(BASE/'.venvs/ros/bin/python'),str(SRC/'acquisition/scan_devices.py')],capture_output=True,text=True,check=True,timeout=15)
+        result=subprocess.run([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/scan_devices.py')],capture_output=True,text=True,check=True,timeout=15)
         rows=json.loads(result.stdout)
         assert not next(r for r in rows if r['name']=='emg_left')['connected']
         print('PASS: occupied EMG is reported unavailable')

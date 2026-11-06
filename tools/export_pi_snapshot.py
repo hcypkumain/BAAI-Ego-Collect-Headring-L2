@@ -3,7 +3,6 @@ import collections,datetime,hashlib,io,json,os,re,stat,subprocess,tarfile
 from pathlib import Path
 
 PROJECT=Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main.2')
-ALTERNATE=Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main')
 OUT=Path('/home/orangepi/maintenance/github-publication-20261102')
 OUT.mkdir(parents=True,exist_ok=True)
 SKIP_DIRS={'.git','.venvs','.uv-cache','__pycache__','.pytest_cache','node_modules','.mypy_cache'}
@@ -21,7 +20,7 @@ if private.is_file():
 def eligible(relative,is_dir=False):
     parts=relative.parts
     if any(part in SKIP_DIRS for part in parts):return False
-    if parts and parts[0] in ('data','delivery_backups'):return False
+    if parts and parts[0] in ('data','delivery_backups','legacy'):return False
     for prefix in (('orangepi','runtime'),('orangepi','private'),('orangepi','tests','results'),('configs','environments')):
         if parts[:len(prefix)]==prefix:return False
     if is_dir:return not BACKUP.search(relative.name)
@@ -61,12 +60,6 @@ def add(path,destination,component,binary=False):
     records.append(row)
 
 for path,relative in project_files(PROJECT):add(path,relative,'collector-and-framework')
-alternate=[]
-for path,relative in project_files(ALTERNATE):
-    if not relative.startswith(('src/','scripts/','tests/')):continue
-    main=PROJECT/relative
-    if main.is_file() and path.read_bytes()==main.read_bytes():continue
-    add(path,'legacy/alternate-project/'+relative,'alternate-project-differences');alternate.append(relative)
 
 sidecar=Path('/opt/pi-phone-media')
 if not sidecar.is_dir():raise RuntimeError('Export the migrated phone media installation; old device snapshots remain in Git history')
@@ -90,7 +83,7 @@ for source,destination in (
         raw=path.read_bytes()
         if b'\x00' not in raw:add(path,destination,'platform-configuration-reference')
 
-for name in ('embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service','camd.service','egorecord.service'):
+for name in ('embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service','camd.service'):
     unit=Path('/etc/systemd/system')/name
     if unit.is_file() and not unit.is_symlink():add(unit,'deployment/systemd/'+name,'systemd')
     directory=unit.with_name(name+'.d')
@@ -114,11 +107,12 @@ add('/home/orangepi/maintenance/uploader/robot_uploader-1.0.0-py3-none-any.whl',
 audit=Path('/home/orangepi/maintenance/upgrade-20261029-headband30/clock_audit_v2.c')
 if audit.is_file():add(audit,'tools/hardware/clock_audit_v2.c','hardware-diagnostics')
 
+commit=subprocess.run(['git','-C',str(PROJECT),'rev-parse','HEAD'],text=True,capture_output=True)
 manifest=dict(schema_version=1,exported_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-    project_source=str(PROJECT),upstream_commit=subprocess.check_output(['git','-C',str(PROJECT),'rev-parse','HEAD'],text=True).strip(),
+    project_source=str(PROJECT),upstream_commit=commit.stdout.strip() if commit.returncode==0 else None,
     source_files=len(records),source_bytes=sum(row['bytes'] for row in records),
     component_counts=dict(collections.Counter(row['component'] for row in records)),
-    alternate_project_files=alternate,redactions=redactions,omitted=dict(omitted),files=records)
+    redactions=redactions,omitted=dict(omitted),files=records)
 raw=(json.dumps(manifest,ensure_ascii=False,indent=2)+'\n').encode()
 items['deployment/manifests/pi-source-snapshot.json']=(raw,0o644,int(datetime.datetime.now().timestamp()))
 archive=OUT/'pi-source-snapshot.tar.gz'

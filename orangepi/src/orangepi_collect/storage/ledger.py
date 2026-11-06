@@ -63,16 +63,18 @@ def mark(image,session,status):
         try:summary=json.loads((Path(session)/'capture_summary.json').read_text())
         except (OSError,ValueError):pass
         if not isinstance(summary,dict):summary={}
-        has_data=status=='success' or any(isinstance(v,dict) and any(isinstance(v.get(k),(int,float)) and v.get(k,0)>0 for k in ('frames','emg_frames','samples_saved','samples_written')) for v in summary.values())
+        has_data=status in ('success','pending_qc') or any(isinstance(v,dict) and any(isinstance(v.get(k),(int,float)) and v.get(k,0)>0 for k in ('frames','emg_frames','samples_saved','samples_written')) for v in summary.values())
         if has_data:
             attempts=value.setdefault('attempts',{}).setdefault(image.name,[])
-            quality=summary.get('qc_level') or ('ERROR' if status in BAD else 'INFO')
+            quality=('PENDING' if status=='pending_qc' else summary.get('qc_level')) or ('ERROR' if status in BAD else 'INFO')
             previous=next((v for v in attempts if v.get('session')==str(session)),None)
-            item=dict(session=str(session),at=time.time(),status=status,qc_level=quality,has_data=True,deleted=False,retained=status=='success')
+            item=dict(session=str(session),at=time.time(),status=status,qc_level=quality,has_data=True,deleted=False,retained=status in ('success','pending_qc'))
             if previous is None:attempts.append(item)
             else:previous.update(item)
-        if status=='success':
-            used[image.name]={'session':str(session),'at':time.strftime('%Y-%m-%d %H:%M:%S')}
+        if status in ('success','pending_qc'):
+            existing=used.get(image.name)
+            if not (status=='pending_qc' and isinstance(existing,dict) and existing.get('status')!='pending_qc' and valid_used(existing)):
+                used[image.name]={'session':str(session),'at':time.strftime('%Y-%m-%d %H:%M:%S'),'status':status,'qc_level':quality}
             value.get('failed',{}).pop(image.name,None)
         else:
             if image.name in used and (not valid_used(used[image.name]) or used[image.name].get('session')==str(session)):

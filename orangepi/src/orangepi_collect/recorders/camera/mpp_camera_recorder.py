@@ -123,7 +123,7 @@ class Camera:
         self.thread.start()
         try:
             if usb:
-                self.input = UvcSource(self.config, self.usb_callback)
+                self.input = UvcSource(self.config, self.usb_callback, strict_frame=self._strict_usb_frame)
                 self.camera_settings = self.input.camera_settings
                 wrist_camera_settings.write_report(self.path / 'camera_controls.json', self.camera_settings)
                 (self.path/'source_pipeline.txt').write_text(self.input.description)
@@ -144,6 +144,10 @@ class Camera:
             self.pipeline.set_state(Gst.State.NULL)
             self.file.close()
             raise
+
+    def _strict_usb_frame(self,capture_mono):
+        with self.owner.gate:
+            return self.owner.active and capture_mono>=self.owner.start_ns
 
     def usb_callback(self, payload, pts, sequence, mono, wall, capture_mono):
         self._verify_source(payload)
@@ -361,6 +365,10 @@ class Camera:
             self._preview_thread.join(3)
         if self.input is not None:
             self.input.close()
+            if self.usb and getattr(self.input,'last_invalid_frame',None):
+                (self.path/'uvc_input_diagnostics.json').write_text(json.dumps(dict(
+                    invalid_preparation_frames=self.input.invalid_preparation_frames,
+                    last_invalid_frame=self.input.last_invalid_frame),indent=2),encoding='utf-8')
         try:
             self.queue.put(None, timeout=3)
             self.thread.join(8)

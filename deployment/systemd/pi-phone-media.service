@@ -12,7 +12,7 @@ WorkingDirectory=/home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi
 Environment=PYTHONUNBUFFERED=1
 RuntimeDirectory=pi-phone-media
 RuntimeDirectoryMode=0700
-ExecStart=/home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi/.venvs/ros/bin/python -u /opt/pi-phone-media/phone_media.py --bind 127.0.0.1 --port 8766 --token-file /home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi/runtime/dashboard_token
+ExecStart=/home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi/.venvs/hardware/bin/python -u /opt/pi-phone-media/phone_media.py --bind 127.0.0.1 --port 8766 --token-file /home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi/runtime/dashboard_token
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=5

@@ -240,7 +240,6 @@ class ConfigurationTests(unittest.TestCase):
             (root/'configs/devices.yaml').write_text(json.dumps(cfg))
             settings.save(root,False)
             with patch.object(project_paths,'BASE',root),patch.dict('os.environ',{'ORANGEPI_DEVICE_SELECTION':''}), \
-                 patch('eeg_settings.apply',side_effect=lambda config,base:copy.deepcopy(config)), \
                  patch.object(device_discovery,'discover',side_effect=lambda config,base:config), \
                  patch.object(wrist_calibration,'apply',side_effect=lambda config,base:config), \
                  patch.object(emg_calibration,'apply',side_effect=lambda config,base:config):

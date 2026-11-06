@@ -94,12 +94,7 @@ def check(kind,name,item):
         if path and (discovery.get('present') is False or not Path(path).exists()):
             return dict(result,status='missing',error='未发现匹配设备，请检查连接')
         result['present']=bool(path)
-        if kind=='eeg':
-            from eeg_bridge import probe as eeg_probe
-            details=eeg_probe(item); ok=details['ready']
-            result['sample_rate_hz']=details['sample_rate_hz']
-            result['startup_diagnostics']=details.get('startup_diagnostics',{})
-        elif kind=='emg':
+        if kind=='emg':
             details=serial_probe(item['port']);ok=details['ready']
             result['bytes_read']=details['bytes_read']
         elif kind=='wrist':
@@ -152,32 +147,13 @@ def record_wrist_probe_diagnostics(results):
         print('Wrist probe diagnostics unavailable: '+str(error),file=sys.stderr,flush=True)
 
 
-def record_eeg_probe_diagnostics(results):
-    rows=[row for row in results if row['name']=='eeg' and row.get('present')]
-    if not rows:return
-    directory=BASE/'runtime/diagnostics/eeg-startup'
-    try:
-        directory.mkdir(parents=True,exist_ok=True)
-        if directory.is_symlink():return
-        directory.resolve().relative_to((BASE/'runtime/diagnostics').resolve())
-        path=directory/('scan-%020d.json'%time.time_ns())
-        # Readiness proof only; no EEG signal or credential values.
-        brief=[{key:row.get(key) for key in ('name','device','present','connected','status','error','startup_diagnostics')} for row in rows]
-        with path.open('x',encoding='utf-8') as stream:
-            json.dump(dict(at_unix=time.time(),eeg=brief),stream,ensure_ascii=False);stream.flush();os.fsync(stream.fileno())
-        for old in sorted(directory.glob('scan-*.json'))[:-30]:old.unlink()
-    except (OSError,ValueError) as error:print('EEG probe diagnostics unavailable: '+str(error),file=sys.stderr,flush=True)
-
-
 if __name__=='__main__':
     config=devices()
     jobs=[('emg',name,item) for name,item in config['emg'].items()]
     jobs += [('camera','cam_ros_'+name,item) for name,item in config['cameras'].items()]
     jobs += [('imu','board_imu',config['board_imu'])]
     jobs += [('wrist',name,item) for name,item in config.get('wrist_cameras',{}).items()]
-    if config.get('eeg',{}).get('enabled',False):jobs += [('eeg','eeg',config['eeg'])]
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
         results=list(pool.map(lambda job:check(*job),jobs))
     record_wrist_probe_diagnostics(results)
-    record_eeg_probe_diagnostics(results)
     print(json.dumps(results,ensure_ascii=False))

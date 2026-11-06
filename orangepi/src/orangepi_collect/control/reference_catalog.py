@@ -130,6 +130,17 @@ def _revision(value):
 class ReferenceCatalog:
     def __init__(self, base, project=None, library=None):
         self.base = Path(base).resolve()
+        from task_block_sampling import policy
+        self.task_block_policy = policy(self.base)
+        policy = self.base/'configs/reference_policy.json'
+        self.single_list_mode = False
+        if policy.exists():
+            if policy.is_symlink() or not policy.is_file() or policy.stat().st_size>4096:
+                raise ValueError('任务抽取设置无效')
+            settings=unique_json(policy.read_bytes())
+            if settings!={'version':1,'mode':'single_list_random'}:
+                raise ValueError('任务抽取设置无效')
+            self.single_list_mode=True
         self.project = Path(project).resolve() if project is not None else self.base.parent
         self.library = Path(library).resolve() if library is not None else self.project/'configs/environments'
         self.library.relative_to(self.project)
@@ -316,6 +327,7 @@ class ReferenceCatalog:
 
     def import_legacy(self, paths=None):
         """Enumerate filenames/stat only. Hash only the image chosen for prepare."""
+        if self._load().get('legacy_import_disabled') is True:return 0
         if paths is None:
             paths = sorted(p for p in self.library.rglob('*.png')
                            if LEGACY_PNG.search(p.stem) and not {'_uploads', '_uploaded'}.intersection(p.relative_to(self.library).parts))
@@ -377,6 +389,7 @@ class ReferenceCatalog:
 
     def _sampling_lists(self, value):
         return [value['lists'][identifier] for identifier in value['list_order']
+                if self.task_block_policy is None or identifier in self.task_block_policy['list_ids']
                 if not value['lists'][identifier]['deleted'] and not value['lists'][identifier].get('hidden', False)
                 and value['lists'][identifier].get('sampling_enabled', True)
                 and (value['lists'][identifier].get('bundle') or {}).get('state') != 'importing']
@@ -429,7 +442,7 @@ class ReferenceCatalog:
         completed_paths = set(completed_paths)
         with self.mutex:
             value = self._load()
-            identifiers = ([] if hidden_only else ['pool', 'all']) + [identifier for identifier in value['list_order']
+            identifiers = ([] if hidden_only or self.single_list_mode else ['pool', 'all']) + [identifier for identifier in value['list_order']
                 if (include_deleted or not value['lists'][identifier]['deleted'])
                 and (include_deleted or bool(value['lists'][identifier].get('hidden', False)) == hidden_only)]
             rows = []
@@ -703,10 +716,14 @@ class ReferenceCatalog:
 
     def freeze_list(self, list_id, expected_revision, completed_paths=(), include_completed=False):
         _revision(expected_revision); completed_paths = set(completed_paths)
+        if self.single_list_mode and list_id in ('pool','all'):
+            raise CatalogError('请选定一个具体任务列表；本机不使用混合任务池','single_list_required',409)
         with self.mutex:
             value = self._load()
             if value['revision'] != expected_revision:
                 raise CatalogError('图库已更新，请刷新列表后再选择', 'revision_conflict', 409)
+            if self.task_block_policy and list_id not in ['all','pool']+self.task_block_policy['list_ids']:
+                raise CatalogError('此列表不在本机采集任务范围内','sampling_scope',409)
             item = self._list(value, list_id)
             if item.get('hidden', False):
                 raise CatalogError('隐藏列表不参与采集，请先在隐藏列表页恢复', 'hidden_list', 409)

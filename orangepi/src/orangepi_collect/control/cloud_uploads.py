@@ -87,17 +87,23 @@ class UploadManager:
                 if not isinstance(entry,dict) or set(entry)!={'session_id','token'}:raise CloudError('批次选择无效')
                 path=self.store.path(entry['session_id']);meta=self.store.metadata(path)
                 if meta['token']!=entry['token'] or not meta['retained']:raise CloudError('批次状态已变化或尚未确认保留，请刷新列表')
+                if meta.get('qc_state')=='pending':raise CloudError('该段等待主机质检，尚不能作为已检数据上传')
                 old=next((job for job in reversed(self.state['jobs']) if job['session_id']==meta['id'] and not job.get('local_deleted')),None)
                 if old and old['state'] in ACTIVE|{'queued','paused','cleanup_queued','success'}:raise CloudError('所选批次已在队列或已上传，请刷新；失败任务请用重试')
                 ids.append((path,meta))
             if len({meta['id'] for _,meta in ids})!=len(ids):raise CloudError('批次不能重复选择')
+            daily=getattr(self,'daily_collection',None)
+            reports={}
+            if daily is not None:
+                for day in sorted({datetime.datetime.fromtimestamp(meta['created_unix'],CST).date().isoformat() for _,meta in ids}):
+                    report,_=daily.export(day);reports[day]=str(report)
             result=[]
             for path,meta in ids:
                 meta=dict(meta,day=datetime.datetime.fromtimestamp(meta['created_unix'],CST).date().isoformat())
                 identifier=uuid.uuid4().hex;remote=config['target_parent']+'/'+meta['day']+'/'+meta['id']+'-'+identifier[:8]
                 snapshot={k:meta.get(k) for k in ('id','token','reference_name','qc_level','day','duration','retained','reference_state')}
                 job=dict(id=identifier,session_id=meta['id'],source=str(path),allowed_root=str(root),volume=str(volume),source_token=meta['token'],
-                    recording=snapshot,settings=dict(config),remote_path=remote,state='queued',phase='等待上传',created_at=time.time(),
+                    daily_report=reports.get(meta['day']),recording=snapshot,settings=dict(config),remote_path=remote,state='queued',phase='等待上传',created_at=time.time(),
                     total_files=0,total_bytes=0,completed_files=0,completed_bytes=0,current_file='',error='',local_deleted=False)
                 self.state['jobs'].append(job);result.append(identifier)
             self.state['settings']=dict(config);self.state['paused']=False;self._save()

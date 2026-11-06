@@ -1,7 +1,7 @@
 # 部署说明
 
 此快照面向当前 Orange Pi / Linux aarch64 系统。先准备与现场兼容的内核、相机驱动、
-Rockchip MPP/GStreamer 插件、ROS Noetic 的 Python/GI 包以及 `/dev/icm20602` 驱动。
+Rockchip MPP/GStreamer 插件、系统 Python 3.8 的 GI 包以及 `/dev/icm20602` 驱动。
 这些系统依赖没有被伪装成可在任意电脑上通过 pip 安装的包。
 
 ## 1. 初始化本机设置
@@ -14,8 +14,9 @@ Rockchip MPP/GStreamer 插件、ROS Noetic 的 Python/GI 包以及 `/dev/icm2060
 
 ## 2. Python 环境
 
-安装 `uv` 后运行 `orangepi/scripts/setup_envs.sh` 和 `setup_eeg.sh`。
-硬件环境使用系统 Python 3.8 的系统包；框架与脑电使用独立 Python 3.11。
+安装 `uv` 后运行 `orangepi/scripts/setup_envs.sh`。
+硬件环境 `.venvs/hardware` 使用系统 Python 3.8 的系统包；框架使用独立 Python 3.11。
+11 月 6 日的当前 Pi 程序已停用脑电/阻抗入口，也不再启动 ROS；旧 `.venvs/ros` 不会被安装脚本删除。
 `deployment/manifests/runtime-versions.json` 是现场版本清单，仅用于对照，不能将其中所有系统包盲目替换为 PyPI 包。
 
 上传进程当前查找 `/home/orangepi/maintenance/uploader/venv/bin/python`。同样的 `orangepi` 用户环境可执行：
@@ -27,7 +28,7 @@ uv pip install --python /home/orangepi/maintenance/uploader/venv/bin/python \
 ```
 
 该 wheel 的依赖也需要安装。主硬件环境需有 `cryptography` 以保存本机上传凭据，
-以及当前程序需要的 numpy、Pillow、PyYAML、GI、GStreamer 和系统串口包。
+以及当前程序需要的 numpy、Pillow、PyYAML、GI、GStreamer 和系统串口包。相机预览使用系统 libturbojpeg；请安装与平台匹配的运行库，并确保 GStreamer 解码插件可用。
 语音依赖为 `dashscope`，密钥仅保存在本机私有目录。
 
 ## 3. 服务与运行文件
@@ -62,7 +63,7 @@ sudo systemctl enable --now embodied-pi-collect pi-phone-media embodied-pi-diagn
 systemctl status camd embodied-pi-collect pi-phone-media --no-pager
 ```
 
-手机整页刷新以加载新脚本。按页面完成本次 USB 枚举下的腕相机、肌电左右确认和脑电采前流程。
+手机整页刷新以加载新脚本。按页面完成本次 USB 枚举下的腕相机、肌电左右确认。
 开始、停止、保存以 Pi 返回的状态为准。
 
 ## 5. 更新现有设备
@@ -74,3 +75,5 @@ systemctl status camd embodied-pi-collect pi-phone-media --no-pager
 
 已有设备从旧服务名称升级时，先按 [媒体服务迁移说明](MIGRATION_PHONE_MEDIA.md) 完成切换。
 不要在采集回调仍运行时只更换共享内存的消费者端。
+
+本次版本同时更新采集端和 `/opt/pi-phone-media`。结束采集并完成保存后再安装，并重新启用 `embodied-pi-collect`、`pi-phone-media` 两项服务以载入新代码。新的安装不包含旧脑电阻抗 drop-in；现有机器若仍有该环境项，当前代码不会据此恢复已停用入口。

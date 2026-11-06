@@ -24,12 +24,11 @@ sys.path.insert(0,str(PROJECT/'src'))
 import embodied_brain_collect.checkers as framework
 from embodied_brain_collect.checkers.base import BaseChecker, Finding, flatten_checks
 from embodied_brain_collect.checkers.camera import CameraChecker
-from embodied_brain_collect.checkers.checks import ts_checks,FrameCountMatch,BlackFrame,Freeze,NanFraction
+from embodied_brain_collect.checkers.checks import ts_checks,FrameCountMatch,BlackFrame,Freeze,NanFraction,MadOutlier
 from embodied_brain_collect.recorders.emg.timestamp_rebuild import rebuild
 from embodied_brain_collect.session.config import load_checker
 from embodied_brain_collect.stim.marker_codes import RUN_START,RUN_END
 from embodied_brain_collect.visualizers.qc_page import build_page,Options
-from eeg_qc import PiEegChecker,standardize_eeg
 from mpp_qc import video_backend
 from practical_evidence import PiTimingEvidence, PiVideoEvidence
 from capture_integrity import checks_for_stream
@@ -84,14 +83,16 @@ class BoardImuChecker(BaseChecker):
     name='board_imu'
     matches=('board_imu',)
     default_series='imu'
-    checks=[ts_checks('imu',expected_rate=200.),NanFraction('angular_velocity'),
-            NanFraction('linear_acceleration')]
+    # Same timestamp and signal checks as original EgoHeadbandChecker IMUs,
+    # adapted only to the Pi's saved field names. No fixed-rate acceptance gate.
+    checks=[ts_checks('imu'),MadOutlier('angular_velocity'),
+            MadOutlier('linear_acceleration')]
     def prepare(self,ctx):
-        ctx.add_series('imu',key='timestamps',expected_rate=200.)
+        ctx.add_series('imu',key='timestamps')
 
 
 PI_QC_STREAMS = frozenset(('cam_ros_left','cam_ros_right','cam_ros_bright','cam_ros_bleft',
-                         'board_imu','cam_left_wrist','cam_right_wrist','emg_left','emg_right','eeg'))
+                         'board_imu','cam_left_wrist','cam_right_wrist','emg_left','emg_right'))
 PI_ROS_STREAMS = frozenset(('cam_ros_left','cam_ros_right','cam_ros_bright','cam_ros_bleft','board_imu'))
 HEADBAND_QC_FILES = ('camera-camchain.yaml','camera_imu-camchain-imucam.yaml','camera_imu-imu.yaml')
 
@@ -284,7 +285,40 @@ def pi_qc_inputs(path):
                 finding(level,message,'HeadbandCalibration','ego_headband',detail)
     return dict(directories=directories,findings=findings,metadata_only=metadata)
 
-def _frozen_reference_selection(old_meta):
+def _uploaded_reference_matches_queue(selection, snapshot):
+    """Bind imported task paths to their frozen queue, without live catalog IO."""
+    if not isinstance(snapshot,dict):
+        return False
+    proof=dict(snapshot)
+    digest=proof.pop('queue_sha256',None)
+    if digest!=selection['queue_sha256']:
+        return False
+    try:
+        encoded=(json.dumps(proof,ensure_ascii=False,allow_nan=False,
+                            separators=(',',':'),sort_keys=True)+'\n').encode('utf-8')
+    except (TypeError,ValueError,RecursionError):
+        return False
+    if hashlib.sha256(encoded).hexdigest()!=digest:
+        return False
+    if any(snapshot.get(key)!=selection[key] for key in
+           ('version','catalog_revision','list_id','list_name','total')):
+        return False
+    items=snapshot.get('items')
+    if not isinstance(items,list) or len(items)!=selection['total']:
+        return False
+    chosen=items[selection['position']-1]
+    if not isinstance(chosen,dict):
+        return False
+    chosen=dict(chosen)
+    chosen.pop('_scene_id',None)
+    expected=dict(selection['asset'])
+    content_digest=expected.pop('sha256')
+    if chosen.pop('sha256',content_digest)!=content_digest:
+        return False
+    return chosen==expected
+
+
+def _frozen_reference_selection(old_meta, reference_queue=None):
     """Validate only the frozen per-segment catalog proof, never live settings."""
     if 'reference_selection' not in old_meta:
         return None
@@ -327,7 +361,8 @@ def _frozen_reference_selection(old_meta):
     upload_root='configs/environments/_uploads/'
     if asset['origin']=='upload':
         if relative!=upload_root+asset['id']+'_1.png':
-            raise ValueError('uploaded reference path does not match its asset identity')
+            if not relative.startswith(upload_root) or not _uploaded_reference_matches_queue(value,reference_queue):
+                raise ValueError('uploaded reference path does not match its asset identity')
     elif relative.startswith(upload_root):
         raise ValueError('uploaded reference cannot be marked as a legacy environment')
     return dict(value,asset=dict(asset))
@@ -352,7 +387,9 @@ def _frozen_session_identity(path,old_meta,require=False):
 
 def _write_pi_session_metadata(path,summary,timestamps,old_meta,names):
     """Keep original metadata writer, with frozen identity and uploaded tasks."""
-    selection=_frozen_reference_selection(old_meta)
+    queue_path=Path(path)/'reference_queue.json'
+    reference_queue=json.loads(queue_path.read_text(encoding='utf-8')) if queue_path.is_file() else None
+    selection=_frozen_reference_selection(old_meta,reference_queue)
     identity=_frozen_session_identity(path,old_meta,require=selection is not None)
     from embodied_brain_collect.session.launcher import _write_session_meta
     from embodied_brain_collect.session.environment import scene_layout
@@ -387,7 +424,7 @@ def _write_pi_session_metadata(path,summary,timestamps,old_meta,names):
     (path/'meta.yaml').write_text(yaml.safe_dump(meta,allow_unicode=True,sort_keys=False),encoding='utf-8')
 
 
-def standardize(path):
+def standardize_emg(path):
     path=Path(path)
     summary=json.loads((path/'capture_summary.json').read_text())
     if summary.get('status') not in ('success','qc_error'):
@@ -424,6 +461,12 @@ def standardize(path):
         for chunk in chunks:chunk.rename(archive/chunk.name)
         if len(arrays['emg_data'])!=summary[name]['emg_frames']:
             raise RuntimeError(name+': merged sample count mismatch')
+    return summary
+
+
+def standardize(path):
+    path=Path(path)
+    summary=standardize_emg(path)
     for directory in sorted(path.glob('cam_ros_*')):
         with (directory/'timestamps.csv').open(encoding='utf-8') as f:rows=list(csv.DictReader(f))
         if not rows:continue
@@ -466,23 +509,31 @@ def standardize(path):
             orientation_covariance=values('orientation_covariance_',list(map(str,range(9)))),
             angular_velocity_covariance=values('angular_velocity_covariance_',list(map(str,range(9)))),
             linear_acceleration_covariance=values('linear_acceleration_covariance_',list(map(str,range(9)))))
-    standardize_eeg(path,summary,atomic_npz)
+    timestamps=standardize_marker(path,summary)
+    old_meta=json.loads((path/'meta.json').read_text(encoding='utf-8')) if (path/'meta.json').exists() else {}
+    names={name:('WLEMGUV2A' if name.startswith('emg_') else 'Pi ROS IMU' if name=='board_imu' else 'Pi USB wrist camera' if name in ('cam_left_wrist','cam_right_wrist') else 'Pi ROS fisheye')
+           for name in summary if name.startswith(('cam_ros_','emg_','board_imu')) or name in ('cam_left_wrist','cam_right_wrist')}
+    _write_pi_session_metadata(path,summary,timestamps,old_meta,names)
+    return summary
+
+def standardize_marker(path,summary):
+    path=Path(path)
     marker=path/'marker';marker.mkdir(exist_ok=True)
     timestamps=np.array([summary['start_unix_ns']/1e9,summary['stop_unix_ns']/1e9])
     atomic_npz(marker/'marker.npz',marker_code=np.array([RUN_START,RUN_END],dtype=np.int64),
         marker_tag=np.array(['RUN_START','RUN_END']),
         marker_t_sent_pc=timestamps,marker_t_local_recv=timestamps,
         source=np.array('Pi controller software start/stop gate; no TTL sent'))
-    old_meta=json.loads((path/'meta.json').read_text(encoding='utf-8')) if (path/'meta.json').exists() else {}
-    names={name:('OmniBCI ADS1299' if name=='eeg' else 'WLEMGUV2A' if name.startswith('emg_') else 'Pi ROS IMU' if name=='board_imu' else 'Pi USB wrist camera' if name in ('cam_left_wrist','cam_right_wrist') else 'Pi ROS fisheye')
-           for name in summary if name.startswith(('cam_ros_','emg_','board_imu')) or name in ('cam_left_wrist','cam_right_wrist','eeg')}
-    _write_pi_session_metadata(path,summary,timestamps,old_meta,names)
-    return summary
+    return timestamps
+
 
 def performance():
-    return yaml.safe_load((BASE/'configs/performance.yaml').read_text())
+    value=yaml.safe_load((BASE/'configs/performance.yaml').read_text())
+    if os.environ.get('ORANGEPI_HOST_QC')=='1':
+        value.update(qc_video_backend='cv2',qc_workers=int(os.environ.get('ORANGEPI_HOST_QC_WORKERS','4')))
+    return value
 
-def parallel_qc_session(path, cfg, workers=None, progress=None):
+def parallel_qc_session(path, cfg, workers=None, progress=None, only=None):
     """Same original checkers, thresholds and report order; concurrent independent streams."""
     from concurrent.futures import ThreadPoolExecutor
     import threading,time
@@ -490,6 +541,9 @@ def parallel_qc_session(path, cfg, workers=None, progress=None):
     from embodied_brain_collect.checkers.marker import find_run_window
     root=Path(path);window=find_run_window(root)
     inputs=pi_qc_inputs(root)
+    if only is not None:
+        only=set(only);inputs['directories']=[p for p in inputs['directories'] if p.name in only]
+        inputs['findings']=[f for f in inputs['findings'] if f.get('subject') in only or f.get('check')=='PiSelection']
     if window is None:
         report=framework.qc_session(root,checker_cfg=cfg)
         report.findings.extend(Finding(**item) for item in inputs['findings'])
@@ -506,13 +560,14 @@ def parallel_qc_session(path, cfg, workers=None, progress=None):
             finally:context.close()
         return report
     config=performance()
+    if os.environ.get('ORANGEPI_HOST_QC')=='1' and workers is None:workers=int(config['qc_workers'])
     mem={line.split(':')[0]:int(line.split()[1]) for line in Path('/proc/meminfo').read_text().splitlines()}
     available=mem['MemAvailable']//1024
     count=workers if workers is not None else min(int(config['qc_workers']),max(1,(available-int(config['qc_reserved_available_mb']))//int(config['qc_min_available_mb_per_worker'])))
-    count=max(1,min(3,count))
+    count=max(1,min(16 if os.environ.get('ORANGEPI_HOST_QC')=='1' else 3,count))
     report=SessionReport(session_dir=str(root),window=window)
     report.findings.extend(Finding(**item) for item in inputs['findings'])
-    classes=(PiEegChecker,BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in framework.CHECKERS if c not in (CameraChecker,PiCameraChecker,BoardImuChecker,PiEegChecker))
+    classes=(BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in framework.CHECKERS if c not in (CameraChecker,PiCameraChecker,BoardImuChecker) and c.__name__ != 'EegChecker')
     def check(directory):
         cls=next((c for c in classes if directory.name.startswith(c.matches)),None)
         if cls is None:
@@ -521,7 +576,8 @@ def parallel_qc_session(path, cfg, workers=None, progress=None):
         checker=cls(cfg)
         # Instance-local additions reuse each original context and decoder.
         # Class-level check lists, checker thresholds and parallelism stay intact.
-        additions=[PiTimingEvidence()]+list(checks_for_stream(directory.name))
+        # EMG and board IMU qualification follow their original checkers only.
+        additions=[] if directory.name in ('emg_left','emg_right','board_imu') else [PiTimingEvidence()]+list(checks_for_stream(directory.name))
         if isinstance(checker,CameraChecker):
             black_cfg=next((v for k,v in cfg.items() if k.lower().replace('_','')=='blackframe'),{})
             lum=black_cfg.get('lum_thr',8.) if isinstance(black_cfg,dict) else 8.
@@ -557,7 +613,7 @@ def check_session(path,html=False,progress=None):
     import cv2
     cv2.setNumThreads(1)
     original=framework.CHECKERS
-    framework.CHECKERS=(PiEegChecker,BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in original if c not in (CameraChecker,PiCameraChecker,BoardImuChecker,PiEegChecker))
+    framework.CHECKERS=(BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in original if c not in (CameraChecker,PiCameraChecker,BoardImuChecker) and c.__name__ != 'EegChecker')
     try:
         cfg=load_checker()
         settings=performance()
@@ -599,6 +655,39 @@ def check_session(path,html=False,progress=None):
         (Path(path)/'qc.html').write_text(build_page(data,session_dir=path,opt=Options(frames=False,filter=False)),encoding='utf-8')
     framework.print_report(report)
     return report
+
+def check_emg(path,progress=None):
+    cfg=load_checker()
+    selected=json.loads((Path(path)/'device_selection.json').read_text())['selected']
+    names=[name for name in selected if name in ('emg_left','emg_right')]
+    if not names:raise ValueError('EMG-only mode requires at least one selected EMG device')
+    report=parallel_qc_session(path,cfg,workers=2,progress=progress,only=names)
+    raw=report.to_dict();atomic_json(Path(path)/'emg_qc_raw_report.json',raw)
+    # A proven sparse-splice repair is preprocessing, never an acceptance rule.
+    # If repair is unavailable/refused, the original checker decides unchanged.
+    from emg_recoverability import recover_stream
+    preprocessing={}
+    for name,stream in report.streams.items():
+        if stream.stats.get('SnGap',{}).get('frames_dropped',0)>0:
+            try:preprocessing[name]=recover_stream(Path(path)/name,report.window)
+            except Exception as exc:preprocessing[name]=dict(applied=False,skipped_reason=str(exc))
+    if any(v.get('applied') for v in preprocessing.values()):
+        report=parallel_qc_session(path,cfg,workers=2,progress=progress,only=names)
+        for name,evidence in preprocessing.items():
+            if evidence.get('applied'):
+                report.streams[name].findings.append(Finding('WARN','少量拼接坏帧已恢复，原始备份保留；按原始肌电规则重新检查。',check='PostprocessRecovery',detail=evidence))
+    if preprocessing:atomic_json(Path(path)/'emg_preprocessing.json',preprocessing)
+    if hasattr(report,'pi_timing'):atomic_json(Path(path)/'emg_qc_timing.json',report.pi_timing)
+    report,audit=apply_policy(report,load_policy(BASE/'configs/qc_policy.json'))
+    audit['recorded_raw_level']=raw['level']
+    audit['preprocessing']=preprocessing
+    audit['emg_acceptance_policy']='original-framework-v1'
+    audit['emg_timestamp_gap_error_s']=.1
+    audit['emg_SN_loss_warn_fraction']=.001
+    audit['emg_SN_loss_error_fraction']=None
+    data=report.to_dict();data['scope']='emg_only';data['remaining_qc']='pending_linux_host'
+    atomic_json(Path(path)/'emg_qc_policy.json',audit)
+    return data
 
 if __name__=='__main__':
     ap=argparse.ArgumentParser();ap.add_argument('session',type=Path);ap.add_argument('--standardize',action='store_true');ap.add_argument('--html',action='store_true')

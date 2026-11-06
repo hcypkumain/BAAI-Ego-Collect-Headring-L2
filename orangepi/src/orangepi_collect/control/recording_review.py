@@ -57,7 +57,7 @@ def describe(root):
     if not root:return None
     root=Path(root)
     if not (root/'stop_gate.json').exists():return None
-    summary=read_json(root/'capture_summary.json');report=read_json(root/'qc_report.json')
+    summary=read_json(root/'capture_summary.json');report=read_json(root/'qc_report.json') or read_json(root/'emg_qc_report.json')
     videos=[]
     for name,label in CAMERAS.items():
         try:
@@ -67,12 +67,12 @@ def describe(root):
                            'duration':float(probe.get('duration',0))})
         except (OSError,ValueError,IndexError,TypeError):pass
     findings=[f.get('message','') for f in report.get('findings',[]) if f.get('level') in ('WARN','ERROR')]
-    qc=summarize_qc(report)
+    qc=summarize_qc(dict(report,preprocessing=read_json(root/'emg_preprocessing.json')))
     for name,stream in report.get('streams',{}).items():
         label=CAMERAS.get(name,{'emg_left':'左臂肌电','emg_right':'右臂肌电'}.get(name,name))
         findings.extend(label+'：'+f.get('message','') for f in stream.get('findings',[]) if f.get('level') in ('WARN','ERROR'))
-    return {'session':root.name,'videos':videos,'qc_level':report.get('level'),
-            'error_count':qc['error_count'],'warn_count':qc['warn_count'],
+    return {'qc_state':summary.get('qc_state'),'qc_scope':report.get('scope','full'),'session':root.name,'videos':videos,'qc_level':report.get('level'),
+            'error_count':qc['error_count'],'warn_count':qc['warn_count'],'qc_issues':qc['findings'][:5],
             'qc_modalities':{name:{k:v for k,v in value.items() if k!='findings'} for name,value in qc['modalities'].items()},
             'warnings':list(summary.get('warnings',[]))+findings,
             'qc_elapsed_seconds':summary.get('qc_elapsed_seconds')}

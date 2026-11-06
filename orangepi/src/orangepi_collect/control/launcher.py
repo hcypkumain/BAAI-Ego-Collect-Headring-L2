@@ -54,7 +54,6 @@ class ConsoleKeyboard:
 from keyboard_input import Keyboard
 from web_controls import WebControls
 from emg_insertion_controls import EmgInsertionControls
-from dashboard import impedance_allows_recording
 from reference_controls import ReferenceControlsMixin,reference_cli_queue
 
 def image_queue(selected=None):
@@ -122,13 +121,18 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
 
     def device_label(self,name,fallback):
         config=getattr(self,'session_devices',None) or devices()
-        if name=='eeg':return config.get('eeg',{}).get('label',fallback)
         for section in ('emg','wrist_cameras'):
             if name in config.get(section,{}):return config[section][name]['label']
         return fallback
 
     def error_voice(self, errors):
         text=' '.join(errors)
+        if '即时质检' in text:
+            # This is a saved-data verdict, not an unidentified device crash.
+            self.last_help=list(dict.fromkeys(getattr(self,'last_help',[])+list(errors)))
+            reasons=[str(item).split('处理建议：',1)[0] for item in errors[:2]]
+            self.voice.say('。'.join(reasons)+'。具体原因和处理建议已在录制结果中按左右侧显示。')
+            return
         labels=[]
         for key,label in [('emg_left','左臂肌电'),('emg_right','右臂肌电'),
                           ('cam_ros_bleft','后左相机'),('cam_ros_bright','后右相机'),
@@ -163,8 +167,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             category=module.slot_category(token)
             if category and category not in categories:categories.append(category)
         if 'serial' in text.lower() and 'emg' not in categories:categories.append('emg')
-        messages=[('脑电数据已中断。请确认脑电帽电源和 USB 连接，再点击重新准备本段。'
-                   if category=='eeg' else module.SLOT_GUIDES[category]) for category in categories]
+        messages=[module.SLOT_GUIDES[category] for category in categories if category in module.SLOT_GUIDES]
         if 'cam_ros' in text:messages.append('板载相机请同时检查 ROS 相机驱动服务。')
         if 'board_imu' in text:messages.append('请检查板载惯性传感器驱动服务是否持续发布数据。')
         if not messages:messages=['请查看当前会话日志中的错误详情，排查后点击重新准备。']
@@ -253,8 +256,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 reference_sha256=selection['asset']['sha256'],reference_selection=selection,
                 test=bool(self.smoke),stim=False,pygame=False,
                 device_config=resolved,selected_devices=list(self.selected_devices),storage_config=storage_paths.config(),
-                keyboard_flow='Touch workflow: prepare and view reference without time limit, impedance, manual camera check, return to preparation, separate formal start, 5-to-1 countdown, hold 3s to stop, save or retry same task',
+                keyboard_flow='Touch workflow: prepare and view reference without time limit, manual camera check, return to preparation, separate formal start, 5-to-1 countdown, hold 3s to stop, save or retry same task',
                 timestamp_note='Shared host start gate; camera ROS source stamps and EMG host arrival stamps retained. No hardware synchronization is claimed.')
+            from qc_deferred import load as qc_execution
+            metadata['qc_mode']=qc_execution(BASE)['mode']
             self.reference_set_raw_metadata(metadata)
             atomic_json(self.path/'meta.json',metadata)
             atomic_json(self.path/'reference_queue.json',self._reference_active['entry']['snapshot'])
@@ -310,9 +315,6 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if not self.worker or self.worker.poll() is not None or self.worker_status().get('state')!='ready':
             self.voice.say('设备尚未就绪，请先准备本段。')
             return False
-        if 'eeg' in (self.selected_devices or ()) and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
-            self.voice.say('请先结束阻抗检查、确认结果，并等待普通脑电采样恢复。')
-            return False
         checks=getattr(dashboard,'camera_checks',None)
         if checks is not None and not checks.approved():
             self.voice.say('请先完成全部相机同屏检查，并确认头环和腕部相机方向。')
@@ -343,9 +345,6 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.ui_publish(force=True)
 
     def _begin_after_privacy(self):
-        if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
-            self.voice.say('请先完成脑电阻抗检查，并确认检测已结束、设备配置已恢复。')
-            return
         if self.worker_status().get('state')!='ready':
             self.voice.say('设备尚未就绪，请等待准备完成后再点击开始采集。')
             return
@@ -364,10 +363,6 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             if self.worker.poll() is not None or self.worker_status().get('state')!='ready':
                 self.poll()
                 return
-            if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
-                self.state='ready';self.state_write()
-                self.voice.say('脑电阻抗检查状态已变化，请检查后再开始。')
-                return
             started=time.monotonic()
             self.countdown_status['remaining']=remaining
             self.countdown_status['tick_unix_ms']=round(time.time()*1000)
@@ -384,10 +379,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.keyboard.discard()
         interrupt=getattr(self.voice,'interrupt',None)
         if callable(interrupt):interrupt()
-        if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
-            self.state='ready';self.state_write();return
         # A cancellation or owner failure can arrive during the final countdown sleep.
-        # Keep the impedance gate above, and recheck immediately before START.
+        # Recheck the worker immediately before START.
         if self.quit:
             return
         if not self.worker or self.worker.poll() is not None or self.worker_status().get('state')!='ready':
@@ -420,7 +413,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.state='finalizing'
         self.finalize_deadline=time.monotonic()+1800
         self.state_write()
-        self.voice.say('采集已停止，正在保存并检验，请等待。')
+        from qc_deferred import load as qc_execution
+        mode=qc_execution(BASE)['mode']
+        self.voice.say('采集已停止，正在保存并'+('完成肌电检查，其余待主机质检。' if mode=='emg_only' else '标记待主机质检。' if mode=='deferred' else '检验，请等待。'))
 
     def discard_and_retry(self):
         if self.state!='confirm_stop':raise ValueError('请先停止采集，再选择重采本段')
@@ -491,7 +486,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         scanned_fingerprint=fingerprint(devices().get('auto_discovery',{}))
         self.state='scanning';self.state_write()
         try:
-            result=subprocess.run([str(BASE/'.venvs/ros/bin/python'),str(SRC/'acquisition/scan_devices.py')],
+            result=subprocess.run([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/scan_devices.py')],
                 capture_output=True,text=True,timeout=15)
             if result.returncode:raise ValueError('设备扫描失败，请查看驱动服务')
             scan=json.loads(result.stdout)
@@ -626,7 +621,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if not wizard.unchanged(wrist_calibration.boot_id(),wrist_calibration.current_stamp(wizard.config)):
             self.calibration_connection_changed();return
         try:
-            result=subprocess.run([str(BASE/'.venvs/ros/bin/python'),str(SRC/'acquisition/calibration_probe.py')],
+            result=subprocess.run([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/calibration_probe.py')],
                 input=json.dumps(wizard.config),capture_output=True,text=True,timeout=12)
             data=json.loads(result.stdout)
             if data.get('error')=='devices_changed':
@@ -851,11 +846,13 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 atomic_json(summary_path,dict(status='error',errors=['worker exited without final summary: exit='+str(self.worker.returncode)],time=time.time()))
             summary=json.loads(summary_path.read_text())
             owner_error=getattr(self,'owner_command_error',None)
-            ok=summary.get('status')=='success' and self.worker.returncode==0 and not owner_error
+            pending=summary.get('status')=='pending_qc' and summary.get('storage_durability',{}).get('completed') is True
+            ok=(summary.get('status')=='success' or pending) and self.worker.returncode==0 and not owner_error
             # Detailed findings remain in the report and web review. Do not
             # postpone ledger commit behind a long queue of spoken warnings.
             retry=getattr(self,'retry_requested',False)
             outcome='error' if not ok and summary.get('status')!='cancelled' else 'failed' if retry else 'success' if ok else 'interrupted'
+            if pending and ok and not retry:outcome='pending_qc'
             if owner_error:outcome='error'
             if self.quit and not getattr(self,'keep_requested',False):outcome='interrupted'
             meta_path=self.path/'meta.yaml'
@@ -868,10 +865,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 meta.update(session_dir=str(self.path),environment=raw.get('reference_image','').replace('configs/environments/','',1),pi=raw)
             meta.update(self.reference_session_metadata())
             meta['status']=outcome
-            meta['retention_state']='kept' if outcome=='success' else outcome
-            meta['retained_at_unix']=time.time() if outcome=='success' else None
-            meta['reference_state']='collected' if outcome=='success' else 'uncollected'
-            meta['upload_state']='retained_for_upload' if outcome=='success' else 'excluded'
+            meta['retention_state']='kept_pending_qc' if outcome=='pending_qc' else 'kept' if outcome=='success' else outcome
+            meta['retained_at_unix']=time.time() if outcome in ('success','pending_qc') else None
+            meta['reference_state']='pending_qc' if outcome=='pending_qc' else 'collected' if outcome=='success' else 'uncollected'
+            meta['upload_state']='pending_qc' if outcome=='pending_qc' else 'retained_for_upload' if outcome=='success' else 'excluded'
             ledger.atomic_yaml(meta_path,meta)
             if retry:
                 atomic_json(self.path/'retry.json',dict(status=outcome,reason='operator requested retry',reference_image=str(self.image),at=time.time()))
@@ -897,10 +894,14 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.voice.say('本条未标记已用。请点击重采本段，或重复播报错误排查提示。')
                 return
             self.state='idle';self.state_write()
+            if pending:
+                self.voice.say('本段已保存，等待主机质检。正在准备下一任务，尚未开始正式录制。')
+                self.prepare();return
             hint='本段存在质量提示，请在网页查看详情。' if summary.get('warnings') or summary.get('qc_level')=='WARN' else ''
             self.voice.say('本段已保存并完成检验。'+hint+'可以回看录像，或点击准备本段开始下一段任务。')
 
     def key(self,key):
+        if self.state in ('usb_importing','usb_import_recovery') and key!='q':return False
         if key in ('a','b','c','d','enter','escape'):
             interrupt=getattr(self.voice,'interrupt',None)
             if callable(interrupt):interrupt()

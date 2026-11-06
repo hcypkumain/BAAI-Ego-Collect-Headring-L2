@@ -59,6 +59,8 @@ def upload(payload):
             manifest=source_manifest(source);atomic(manifest_path,manifest)
         else:check_source(source,manifest)
         emit(total_files=manifest['total_files'],total_bytes=manifest['total_bytes'],completed_files=0,completed_bytes=0)
+        from standard_bridge import prepare
+        package,package_manifest,conversion=prepare(job,directory,manifest,emit)
         fingerprint=hashlib.sha256(payload['credentials']['ak'].encode()).hexdigest()
         attempt=read_json(directory/'platform.json',{})
         if attempt and attempt.get('account')!=fingerprint:raise CloudError('本批次已绑定另一组平台凭据，请使用原上传账号重试')
@@ -66,7 +68,7 @@ def upload(payload):
         projects=client.get_project_list() or []
         matches=[row for row in projects if str(row.get('projectName','')).strip().casefold()==job['settings']['project_name'].strip().casefold()]
         if len(matches)!=1:raise CloudError('找不到唯一匹配的授权项目，请核对项目名称')
-        client.project_id=matches[0]['projectId'];client.data_format=vendor.detect_data_format(str(source))
+        client.project_id=matches[0]['projectId'];client.data_format='LerobotDataset3.1'
         if not client.get_eai_task(job['settings']['task_id'] if job['settings']['task_id'] is not None else -99):raise CloudError('平台任务 ID 无效或无权限')
         bucket=client.get_connection(False).get_bucket(config.BUCKET_NAME)
         prefix=config.UPLOAD_TARGET+'/'+job['remote_path']+'/'
@@ -74,28 +76,28 @@ def upload(payload):
         if not attempt:
             if remote:raise CloudError('目标目录已有数据，本次未覆盖；请联系维护人员核对')
             data=dict(eai_task_id=client.eai_task_id,task_name=job['remote_path'],source_path=str(source),target_root_path=job['remote_path'],
-                target_full_path=job['remote_path'],total_file_count=manifest['total_files'],total_size_bytes=manifest['total_bytes'],project_id=client.project_id)
+                target_full_path=job['remote_path'],total_file_count=package_manifest['total_files'],total_size_bytes=package_manifest['total_bytes'],project_id=client.project_id)
             if not client.beigin_upload_eai_task(data) or not client.eai_upload_task_id:raise CloudError('平台尚未确认创建上传任务，未开始传输')
-            attempt=dict(account=fingerprint,upload_task_id=client.eai_upload_task_id,project_id=client.project_id,manifest_digest=manifest['digest'])
+            attempt=dict(account=fingerprint,upload_task_id=client.eai_upload_task_id,project_id=client.project_id,manifest_digest=manifest['digest'],package_version='pi-mf-v3.1-2',package_digest=package_manifest['digest'])
             atomic(directory/'platform.json',attempt)
         else:
             if attempt['manifest_digest']!=manifest['digest'] or attempt['project_id']!=client.project_id:raise CloudError('原上传任务与当前文件或项目不一致')
             client.eai_upload_task_id=attempt['upload_task_id']
-        expected={prefix+row['path']:row['bytes'] for row in manifest['files']}
+        expected={prefix+row['path']:row['bytes'] for row in package_manifest['files']}
         remote_map={row.name:int(row.size) for row in remote}
         if set(remote_map)-set(expected):raise CloudError('目标目录存在本清单以外的文件，已停止以避免混入其他批次')
         completed=0;done_bytes=0;last_platform=0
-        emit(state='uploading',phase='上传文件',platform_task_id=client.eai_upload_task_id)
+        emit(state='uploading',phase='上传标准数据包',total_files=package_manifest['total_files'],total_bytes=package_manifest['total_bytes'],completed_files=0,completed_bytes=0,platform_task_id=client.eai_upload_task_id)
         # A previous worker was interrupted: identical manifest and account are
         # required before the vendor's multipart continuation can be reused.
-        for row in manifest['files']:
-            key=prefix+row['path'];path=source/row['path']
+        for row in package_manifest['files']:
+            key=prefix+row['path'];path=package/row['path']
             emit(current_file=row['path'],completed_files=completed,completed_bytes=done_bytes)
             if remote_map.get(key)!=row['bytes']:
                 if row['bytes']==0:upload_empty(client,config,key)
                 else:
                     adapter=Progress(row['bytes'],lambda n:emit(completed_bytes=done_bytes+n))
-                    returned=client.upload_file(str(path),job['remote_path'],base_dir=str(source),skip_dir_check=True,show_progress=False,pbar=adapter)
+                    returned=client.upload_file(str(path),job['remote_path'],base_dir=str(package),skip_dir_check=True,show_progress=False,pbar=adapter)
                     if not isinstance(returned,tuple) or len(returned)!=2 or returned[1]!=key:raise CloudError('上传器未确认文件成功，已停止并保留本地数据')
             completed+=1;done_bytes+=row['bytes']
             emit(completed_files=completed,completed_bytes=done_bytes)
@@ -103,17 +105,18 @@ def upload(payload):
                 client.update_upload_eai_task_progress(dict(upload_task_id=client.eai_upload_task_id,success_file_count=completed,failed_file_count=0,data_format=client.data_format));last_platform=time.monotonic()
         emit(state='verifying',phase='核验云端文件与本地清单',current_file='')
         client._refresh_sts_if_needed();bucket=client.get_connection(False).get_bucket(config.BUCKET_NAME)
-        verified=verify_remote(manifest,prefix,bucket.list(prefix=prefix,delimiter=''))
+        verified=verify_remote(package_manifest,prefix,bucket.list(prefix=prefix,delimiter=''))
+        check_source(package,package_manifest)
         check_source(source,manifest)
         if not client.update_upload_eai_task_progress(dict(upload_task_id=client.eai_upload_task_id,success_file_count=completed,failed_file_count=0,data_format=client.data_format)):
             raise CloudError('文件已传输，但平台尚未确认最终进度；重试核验后才可清理')
         if not client.complete_upload_eai_task('SUCCESS'):raise CloudError('文件已核验，但平台尚未确认上传完成；暂不可清理')
         receipt=dict(version=1,status='success',session_id=job['session_id'],job_id=job['id'],remote_path=job['remote_path'],
-                     manifest_digest=manifest['digest'],platform_task_id=client.eai_upload_task_id,project_id=client.project_id,
+                     manifest_digest=manifest['digest'],package_digest=package_manifest['digest'],package_path=str(package),package_version='pi-mf-v3.1-2',data_format=client.data_format,platform_task_id=client.eai_upload_task_id,project_id=client.project_id,
                      platform_completion_acknowledged=True,verification=verified,account=fingerprint,completed_at=time.time())
         atomic(directory/'receipt.json',receipt)
         emit(state='success',phase='已上传并核验，可清理本地数据',completed_at=receipt['completed_at'],receipt=receipt,
-             completed_files=manifest['total_files'],completed_bytes=manifest['total_bytes'],current_file='')
+             completed_files=package_manifest['total_files'],completed_bytes=package_manifest['total_bytes'],current_file='')
 
 def cleanup(payload):
     job=payload['job'];source=Path(job['source']);directory=Path(payload['directory']);base=Path(payload['base'])
@@ -122,6 +125,8 @@ def cleanup(payload):
         if not receipt or receipt.get('status')!='success' or receipt.get('manifest_digest')!=manifest.get('digest') or not receipt.get('platform_completion_acknowledged'):
             raise CloudError('没有完整云端成功回执，禁止删除本地数据')
         if source.resolve().parent!=Path(job['allowed_root']).resolve() or source.name!=job['session_id']:raise CloudError('清理目录越界')
+        from standard_bridge import check_cleanup,cleanup_cache
+        check_cleanup(job,directory,receipt)
         intent_path=directory/'cleanup.json';intent=read_json(intent_path)
         if intent is None:
             check_source(source,manifest)
@@ -137,12 +142,19 @@ def cleanup(payload):
             os.rename(str(source),str(destination));sync_dir(source.parent);sync_dir(destination.parent)
         emit(state='cleaning',phase='删除已核验的本地副本')
         if destination.exists():shutil.rmtree(str(destination));sync_dir(destination.parent)
+        cleanup_cache(job,directory,receipt)
         intent.update(phase='complete',completed_at=time.time());atomic(intent_path,intent)
         # The reference ledger and receipt are intentionally retained. This is
         # storage cleanup, not invalidating/deleting a failed recording.
         emit(state='success',phase='云端已上传，本地副本已清理',local_deleted=True,cleaned_at=time.time())
 
+def cancel_group(signum,frame):
+    signal.signal(signum,signal.SIG_IGN)
+    if os.getpgrp()==os.getpid():os.killpg(os.getpgrp(),signal.SIGTERM)
+    raise SystemExit(128+signum)
+
 def main():
+    signal.signal(signal.SIGTERM,cancel_group)
     payload=json.loads(sys.stdin.readline());mode=payload.get('mode','upload');directory=Path(payload['directory'])
     directory.mkdir(parents=True,exist_ok=True);os.chdir(str(directory));os.umask(0o077)
     # Never forward native stdout/stderr: upstream logs can contain tokens.

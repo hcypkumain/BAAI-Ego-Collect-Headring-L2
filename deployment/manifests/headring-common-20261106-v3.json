@@ -1,0 +1,30 @@
+{
+  "version": "headring-common-20261106-v3",
+  "date": "2026-11-06",
+  "files": {
+    "orangepi/src/orangepi_collect/acquisition/capture.py": "dd5bbcf4cd1a8c76eaf9b50104d3f53463201eef70230c5a185ca93f896f602a",
+    "orangepi/src/orangepi_collect/acquisition/imu_source.py": "1b41ded5054f2b02f95b2d26e1abd447a3d934901dc7fcc481d27e278e867d6a",
+    "orangepi/src/orangepi_collect/common/qc_deferred.py": "f7e1e57a6cd8389824544a2ed7361175269a6e86c35cacb3b6260988cba3da0a",
+    "orangepi/src/orangepi_collect/common/qc_explanations.py": "570061c9ed5991e3f608ec114adc3ab6e36380d8f0d3425b4045fb3331a7ed26",
+    "orangepi/src/orangepi_collect/control/dashboard.py": "b81fa9b8d509f7ccaa71ee7337bce1feaa43707ac072712db15eb81a08bbf8ea",
+    "orangepi/src/orangepi_collect/control/launcher.py": "ad64a4e87f4883e623f0eeef04943c968785ee77c391a27be3dbe7fb7e1a686f",
+    "orangepi/src/orangepi_collect/control/manual_reference.py": "b943b8b785e32d67ffa93cc5b81d8353c3781ff719a8f963365b97d7ea831a8e",
+    "orangepi/src/orangepi_collect/control/phone_app.js": "482b0635f50a97f4aeb97e00e26ae80b238f691fac5eb4bb2e3ffff75490c2ee",
+    "orangepi/src/orangepi_collect/control/phone_references.js": "75f109974bc9262e84fab4f2b4e2d7d43ca3dae7322e80a55683a35445cb358e",
+    "orangepi/src/orangepi_collect/control/phone_shell.js": "cbf4391f15eb0458cd9e827db2193f27bca1ed19c1cd0a63808651d1ac7c738d",
+    "orangepi/src/orangepi_collect/control/qc_details.py": "19836f91c833d234ce9066f1bfe4cdffefba9c457c6ab46bbba28dbaebc65dc7",
+    "orangepi/src/orangepi_collect/control/recording_review.py": "dcb39f5e1f0949328ac2d4f24a506c684e8d5089be91a96cf25606784cff84cd",
+    "orangepi/src/orangepi_collect/control/reference_controls.py": "6fba532ac9bd34e9a1fc3e9620f47e02749f0fe663bcf69bbe0f407f458ddecd",
+    "orangepi/src/orangepi_collect/control/task_block_sampling.py": "caafe63e538d8fc9dfb417ab2cf24bfeb479098f7c65961de2b10b8754cf0b86",
+    "orangepi/src/orangepi_collect/control/web_controls.py": "51209c7132b04f8940450abd2c9352a65330370696842f6d33cc9f151a00d018",
+    "orangepi/src/orangepi_collect/framework/capture_integrity.py": "65172cdb5d17ec448d2ee45389af428a40aebd0f922c74fd6854f61a6072aee7",
+    "orangepi/src/orangepi_collect/framework/emg_recoverability.py": "89bdc0ff0c3e336e412350e6e3df48a6f12594e050002d3e9d2ff042e34d4b40",
+    "orangepi/src/orangepi_collect/framework/framework_qc.py": "81d3862cc4c39216b61e463eba48b7609cbb7458e3ccf59e4abc4ad8582233c8",
+    "orangepi/src/orangepi_collect/framework/gap_thresholds.py": "aaf1ab0a02a54e916b80a0f887f4f8cab53f04c379c8b9f8757b3af085c6d823",
+    "orangepi/src/orangepi_collect/framework/qc_policy.py": "b9df7e4382ce9cc75c4c5c4d327d0d754bf1642a7865764b48a1f50c54488a0f",
+    "services/phone-media/phone_media.py": "f974ace06c7e266d900c650a9cbe1adf570f1991672aa158f2bc1a73445c3de0",
+    "services/phone-media/qc_details.py": "19836f91c833d234ce9066f1bfe4cdffefba9c457c6ab46bbba28dbaebc65dc7",
+    "services/phone-media/qc_explanations.py": "570061c9ed5991e3f608ec114adc3ab6e36380d8f0d3425b4045fb3331a7ed26",
+    "services/phone-media/recording_replay.py": "3af89c0f680e8c4107a27b826e34ffa7af1f61ddc8225594729410d3414878af"
+  }
+}

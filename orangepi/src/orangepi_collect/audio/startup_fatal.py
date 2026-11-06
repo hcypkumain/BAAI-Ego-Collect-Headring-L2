@@ -20,7 +20,13 @@ def play_startup_fatal(base, timeout=12.0):
         assets = Path(base)/'assets/cloud_voice'
         with (assets/'manifest.json').open('rb') as handle: raw = handle.read(32769)
         if len(raw)>32768: return 3
-        expected = json.loads(raw.decode('utf-8'))['fatal']['sha256']
+        entry = json.loads(raw.decode('utf-8'))['fatal']
+        # Startup preflight failures are camera/storage/controller failures.
+        # The legacy clip incorrectly calls every such failure a voice outage.
+        if '语音' in entry.get('text', ''):
+            print('STARTUP_FAILURE: skipped misleading legacy voice clip; see service journal', file=sys.stderr)
+            return 3
+        expected = entry['sha256']
         wav = assets/'fatal.wav'
         digest = hashlib.sha256(); size = 0
         with wav.open('rb') as handle:

@@ -28,6 +28,9 @@ def main():
         assert hashlib.sha256(path.read_bytes()).hexdigest()==expected,'Changed source: '+row['path']
         if change:modified+=1
         verified+=1
+    release=json.loads((ROOT/'deployment/manifests/headring-common-20261106-v3.json').read_text(encoding='utf-8'))
+    for relative,expected in release['files'].items():
+        assert hashlib.sha256((ROOT/relative).read_bytes()).hexdigest()==expected,'Fleet release drift: '+relative
     syntax=0
     for folder in ('services','orangepi/src','deployment/systemd'):
         for path in (ROOT/folder).rglob('*'):
@@ -49,6 +52,7 @@ def main():
     audit=json.loads(process.stdout)
     print(json.dumps(dict(snapshot_or_derived_files_verified=verified,retired_files_verified=retired,
         documented_repository_changes=modified,local_selection_files_excluded=len(LOCAL_SELECTIONS),
+        fleet_release=release['version'],fleet_release_files_verified=len(release['files']),
         runtime_terminal_dependencies_absent=True,
         python_files_compiled=syntax,secret_audit=audit),ensure_ascii=False,indent=2))
 

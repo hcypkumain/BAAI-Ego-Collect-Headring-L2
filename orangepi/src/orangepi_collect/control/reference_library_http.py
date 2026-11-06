@@ -118,6 +118,9 @@ def handle_reference_request(handler, owner, method):
                 message='尝试次数较多，请30秒后重试' if limited else '请输入手机采集页面显示的图库管理码'))
             return True
         store = owner.reference_catalog
+        importer=getattr(owner,'usb_task_importer',None)
+        if method=='POST' and importer is not None and importer.active:
+            raise CatalogError('正在从U盘替换任务库，完成后再编辑列表','usb_import_busy',423)
         if method == 'GET':
             if url.path not in GET_PATHS:
                 raise CatalogError('该接口不支持读取', 'method_not_allowed', 405)

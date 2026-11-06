@@ -22,7 +22,7 @@ def validate_config(config):
 
 
 class UvcSource:
-    def __init__(self, config, callback):
+    def __init__(self, config, callback, strict_frame=None):
         self.camera_settings = None
         try:
             device, width, height, fps = validate_config(config)
@@ -35,6 +35,10 @@ class UvcSource:
             self.Gst = Gst
             Gst.init(None)
             self.error = None
+            self.strict_frame = strict_frame
+            self.invalid_preparation_frames = 0
+            self.invalid_consecutive = 0
+            self.last_invalid_frame = None
             self.expected_size=(width,height)
             self.count = 0
             self.callback = callback
@@ -73,7 +77,20 @@ class UvcSource:
             capture_mono = mono - max(0, running - pts)
             payload = buffer.extract_dup(0, buffer.get_size())
             if not payload.startswith(b'\xff\xd8'):
-                raise RuntimeError('UVC frame is not JPEG')
+                strict = bool(self.strict_frame(capture_mono)) if self.strict_frame is not None else False
+                self.invalid_consecutive += 1
+                self.last_invalid_frame = dict(bytes=len(payload),prefix_hex=payload[:8].hex(),
+                    pts_ns=pts,capture_monotonic_ns=capture_mono,arrival_monotonic_ns=mono,
+                    phase='recording' if strict else 'preparation',consecutive=self.invalid_consecutive,
+                    flags=int(buffer.get_flags()))
+                if strict or self.invalid_consecutive>=5:
+                    raise RuntimeError('UVC frame is not JPEG (phase=%s bytes=%d prefix=%s consecutive=%d)' %
+                        (self.last_invalid_frame['phase'],len(payload),payload[:8].hex(),self.invalid_consecutive))
+                self.invalid_preparation_frames += 1
+                # These samples are outside the formal capture gate; they are
+                # neither counted nor delivered. Readiness still needs real frames.
+                return Gst.FlowReturn.OK
+            self.invalid_consecutive = 0
             self.count += 1
             self.callback(payload, pts, self.count - 1, mono, wall, capture_mono)
             return Gst.FlowReturn.OK

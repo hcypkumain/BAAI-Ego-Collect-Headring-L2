@@ -5,14 +5,16 @@ cd "$BASE/.."
 mkdir -p "$BASE/runtime" "$BASE/tests/results"
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export PYTHONUNBUFFERED=1
+unset ROS_MASTER_URI ROS_PACKAGE_PATH ROS_DISTRO ROS_VERSION HARDWARE_PYTHON_VERSION ROSLISP_PACKAGE_DIRECTORIES
+export PYTHONPATH="$BASE/src/orangepi_collect/common:$BASE/../src"
 export OPENBLAS_NUM_THREADS=1
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENCV_FFMPEG_CAPTURE_OPTIONS='threads;1'
-ROS_PYTHON="$BASE/.venvs/ros/bin/python"
+HARDWARE_PYTHON="$BASE/.venvs/hardware/bin/python"
 FRAMEWORK_PYTHON="$BASE/.venvs/framework/bin/python"
 ensure_runtime() {
-    if [[ ! -x "$ROS_PYTHON" || ! -x "$FRAMEWORK_PYTHON" ]]; then
+    if [[ ! -x "$HARDWARE_PYTHON" || ! -x "$FRAMEWORK_PYTHON" ]]; then
         echo 'Run bash orangepi/scripts/setup_envs.sh first.' >&2
         return 1
     fi
@@ -55,7 +57,7 @@ start)
     fi
     ensure_runtime
     ensure_hardware
-    nohup "$ROS_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py" "$@" >> "$BASE/runtime/launcher.log" 2>&1 < /dev/null &
+    nohup "$HARDWARE_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py" "$@" >> "$BASE/runtime/launcher.log" 2>&1 < /dev/null &
     task_pid=$!
     echo "$task_pid" > "$pid_file"
     ready=0
@@ -75,23 +77,23 @@ start)
 service)
     ensure_runtime
     ensure_hardware
-    exec "$ROS_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py"
+    exec "$HARDWARE_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py"
     ;;
 foreground)
     ensure_runtime
     ensure_hardware
-    exec "$ROS_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py" "$@"
+    exec "$HARDWARE_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py" "$@"
     ;;
 smoke)
     ensure_runtime
     ensure_hardware
     duration="${1:-15}"
     if [[ $# -gt 0 ]]; then shift; fi
-    exec "$ROS_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py" --smoke "$duration" "$@"
+    exec "$HARDWARE_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py" --smoke "$duration" "$@"
     ;;
 list-images)
     ensure_runtime
-    exec "$ROS_PYTHON" "$BASE/src/orangepi_collect/control/launcher.py" --list-images
+    exec "$HARDWARE_PYTHON" "$BASE/src/orangepi_collect/control/launcher.py" --list-images
     ;;
 stop)
     if is_running; then

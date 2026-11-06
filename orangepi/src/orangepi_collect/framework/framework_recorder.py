@@ -21,19 +21,9 @@ from embodied_brain_collect.recorders.base import BaseRecorder,BaseRecorderConfi
 from framework_qc import atomic_json,standardize,check_session,performance
 
 
-def impedance_request(line):
-    """Bounded control envelope; measurement END is never the global STOP."""
-    if not isinstance(line,str) or not line.startswith('{') or len(line)>512:return None
-    try:value=json.loads(line)
-    except ValueError:return None
-    if (not isinstance(value,dict) or set(value)-{'command','request_id'}
-            or value.get('command') not in ('IMPEDANCE_START','IMPEDANCE_END','IMPEDANCE_REVIEW')
-            or not isinstance(value.get('request_id'),str) or not 0<len(value['request_id'])<=64):return None
-    return json.dumps(value)
-
 @dataclass
 class PiBundleConfig(BaseRecorderConfig):
-    hardware_python: str = str(BASE/'.venvs/ros/bin/python')
+    hardware_python: str = str(BASE/'.venvs/hardware/bin/python')
     stdin_control: bool = False
     wait_for_save: bool = False
 
@@ -117,10 +107,6 @@ class PiBundleRecorder(BaseRecorder):
                 if command=='START':
                     committed=True;self._committed=True;commit_at=time.monotonic()
                 if command=='STOP':sent_stop=True
-            elif not committed and not sent_stop:
-                request=impedance_request(command)
-                if request is not None:
-                    self.process.stdin.write(request+'\n');self.process.stdin.flush()
         code=self.process.returncode
         path=Path(self.config.session_dir)
         summary_path=path/'capture_summary.json'
@@ -152,6 +138,21 @@ class PiBundleRecorder(BaseRecorder):
             return
         if code:raise RuntimeError('Native acquisition failed; see capture_summary.json')
         if summary['status']=='cancelled':return
+        from qc_deferred import save_pending
+        mode=json.loads((path/'meta.json').read_text(encoding='utf-8')).get('qc_mode','immediate')
+        if mode in ('deferred','emg_only'):
+            partial=None
+            if mode=='emg_only':
+                from framework_qc import standardize_emg,standardize_marker,check_emg
+                began=time.time()
+                atomic_json(path/'status.json',dict(state='postprocessing',pid=os.getpid(),time=time.time(),processing_started=began,qc_scope='emg_only',recording_active=False))
+                summary=standardize_emg(path);standardize_marker(path,summary)
+                def emg_progress(value):
+                    atomic_json(path/'status.json',dict(state='checking',pid=os.getpid(),time=time.time(),processing_started=began,progress=value,qc_scope='emg_only',recording_active=False))
+                partial=check_emg(path,emg_progress)
+                summary['emg_qc_elapsed_seconds']=time.time()-began
+            save_pending(path,summary,BASE,PROJECT,partial)
+            return
         # Acquisition exited: bounded parallel QC, with CPU/memory headroom.
         allowed=os.sched_getaffinity(0)
         settings=performance()

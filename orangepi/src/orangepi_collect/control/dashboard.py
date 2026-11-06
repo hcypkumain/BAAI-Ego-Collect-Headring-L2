@@ -10,7 +10,6 @@ import threading
 import time
 from urllib.parse import parse_qs, urlsplit
 from live_preview import CAMERAS, EMGS, SIGNALS
-from eeg_settings import PRESETS
 from wrist_calibration import SLOTS
 import recording_review
 import re
@@ -27,71 +26,21 @@ class DashboardHTTPServer(ThreadingHTTPServer):
 SAFE = ('device_confirm','idle','failed_wait','exhausted','ready')
 
 
-def impedance_presentation(state, selected_devices, worker, worker_active):
-    """Explain preparation separately from the current owner's measured state."""
-    if 'eeg' not in (selected_devices or ()):
-        return dict(required=False, supported=False, phase='not_selected', can_record=True)
-    required = os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT') == '1'
-    worker = worker or {}
-    measured = worker.get('eeg_impedance')
-    if worker_active and isinstance(measured, dict) and measured.get('phase'):
-        return copy.deepcopy(measured)
-    value = dict(required=required, supported=False, can_record=not required,
-        active=False, pending=False, error=None, channels=[],
-        loff_off_confirmed=False, frontend_restored=False)
-    if not required:
-        return dict(value, phase='unavailable', reason='feature_disabled',
-                    message='当前采集服务未启用阻抗检查。')
-    if state in ('failed_wait', 'error'):
-        errors = [str(error) for error in worker.get('errors', [])
-                  if 'eeg' in str(error).lower() or '脑电' in str(error)]
-        error = '；'.join(errors) or None
-        description = error or '采集准备未完成'
-        normalized = (error or '').lower()
-        if ('no data' in normalized or 'no eeg samples' in normalized) and '3' in normalized:
-            description = '脑电连续 3 秒未收到数据'
-        return dict(value, phase='interrupted', error=error,
-            message='上次准备已中断：'+description+'。请重新准备本段，再开始检查。')
-    if state == 'preparing':
-        return dict(value, phase='initializing',
-                    message='正在准备本段并连接脑电设备，请稍候。')
-    if worker_active:
-        return dict(value, phase='initializing',
-                    message='尚未收到脑电检查状态，请等待设备准备完成；当前不能开始录制。')
-    return dict(value, phase='awaiting_prepare',
-                message='请先点击“准备本段”，完成设备预检后即可开始阻抗检查。')
-
-
-def impedance_required(value=None):
-    value = value or {}
-    return value.get('required', os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT') == '1') is True
-
-
-def impedance_allows_recording(value=None):
-    value = value or {}
-    if not impedance_required(value): return True
-    from impedance_quality import quality_allows_recording
-    if not quality_allows_recording(value):return False
-    return (value.get('supported') is True and value.get('can_record') is True
-        and not value.get('active') and not value.get('pending') and not value.get('error')
-            and value.get('loff_off_confirmed') is True and value.get('frontend_restored') is True
-            and value.get('phase') == 'completed' and value.get('reviewed') is True
-            and value.get('window_ready') is True and value.get('normal_frame_confirmed') is True)
-
-
 def preparation_state(state):
     return state in ('device_confirm','idle','failed_wait','exhausted','preparing','ready','emg_manual','emg_pairing') or state.startswith('wrist_')
 
 
-def actions_for(state, impedance=None):
-    actions=_base_actions_for(state,impedance)
+def actions_for(state):
+    actions=_base_actions_for(state)
+    if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['qc_mode']
+    if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['usb_task_import']
     if preparation_state(state):actions=actions+['abandon']
     if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['delete_recording','retain_error_recording']
     if state in ('device_confirm','idle','failed_wait','exhausted','ready'):actions=actions+['select_reference','switch_reference']
     return actions
 
 
-def _base_actions_for(state, impedance=None):
+def _base_actions_for(state):
     if state == 'emg_pairing': return ['restart_calibration','volume']
     if state == 'wrist_choose': return ['wrist_method','restart_calibration','volume']
     if state == 'wrist_manual': return ['wrist_method','assign_wrist_roles','restart_calibration','volume']
@@ -105,44 +54,33 @@ def _base_actions_for(state, impedance=None):
         'failed_wait':['prepare','rescan','calibrate_wrist','calibrate_emg','volume','repeat'],
         'exhausted':['prepare','rescan','calibrate_wrist','calibrate_emg','volume']}
     actions=table.get(state,[])
-    if state in SAFE:actions=actions+['eeg_filter','wrist_camera_settings']
-    if state == 'ready' and impedance_required(impedance):
-        value = impedance or {}
-        if not impedance_allows_recording(value): actions = [a for a in actions if a != 'start']
-        if value.get('supported') is True:
-            if value.get('active') or value.get('pending'):
-                return ['impedance_end', 'repeat', 'volume']
-            restored = value.get('loff_off_confirmed') is True and value.get('frontend_restored') is True
-            if restored and not value.get('error'):
-                actions = actions + ['impedance_start'] if impedance_allows_recording(value) else ['impedance_start'] + actions
-                if value.get('completed_at') and not value.get('can_record'):
-                    actions = ['impedance_review'] + actions
-            elif value.get('phase') == 'not_checked':
-                actions = ['impedance_start'] + actions
-            else:
-                # Ending also requests recovery; never offer a fresh activation
-                # while the preceding transaction may still be on the device.
-                actions = ['impedance_end', 'repeat', 'volume']
+    if state in SAFE:actions=actions+['wrist_camera_settings']
     return actions
 
 
 def snapshot_actions(snapshot):
-    actions=actions_for(snapshot.get('state',''),snapshot.get('eeg_impedance'))
+    actions=actions_for(snapshot.get('state',''))
+    if snapshot.get('task_list',{}).get('manual_task_switch') and not snapshot.get('task_list',{}).get('can_switch'):
+        actions=[a for a in actions if a not in ('select_reference','switch_reference','reference_list')]
     if (snapshot.get('privacy',{}).get('required') or (snapshot.get('worker') or {}).get('recording_active')):
-        actions=[action for action in actions if action not in ('abandon','delete_recording','retain_error_recording','select_reference','switch_reference')]
+        actions=[action for action in actions if action not in ('abandon','delete_recording','retain_error_recording','select_reference','switch_reference','usb_task_import')]
     if snapshot.get('wrist_camera_settings',{}).get('can_change') is False:
         actions=[action for action in actions if action!='wrist_camera_settings']
-    if (snapshot.get('state') in ('device_confirm','idle','failed_wait','exhausted')
-            and snapshot.get('task_list',{}).get('can_change') is True):
+    if (snapshot.get('state') in ('device_confirm','idle','failed_wait','exhausted','ready')
+            and (snapshot.get('task_list',{}).get('can_switch') is True or snapshot.get('task_list',{}).get('can_change') is True)
+            and snapshot.get('privacy',{}).get('required') is False
+            and snapshot.get('privacy',{}).get('stop_confirmed') is True
+            and not (snapshot.get('worker') or {}).get('recording_active')):
         actions=actions+['reference_list']
     return actions
 
 
 class Dashboard:
     def __init__(self, base, preview, settings, reference_catalog=None, reference_credentials=None,
-                 reference_completed_paths=None, reference_access=None,recording_store=None,reference_states=None):
+                 reference_completed_paths=None, reference_access=None,recording_store=None,reference_states=None,usb_task_importer=None):
         self.base=Path(base);self.preview=Path(preview)
         self.reference_catalog=reference_catalog;self.reference_credentials=reference_credentials
+        self.usb_task_importer=usb_task_importer
         self.reference_completed_paths=reference_completed_paths or (lambda: ())
         self.reference_access=reference_access
         self.recording_store=recording_store
@@ -158,6 +96,9 @@ class Dashboard:
         from cloud_uploads import UploadManager
         try:self.cloud_uploads=UploadManager(self.base,self.recording_store,self.display_state) if self.recording_store is not None else None
         except Exception:self.cloud_uploads=None
+        from daily_collection import DailyCollection
+        self.daily_collection=DailyCollection(self.base,self.recording_store,self.display_state) if self.recording_store is not None else None
+        if self.cloud_uploads is not None:self.cloud_uploads.daily_collection=self.daily_collection
         self.review_root=None
         self._review_cache=(None,0,None)
         self.access_code_required=settings.get('access_code_required',True)
@@ -224,10 +165,10 @@ class Dashboard:
                 if path=='/api/status':
                     query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
                     if not query:
-                        owner.demands.touch('legacy:'+self.client_address[0],('eeg','emg_left','emg_right'),True);self.send(200,owner.status());return
+                        owner.demands.touch('legacy:'+self.client_address[0],('emg_left','emg_right'),True);self.send(200,owner.status());return
                     if set(query)-{'signals','review','display','cameras','camera'} or any(len(v)!=1 for v in query.values()):self.send(400,{'error':'无效显示请求'});return
                     names=query.get('signals',[''])[0].split(',');names=[n for n in names if n]
-                    if any(n not in ('eeg','emg_left','emg_right') for n in names) or query.get('review',['0'])[0] not in ('0','1') or query.get('cameras',['0'])[0] not in ('0','1'):self.send(400,{'error':'无效显示请求'});return
+                    if any(n not in ('emg_left','emg_right') for n in names) or query.get('review',['0'])[0] not in ('0','1') or query.get('cameras',['0'])[0] not in ('0','1'):self.send(400,{'error':'无效显示请求'});return
                     client=query.get('display',['web'])[0]
                     camera=query.get('camera',[None])[0]
                     if camera is not None and camera not in CAMERAS:self.send(400,{'error':'无效相机显示请求'});return
@@ -327,7 +268,7 @@ class Dashboard:
         with self.lock:
             if (self.busy and not self.prompting) or self.pending is not None:raise ValueError('正在执行上一步，请等待')
             if data.get('revision')!=self.snapshot.get('revision'):raise ValueError('流程已变化，请刷新后操作')
-            if data.get('action') not in snapshot_actions(self.snapshot):raise ValueError('当前步骤不允许这个操作')
+            if data.get('action') not in snapshot_actions(dict(self.snapshot,privacy=self.privacy.snapshot())):raise ValueError('当前步骤不允许这个操作')
             if data['action']=='reference_list':
                 value=data.get('value')
                 if (not isinstance(value,dict) or set(value)!={'list_id','catalog_revision'}
@@ -335,6 +276,15 @@ class Dashboard:
                         or type(value.get('catalog_revision')) is not int
                         or not 0<=value['catalog_revision']<=MAX_REVISION):
                     raise ValueError('请选择当前图库版本中的任务列表')
+            if data['action']=='usb_task_import':
+                value=data.get('value')
+                if (not isinstance(value,dict) or set(value)!={'scan_id','zip_ids','catalog_revision','confirm_replace'}
+                        or value.get('confirm_replace') is not True or not valid_id(value.get('scan_id'))
+                        or not isinstance(value.get('zip_ids'),list) or not 1<=len(value['zip_ids'])<=50
+                        or any(not valid_id(v) for v in value['zip_ids'])
+                        or len(set(value['zip_ids']))!=len(value['zip_ids'])
+                        or type(value.get('catalog_revision')) is not int):
+                    raise ValueError('请勾选当前U盘任务包，并确认替换旧列表')
             if data['action'] in ('delete_recording','retain_error_recording'):
                 value=data.get('value')
                 if (not isinstance(value,dict) or set(value)!={'session_id','token'}
@@ -343,15 +293,14 @@ class Dashboard:
                     raise ValueError('请选择当前采集条目后再删除')
             if data['action']=='select_reference':
                 value=data.get('value')
-                if (not isinstance(value,dict) or set(value)!={'image_id','catalog_revision'} or not valid_id(value.get('image_id'))
+                if (not isinstance(value,dict) or set(value) not in ({'image_id','catalog_revision'},{'image_id','catalog_revision','list_id'}) or ('list_id' in value and not valid_id(value['list_id'])) or not valid_id(value.get('image_id'))
                         or type(value.get('catalog_revision')) is not int or not 0<=value['catalog_revision']<=MAX_REVISION):raise ValueError('请选择当前图库中的参考图')
             if data['action']=='volume' and (type(data.get('value')) is not int or not 20<=data['value']<=120):
                 raise ValueError('音量应在 20 到 120 之间')
-            if data['action']=='eeg_filter' and data.get('value') not in PRESETS:
-                raise ValueError('无效的脑电滤波选项')
             if data['action']=='wrist_camera_settings' and ('value' not in data or
                     (data['value'] is not None and type(data['value']) is not bool)):
                 raise ValueError('请选择保持当前设置、允许或不允许自动曝光改变帧率')
+            if data['action']=='qc_mode' and data.get('value') not in ('immediate','emg_only','deferred'):raise ValueError('无效质检模式')
             if data['action']=='wrist_method' and data.get('value') not in ('manual','occlusion'):
                 raise ValueError('无效的腕部标定方式')
             if data['action'] in ('assign_wrist_roles','assign_emg_roles'):
@@ -381,12 +330,13 @@ class Dashboard:
         with self.lock:self.busy=False;self.result={'ok':not error,'error':error,'time':time.time()}
 
     def display_state(self):
-        """Authoritative display gate without disk, QC, media or impedance parsing."""
+        """Authoritative display gate without disk, QC, media parsing."""
         with self.lock:
             value={key:self.snapshot.get(key) for key in ('state','session','preview_id','image','selected_devices','revision')}
             value['busy']=self.busy or self.pending is not None
-            value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state')}
+            value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state','progress','processing_started','qc_scope','qc_mode','qc_state')}
         value['privacy']=self.privacy.snapshot()
+        value['server_time']=time.time()
         return value
 
     def status(self,include_signals=None,include_review=True):
@@ -394,13 +344,11 @@ class Dashboard:
             data=copy.deepcopy(self.snapshot);data.update(busy=self.busy or self.pending is not None,result=self.result)
             review_root=self.review_root
             data['speaking']=self.prompting
+            data['privacy']=self.privacy.snapshot()
             data['actions']=[] if self.pending is not None or (self.busy and not self.prompting) else snapshot_actions(data)
         data['can_skip_speech']=data['speaking'] and bool(data['actions'])
         data['privacy']=self.privacy.snapshot()
         data['camera_check']=self.camera_checks.status()
-        if isinstance(data.get('eeg_impedance'),dict):
-            from impedance_quality import assess_impedance
-            data['eeg_impedance']['quality']=assess_impedance(data['eeg_impedance'])
         if data['privacy']['required']:
             data['image']=None
             if data['privacy']['phase']=='arming':data['actions']=['stop']
@@ -410,6 +358,8 @@ class Dashboard:
             if cached_root!=review_root or time.monotonic()-cached_at>=1:
                 cached_value=recording_review.describe(review_root);self._review_cache=(review_root,time.monotonic(),cached_value)
             data['review']=copy.deepcopy(cached_value)
+        if self.daily_collection is not None:
+            data['daily_collection']={k:v for k,v in self.daily_collection.snapshot().items() if k!='rows'}
         data['system']={'boot_id':self.boot_id,'controller_pid':os.getpid()}
         data['server_time']=time.time();data['previews']={};data['signals']={}
         for name in (() if data['privacy']['required'] else CAMERAS):
@@ -434,5 +384,6 @@ class Dashboard:
         return data
 
     def close(self):
+        if self.daily_collection is not None:self.daily_collection.close()
         if self.cloud_uploads is not None:self.cloud_uploads.close()
         self.server.shutdown();self.server.server_close();self.thread.join(2)

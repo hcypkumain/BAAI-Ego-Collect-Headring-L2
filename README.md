@@ -1,7 +1,9 @@
 # BAAI Ego Collect · Headring L2
 
-基于 **2026-11-02** Orange Pi / RK3588 运行快照整理的手机采集项目。
-包含主采集框架、手机控制页、六路视频、脑电/肌电/IMU、任务 ZIP 导入、QC、云端上传及配套服务。
+基于 Orange Pi / RK3588 运行程序整理的手机采集项目，已同步 **2026-11-06** 最新采集程序及三台设备验证过的 `headring-common-20261106-v3` 公共模块。
+包含主采集框架、手机控制页、六路视频、肌电/IMU、任务 ZIP 导入、QC、云端上传及配套服务。
+本次版本的功能、质检规则、环境迁移和验证范围见 [11 月 6 日版本说明](docs/RELEASE_2026-11-06.md)。
+本分支维护肌电版本；脑电版本后续通过独立分支维护，不合并到当前采集入口。
 
 | 路径 | 内容 |
 |---|---|
@@ -13,8 +15,7 @@
 | `deployment/os-reference/` | PulseAudio、Avahi、平台 USB/音频脚本参考；不自动覆盖操作系统 |
 | `vendor/pi-runtime/` | 当前 camd、图像配置及音频播放器运行文件 |
 | `vendor/wheels/` | 用户提供的 `robot_uploader-1.0.0` 安装包 |
-| `legacy/alternate-project/` | Pi 另一份 checkout 中不同的 73 个旧文件，供追溯，非启动入口 |
-| `deployment/manifests/` | 原文件 SHA256、来源、组件清单与四套 Python 环境版本 |
+| `deployment/manifests/` | 公共版本哈希、原快照来源、组件清单与历史环境版本 |
 
 ## 当前采集链路
 
@@ -22,15 +23,15 @@
   当前配置输出为 1920×1200、30 fps；这不是对传感器原生最大分辨率的声明。
 - 两只 USB 腕相机使用独立的 USB 拓扑路径，当前配置 1920×1080、30 fps。
   实际保存尺寸和帧数会再核验；预览降画质不改变录制分辨率。
-- 板载 IMU 从 `/dev/icm20602` 获取；脑电为 OmniBCI、250 Hz、8 个启用通道；双臂肌电按开机插入顺序确认左右。
+- 板载 IMU 从 `/dev/icm20602` 获取；双臂肌电按开机插入顺序确认左右。当前 Pi 程序已停用脑电/阻抗采集入口。
 - 保持现有采集模态，不额外录制麦克风音频；语音文件用于流程播报。
 - 每段手动开始，黑屏确认后倒计时。停止后等用户选择：确认保存才整理与 QC；重采会删除当前放弃段并重新准备同一任务。
-- 脑电最终数据按已落盘的起止门限处理；原始批次与处理证据保留，不伪造硬件同步精度。
+- 信号数据保留原始异常证据，不伪造硬件同步精度。已验证的稀疏肌电拼接修复保留原文件并重新执行原始框架检查，WARN 可继续，ERROR 保留。
 - 历史列表排除已删除及明确放弃的段，并重新过滤缓存。正常 ERROR 记录不因错误级别被自动隐藏。
 - 多个启用列表组成混合任务池，隐藏列表仅供查看；来源标签及本段场景资料随采集保存。使用与验证见 [手机任务池与页面稳定性](docs/MIXED_TASK_POOL.md)。
 
-硬件进程仍使用系统绑定的 Python 3.8 / ROS Noetic / GI 环境，框架与脑电使用 Python 3.11。
-“摄像头不用 ROS”不表示可以删除当前硬件环境所需的 ROS/GStreamer 系统依赖。
+硬件进程使用系统绑定的 Python 3.8 / GI 环境 `.venvs/hardware`，框架使用 Python 3.11。
+当前启动入口不依赖 ROS。内核、camd、MPP、GI/GStreamer 等硬件系统依赖仍需保留。
 
 ## 部署到同型号 Pi
 
@@ -41,7 +42,6 @@ git clone https://github.com/hcypkumain/BAAI-Ego-Collect-Headring-L2.git
 cd BAAI-Ego-Collect-Headring-L2
 python3 tools/configure_station.py --collector-id L2-001
 bash orangepi/scripts/setup_envs.sh
-bash orangepi/scripts/setup_eeg.sh
 python3 scripts/install_pi_services.py                # 先查看安装计划
 sudo python3 scripts/install_pi_services.py --apply   # 安装配置，不自动启停采集
 ```
@@ -76,7 +76,7 @@ python3 tools/verify_repository.py
 node orangepi/tests/test_screen_sync.cjs
 node orangepi/tests/test_recording_overlay.cjs
 # Linux 依赖环境下的隔离媒体接口测试，不连接采集设备：
-orangepi/.venvs/ros/bin/python orangepi/tests/test_phone_media_service.py
+orangepi/.venvs/hardware/bin/python orangepi/tests/test_phone_media_service.py
 ```
 
 完整硬件测试应在依赖就绪的 Pi 上执行；部分原框架测试需要自行导入的任务图片或具体硬件。

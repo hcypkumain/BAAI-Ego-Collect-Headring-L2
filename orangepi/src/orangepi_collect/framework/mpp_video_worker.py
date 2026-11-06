@@ -6,6 +6,7 @@ import ctypes.util
 import json
 from pathlib import Path
 import resource
+import subprocess
 import sys
 import time
 
@@ -78,7 +79,13 @@ def decode(request):
     pipeline = Gst.Pipeline.new('qc-mpp')
     source = Gst.ElementFactory.make('filesrc', 'source')
     demux = Gst.ElementFactory.make('qtdemux', 'demux')
-    parser = Gst.ElementFactory.make('h265parse', 'parser')
+    probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-select_streams','v:0',
+        '-show_entries','stream=codec_name','-of','json',str(request['video'])],timeout=10))
+    codec=probe.get('streams',[{}])[0].get('codec_name')
+    parser_name={'h264':'h264parse','hevc':'h265parse'}.get(codec)
+    if parser_name is None:raise RuntimeError('Unsupported MPP QC codec: '+str(codec))
+    expected_caps='video/x-h264' if codec=='h264' else 'video/x-h265'
+    parser = Gst.ElementFactory.make(parser_name, 'parser')
     decoder = Gst.ElementFactory.make('mppvideodec', 'decoder')
     sink = Gst.ElementFactory.make('appsink', 'sink')
     if any(element is None for element in (source, demux, parser, decoder, sink)):
@@ -97,7 +104,7 @@ def decode(request):
 
     def on_pad_added(_element, pad):
         caps = pad.get_current_caps()
-        if caps and caps.get_structure(0).get_name() == 'video/x-h265':
+        if caps and caps.get_structure(0).get_name() == expected_caps:
             target = parser.get_static_pad('sink')
             if not target.is_linked():
                 pad.link(target)

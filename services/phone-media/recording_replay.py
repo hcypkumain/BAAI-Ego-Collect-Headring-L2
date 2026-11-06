@@ -384,9 +384,16 @@ class RecordingReplay:
                     if (folder/'ui_preparation_cancelled.json').is_file():
                         status = 'cancelled'
                     qc = str(summary.get('qc_effective_level') or summary.get('qc_level') or state.get('qc_level') or 'UNKNOWN')[:24]
+                    # Preparation failures have no START. Keep their real stop
+                    # time in the chronology without inventing a recording gate.
+                    attempt_ns = start_ns or stop_ns or _int(_number(state.get('time'))*1e9) or folder.stat().st_mtime_ns
+                    failed = status in ('error','failed','qc_error') or bool(summary.get('errors'))
+                    if qc == 'UNKNOWN' and failed:qc = 'ERROR'
                     count = sum(1 for n in CAMERAS+('eeg','emg_left','emg_right','board_imu') if n in summary)
                     catalog[identifier] = dict(path=folder, summary=summary, start=start, stop=stopped,
                         public=dict(id=identifier, label=folder.name, start_unix_ns=start_ns,
+                                    attempt_unix_ns=attempt_ns,recording_started=bool(start_ns),
+                                    failure_stage=('emg_qc' if summary.get('qc_mode')=='emg_only' and status=='qc_error' else 'preparation' if not start_ns else 'acquisition') if failed else None,
                                     duration_seconds=duration, qc=qc, status=status, stream_count=count))
                 except ReplayError:
                     if self._excluded(folder):continue
@@ -397,7 +404,7 @@ class RecordingReplay:
                         public=dict(id=identifier,label=folder.name,start_unix_ns=0,duration_seconds=0,
                                     qc='UNKNOWN',status='corrupt',stream_count=0))
             self._catalog = catalog
-            self._ordered = sorted(catalog.values(), key=lambda r:(r['public']['start_unix_ns'], r['public']['label']), reverse=True)
+            self._ordered = sorted(catalog.values(), key=lambda r:(r['public'].get('attempt_unix_ns',0), r['public']['label']), reverse=True)
             self._refreshed = time.monotonic()
 
     def sessions(self, offset=0, limit=20):
@@ -497,14 +504,27 @@ class RecordingReplay:
             common['error']='no_saved_data'
         return common
 
+    def _qc_summary(self, record):
+        report=self._json(record['path']/'qc_report.json') or self._json(record['path']/'emg_qc_report.json')
+        if report:report=dict(report,preprocessing=self._json(record['path']/'emg_preprocessing.json'))
+        # Native setup/acquisition failures bypass offline QC. Surface their
+        # durable errors through the same read-only details endpoint.
+        if not report and record['summary'].get('errors'):
+            errors=list(dict.fromkeys(str(item)[:3000] for item in record['summary']['errors'][:100]))
+            report=dict(level='ERROR',findings=[dict(level='ERROR',subject='session',
+                check='acquisition',message=message) for message in errors])
+        return summarize_qc(report)
+
     def session(self, identifier):
         record=self._record(identifier)
         result=dict(record['public']);result['streams']=[];result['warnings']=[]
-        try:result['qc_details']=compact_qc(summarize_qc(self._json(record['path']/'qc_report.json')))
+        try:result['qc_details']=compact_qc(self._qc_summary(record))
         except ReplayError:result['qc_details']=dict(level='UNKNOWN',error_count=0,warn_count=0,total_findings=0,next_offset=None,findings=[],modalities={},unavailable=True)
         if record.get('corrupt'):
             result['warnings'].append('录制元数据损坏，不能作为可播放数据')
             result['impedance']={};return result
+        if result.get('failure_stage')=='preparation':
+            result['warnings'].append('准备失败：本次未开始正式录制；以下为采集错误，尚未运行离线质检。')
         for name in CAMERAS+SIGNALS:
             base=name[:-4] if name.endswith('_imu') and name.startswith('emg_') else name
             if base in record['summary'] or (record['path']/base).is_dir():
@@ -547,11 +567,11 @@ class RecordingReplay:
     def qc_page(self,identifier,offset=0,limit=50,stream=''):
         if not 0<=offset<=100000 or not 1<=limit<=50 or stream and stream not in CAMERAS+SIGNALS+('session','marker'):
             raise ReplayError('invalid_qc_page')
-        record=self._record(identifier);value=summarize_qc(self._json(record['path']/'qc_report.json'))
+        record=self._record(identifier);value=self._qc_summary(record)
         base=stream[:-4] if stream.endswith('_imu') and stream.startswith('emg_') else stream
         rows=[item for item in value['findings'] if not stream or item['modality'] in (stream,base)]
         page=rows[offset:offset+limit]
-        return dict(error_count=sum(v['level']=='ERROR' for v in rows),warn_count=sum(v['level']=='WARN' for v in rows),
+        return dict(scope=value.get('scope','full'),error_count=sum(v['level']=='ERROR' for v in rows),warn_count=sum(v['level']=='WARN' for v in rows),
             total=len(rows),offset=offset,findings=page,unavailable=value['level']=='UNKNOWN',next_offset=offset+len(page) if offset+len(page)<len(rows) else None)
 
     def frames(self,identifier,stream,start,limit):

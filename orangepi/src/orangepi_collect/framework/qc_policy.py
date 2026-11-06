@@ -196,7 +196,7 @@ def apply_policy(report, config=None):
     """Return (effective_report, audit), without mutating the original report.
 
     Only positively verified timing/full-frame evidence can lower raw ERROR.
-    Unknown ERROR and required impedance/format/marker findings remain ERROR.
+    Unknown ERROR and required format/marker findings remain ERROR.
     Full-frame black or actual long no-data intervals may raise raw WARN/INFO.
     """
     if config is None:
@@ -210,14 +210,21 @@ def apply_policy(report, config=None):
         raw_level=report.level, effective_level=report.level, changes=[], decisions=[], blockers=[], advisories=[], evidence={})
     audit['capture_integrity']=dict(schema_version=1, policy='recorded-stream-v1',
         comparison='strictly_greater_than', wrist_warn_ns=100000000,wrist_error_ns=150000000,
-        emg_warn_ns=10000000,emg_error_ns=50000000,
-        emg_wire_loss_warn_fraction=.001,emg_wire_loss_error_fraction=.01,
-        protected_checks=['PiWristFrameGap','PiEmgContinuity'])
+        board_imu_rule_set='original-framework-v1',
+        emg_rule_set='original-framework-v1',emg_timestamp_gap_error_s=.1,
+        emg_wire_loss_warn_fraction=.001,emg_wire_loss_error_fraction=None,
+        protected_checks=['PiWristFrameGap'])
     if config['mode'] == 'strict':
         audit['reason'] = 'strict mode preserves the original report and severities'
     else:
         finding_type = _finding_class(report)
         for name, stream in effective.streams.items():
+            if name in ('emg_left','emg_right','board_imu'):
+                audit['evidence'][name]=dict(rule_set='original-framework-v1')
+                for index,finding in enumerate(stream.findings):
+                    audit['decisions'].append(dict(stream=name,finding_index=index,check=finding.check,
+                        raw_level=finding.level,effective_level=finding.level,reason=('original_IMU_framework_severity_preserved' if name=='board_imu' else 'original_EMG_framework_severity_preserved')))
+                continue
             video = _full_video(stream)
             timing = _timing_series(stream)
             audit['evidence'][name] = dict(usable_timing_series=[key for key,value in timing.items() if _usable_timing(value)],

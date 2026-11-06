@@ -69,7 +69,9 @@ def source_manifest(source,hashes=True,progress=None):
     return dict(files=rows,total_files=len(rows),total_bytes=total,digest=digest)
 
 def same_manifest(expected,actual,hashes=True):
-    fields=('path','bytes','mtime_ns','inode','sha256') if hashes else ('path','bytes','mtime_ns','inode')
+    # exFAT inode numbers change after remount; hashes still prove identical data.
+    # source_manifest retains before/after inode checks while hashing an open file.
+    fields=('path','bytes','mtime_ns','sha256') if hashes else ('path','bytes','mtime_ns')
     return len(expected['files'])==len(actual['files']) and all(
         all(left.get(key)==right.get(key) for key in fields) for left,right in zip(expected['files'],actual['files']))
 

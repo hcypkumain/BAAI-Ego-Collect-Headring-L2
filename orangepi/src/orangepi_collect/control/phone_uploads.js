@@ -38,7 +38,7 @@
   function controls() {
    if(!ui.toolbar)return;
    const configured=Boolean(data?.credentials?.configured), collectionBusy=Boolean(data?.collection_busy);
-   ui.range.disabled=busy; ui.refresh.disabled=busy||Boolean(loading);
+   ui.range.disabled=busy;if(ui.report){ui.report.disabled=busy||collectionBusy;ui.reportDate.disabled=busy||collectionBusy;} ui.refresh.disabled=busy||Boolean(loading);
    ui.selectPending.disabled=busy||!(data?.recordings||[]).some(item=>canUpload(item)&&!errorTake(item));
    ui.clearSelection.disabled=busy||!uploadSelection.size;
    ui.uploadSelected.disabled=busy||!configured||!selectedRecordings().length;
@@ -225,7 +225,9 @@
     ui.recordingsEmpty.textContent=ui.jobsEmpty.textContent='正在读取…';ui.recordingsEmpty.hidden=ui.jobsEmpty.hidden=false;
     ui.selectionHint.textContent='正在读取所选日期范围…';ui.overall.textContent='正在读取上传状态…';controls();load(true);
    };
-   ui.refresh=button('刷新状态',()=>load());ui.toolbar.append(ui.range,ui.refresh);
+   ui.refresh=button('刷新状态',()=>load());ui.reportDate=node('input');ui.reportDate.type='date';ui.reportDate.setAttribute('aria-label','每日汇总日期');ui.reportDate.value=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai'}).format(new Date());
+   ui.report=button('导出当日汇总（TXT）',async()=>{try{const selectedDay=ui.reportDate.value;if(!selectedDay)throw Error('请选择汇总日期');const response=await request('/api/phone/cloud/daily-report?'+new URLSearchParams({day:selectedDay}),{timeoutMs:30000});if(!response.ok){const value=await response.json();throw Error(value.error||'导出失败');}const url=URL.createObjectURL(await response.blob()),link=node('a');link.href=url;link.download='collection-summary-'+selectedDay+'.txt';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);tell('当日汇总已导出；每次提交上传前 Pi 也会自动保存一份。');}catch(error){tell(error.message);}});
+   ui.toolbar.append(ui.range,ui.refresh,ui.reportDate,ui.report);
    const account=node('section',null,'pcu-card');ui.credentialState=node('b','正在读取账号状态…');
    ui.changeCredentials=button('更换 AK / SK',()=>{editingCredentials=true;reconcile();ui.ak.focus();});
    ui.clearCredentials=button('清除已保存的 AK / SK',()=>ask('清除上传账号？','清除后需要重新输入 AK / SK 才能提交新的上传任务。已保存的采集数据保留。','确认清除账号',async(id)=>{await json('/clear-credentials',{});if(valid(id)){editingCredentials=false;ui.ak.value=ui.sk.value='';}},false,'上传账号已清除。'));

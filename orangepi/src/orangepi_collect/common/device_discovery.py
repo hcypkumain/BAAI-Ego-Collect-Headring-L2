@@ -34,7 +34,6 @@ def inventory(settings=None, dev_root=Path('/dev'), sys_root=Path('/sys')):
     allowed = {
         'wrist': set(settings.get('wrist_usb_ids', ['0bda:5858'])),
         'emg': set(settings.get('emg_usb_ids', ['1a86:55d3'])),
-        'eeg': set(settings.get('eeg_usb_ids', ['303a:1001'])),
     }
     found = []
     seen = set()
@@ -46,7 +45,7 @@ def inventory(settings=None, dev_root=Path('/dev'), sys_root=Path('/sys')):
             identity = _usb_identity(node, sys_root)
             if identity and kind == 'serial':
                 usb_id = identity['vendor'] + ':' + identity['product']
-                kind = next((k for k in ('emg', 'eeg') if usb_id in allowed[k]), 'unknown')
+                kind = next((k for k in ('emg',) if usb_id in allowed[k]), 'unknown')
             if not identity or identity['vendor'] + ':' + identity['product'] not in allowed.get(kind, set()):
                 continue
             if str(node) in seen:
@@ -215,20 +214,6 @@ def resolve(config, candidates, registry):
                                          reason='ambiguous' if remaining else 'missing')
             if not confirmed:
                 item['label'] = label + ' ' + chr(65 + index) + '（左右未确认）'
-    eeg = config.get('eeg')
-    if eeg and eeg.get('enabled', True):
-        serial = eeg.get('serial', '')
-        matches = [c for c in candidates if c['kind'] == 'eeg' and
-                   serial and c.get('serial', '').upper() == serial.upper()]
-        present = len(matches) == 1
-        eeg['discovery'] = dict(present=present, role_confirmed=True, serial=serial,
-            reason=None if present else 'ambiguous' if matches else 'missing', binding='serial')
-        if present:
-            eeg['port'] = matches[0]['path']
-            eeg['discovery'].update(path=eeg['port'], topology=matches[0].get('topology', ''))
-            bindings['eeg'] = dict(matches[0], role_confirmed=True)
-        else:
-            eeg['port'] = '/dev/omnibci-unconnected'
     return config, state
 
 

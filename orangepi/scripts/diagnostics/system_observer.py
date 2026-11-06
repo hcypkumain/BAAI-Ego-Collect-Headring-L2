@@ -17,6 +17,10 @@ def relevant(event):
     message = str(event.get('MESSAGE', ''))
     if '0 kbit/s downlink 0 kbit/s uplink' in message:
         return False
+    if event.get('_SYSTEMD_UNIT') == 'camd.service':
+        # Keep connection accounting and faults across reboot. Frame chatter is
+        # excluded; the existing rotated SD log still bounds total storage.
+        return bool(re.search(r'客户端|\b(?:ERROR|WARN|FATAL)\b|失败|超时|拒绝|上限|退出|启动', message, re.I))
     if event.get('_TRANSPORT') == 'kernel':
         return bool(re.search(r'USB disconnect|new .*USB device|hub nested|panic|Oops|Call trace|watchdog|reboot|reset|shutdown|power.?off|rk806|pmic|oom|Out of memory|allocation fail|thermal|voltage|SError|mali|gpu|encoder|decoder|timeout', message, re.I))
     if event.get('_SYSTEMD_UNIT') == 'systemd-logind.service':

@@ -31,7 +31,7 @@ def decode_mpp(mp4, frame_ts, window, rate_hz=2, *, python=None, timeout=120, bl
         if inside.size:
             i0, i1 = int(inside[0]), int(inside[-1])
     base = Path(__file__).resolve().parents[3]
-    python = str(python or base / '.venvs/ros/bin/python')
+    python = str(python or base / '.venvs/hardware/bin/python')
     worker = Path(__file__).with_name('mpp_video_worker.py')
     request = dict(video=str(Path(mp4).resolve()), i0=i0, i1=i1, rate_hz=float(rate_hz),
                    black_lum_thr=float(black_lum_thr))
@@ -91,11 +91,16 @@ def video_backend(settings):
         started = time.monotonic()
         detail = {'stream': Path(mp4).parent.name, 'file': Path(mp4).name}
         try:
+            wait_started=time.monotonic()
             with slot:
-                result = decode_mpp(mp4, frame_ts, window, rate_hz,
-                    python=settings.get('qc_mpp_python'),
-                    timeout=float(settings.get('qc_mpp_timeout_seconds', 120)),
-                    black_lum_thr=float(settings.get('qc_mpp_black_lum_thr', 8)))
+                detail['hardware_queue_seconds']=time.monotonic()-wait_started
+                decode_started=time.monotonic()
+                try:
+                    result = decode_mpp(mp4, frame_ts, window, rate_hz,
+                        python=settings.get('qc_mpp_python'),
+                        timeout=float(settings.get('qc_mpp_timeout_seconds', 120)),
+                        black_lum_thr=float(settings.get('qc_mpp_black_lum_thr', 8)))
+                finally:detail['hardware_attempt_seconds']=time.monotonic()-decode_started
             detail.update(result.mpp_timing)
             return result
         except Exception as error:
@@ -105,8 +110,12 @@ def video_backend(settings):
             logging.getLogger(__name__).warning('MPP QC fallback for %s: %s', mp4, error)
             # Software decoders share the parent's address space. Serialize
             # fallback to preserve the earlier memory-safe single-decoder path.
+            wait_started=time.monotonic()
             with software_slot:
-                return original(mp4, frame_ts, window, rate_hz)
+                detail['software_queue_seconds']=time.monotonic()-wait_started
+                decode_started=time.monotonic()
+                try:return original(mp4, frame_ts, window, rate_hz)
+                finally:detail['software_decode_seconds']=time.monotonic()-decode_started
         finally:
             detail['wall_seconds'] = time.monotonic() - started
             with lock:
