@@ -33,12 +33,6 @@ def safe_to_step():
   request=urllib.request.Request('http://127.0.0.1:8765/api/display-state',headers={'X-Access-Token':token})
   with urllib.request.urlopen(request,timeout=.7) as response:v=json.load(response)
   started=bool(v.get('session') and (Path(v['session'])/'start_gate.json').exists())
-  if v.get('session'):
-   status=Path(v['session'])/'status.json'
-   try:impedance=json.loads(status.read_text()).get('eeg_impedance') or {}
-   except (OSError,ValueError):impedance={}
-   if impedance.get('active') or impedance.get('pending'):
-    return False,'eeg_impedance_measurement_active'
   return verdict(v,started)
  except Exception:
   # During boot the UI is intentionally ordered after this service. A failed
@@ -48,7 +42,7 @@ def safe_to_step():
    if not p.name.isdigit():continue
    try:args=(p/'cmdline').read_bytes().split(b'\0')
    except OSError:continue
-   if any(target in args for target in targets) or any(b'/orangepi_collect/' in arg and arg.endswith((b'/launcher.py',b'/framework_recorder.py',b'/capture.py')) for arg in args):return False,'application_active_without_authoritative_status'
+   if any(target in args for target in targets):return False,'application_active_without_authoritative_status'
   return True,'before_application_start'
 
 def parse_reply(data,nonce,t0,t1):

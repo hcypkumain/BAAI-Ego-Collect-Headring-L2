@@ -209,7 +209,7 @@ class WebControls:
         if calibration.get('warnings'):
             notices.append('头环标定文件的适用性待核对，请查看本段标定记录。')
         from project_paths import COLLECTION_MODE,COLLECTION_CONTEXT
-        dashboard.publish(dict(collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,state=self.state,revision=getattr(self,'ui_revision',0),audio=audio,
+        dashboard.publish(dict(collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,mode_switch_target=getattr(self,'mode_switch_target',None),state=self.state,revision=getattr(self,'ui_revision',0),audio=audio,
             countdown=getattr(self,'countdown_status',None) if self.state=='countdown' else None,
             collector_id=getattr(self,'collector_id',''),preparation_cancelled_at=getattr(self,'preparation_cancelled_at',None),
             task_list=getattr(self,'reference_task_state',lambda:{})(),reference_image_state=getattr(self,'reference_image_state',lambda:{})(),
@@ -349,7 +349,11 @@ class WebControls:
                 impedance = self.worker_status().get('eeg_impedance', {}) if 'eeg' in (getattr(self,'selected_devices',None) or ()) else dict(required=False)
                 allowed=list(actions_for(self.state,impedance))
                 if getattr(self,'reference_can_switch_list',getattr(self,'reference_can_change',lambda:False))():allowed.append('reference_list')
-                if job['revision']!=getattr(self,'ui_revision',0) or job['action'] not in allowed:
+                mode_action=job['action']=='collection_mode'
+                if mode_action:
+                    from project_paths import COLLECTION_CONTEXT
+                    if job.get('collection_context')!=COLLECTION_CONTEXT:raise ValueError('采集模式已变化，请刷新页面后操作')
+                if (not mode_action and job['revision']!=getattr(self,'ui_revision',0)) or job['action'] not in allowed:
                     raise ValueError('流程已经变化，本次点击未执行，请重新选择')
                 action=job['action']
                 if action not in ('volume','eeg_filter','wrist_camera_settings'):

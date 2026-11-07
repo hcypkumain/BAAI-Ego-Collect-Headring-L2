@@ -1,7 +1,6 @@
 [Unit]
 Description=Orange Pi continuous collection without stimulus
 Wants=network-online.target bluetooth.service
-After=network-online.target bluetooth.service display-manager.service sound.target
 StartLimitIntervalSec=0
 
 [Service]

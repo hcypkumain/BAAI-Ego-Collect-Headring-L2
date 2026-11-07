@@ -71,7 +71,7 @@ def main():
     finally: os.close(fd)
     # Read-only journal access; never opens recording devices or controls services.
     # Include this boot's backlog: PMIC reset-source messages precede the observer.
-    journal = subprocess.Popen(['journalctl', '-b', '-f', '-n', 'all', '-o', 'json', '--no-pager'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    journal = subprocess.Popen(['journalctl', '-b', '-f', '--since=-5min', '-g', '(?i)USB disconnect|new .*USB device|hub nested|panic|Oops|Call trace|watchdog|reboot|reset|shutdown|power.?off|rk806|pmic|oom|Out of memory|allocation fail|thermal|voltage|SError|mali|gpu|encoder|decoder|timeout|客户端|ERROR|WARN|FATAL|失败|超时|拒绝|上限|退出|启动|power key|Shutting down|Rebooting|Powering off|Reached target|Traceback', '-o', 'json', '--no-pager'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     os.set_blocking(journal.stdout.fileno(), False)
     sel = selectors.DefaultSelector(); sel.register(journal.stdout, selectors.EVENT_READ)
     stopping = []

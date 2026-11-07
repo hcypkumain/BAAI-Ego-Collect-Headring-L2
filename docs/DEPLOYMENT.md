@@ -16,7 +16,7 @@ Rockchip MPP/GStreamer 插件、系统 Python 3.8 的 GI 包以及 `/dev/icm2060
 
 安装 `uv` 后运行 `orangepi/scripts/setup_envs.sh`。
 硬件环境 `.venvs/hardware` 使用系统 Python 3.8 的系统包；框架使用独立 Python 3.11。
-11 月 6 日的当前 Pi 程序已停用脑电/阻抗入口，也不再启动 ROS；旧 `.venvs/ros` 不会被安装脚本删除。
+统一版保留肌电和脑电/阻抗入口，通过手机切换；不再启动旧 ROS 相机桥。`.venvs/eeg` 使用独立 CPython 3.11 OmniBCI SDK，`setup_envs.sh` 会同时准备它；旧 `.venvs/ros` 不会被安装脚本删除。
 `deployment/manifests/runtime-versions.json` 是现场版本清单，仅用于对照，不能将其中所有系统包盲目替换为 PyPI 包。
 
 上传进程当前查找 `/home/orangepi/maintenance/uploader/venv/bin/python`。同样的 `orangepi` 用户环境可执行：
@@ -34,7 +34,7 @@ uv pip install --python /home/orangepi/maintenance/uploader/venv/bin/python \
 ## 3. 服务与运行文件
 
 `scripts/install_pi_services.py` 默认只打印计划；`--apply` 才复制文件、备份被覆盖文件并重载 unit 定义。
-它安装预览代码、四个采集相关 unit、drop-in 和两条项目专用 udev 规则。
+它安装预览代码、采集/媒体/诊断/USB 手机相关 unit、drop-in 和项目专用 udev 规则。USB 手机服务需要系统 adb 或原有匹配的私有 adb 运行库；按 [USB 手机接入](USB_PHONE.md) 准备依赖。
 它不会启动/停止采集、触发 USB 重置、覆盖 PulseAudio/Avahi 全局配置或格式化 SD 卡。
 
 已安装匹配的 EgoRecord HAL 时，可使用其现有 camd。需要恢复仓库中的 aarch64 运行文件时，
@@ -76,4 +76,8 @@ systemctl status camd embodied-pi-collect pi-phone-media --no-pager
 已有设备从旧服务名称升级时，先按 [媒体服务迁移说明](MIGRATION_PHONE_MEDIA.md) 完成切换。
 不要在采集回调仍运行时只更换共享内存的消费者端。
 
-本次版本同时更新采集端和 `/opt/pi-phone-media`。结束采集并完成保存后再安装，并重新启用 `embodied-pi-collect`、`pi-phone-media` 两项服务以载入新代码。新的安装不包含旧脑电阻抗 drop-in；现有机器若仍有该环境项，当前代码不会据此恢复已停用入口。
+本次版本同时更新采集端和 `/opt/pi-phone-media`。结束采集并完成保存后再安装，重启 `embodied-pi-collect`、`pi-phone-media` 以载入新代码。保留本机 `runtime/collection_profile.json`，不把 Git 中的新安装默认模式覆盖到现有设备；脑电阻抗预检依然保留。
+
+已有设备启用快速启动时，安装新代码后先执行 `sudo python3 orangepi/scripts/enable_early_web.py --dry-run` 查看 unit 顺序变更，再去掉 `--dry-run` 应用。该迁移不重启采集。相机仍须通过真实初始化与校准检查，早期页面不意味着硬件已就绪。
+
+`--with-lan-time` 可安装校时辅助程序及 unit，保留已有 `/etc/headring-lan-time.json`；新文件来自示例，需核对本地授时服务器。此选项不启停 chrony。启用前必须按 `deployment/lan-time/chrony-server.example.conf` 和现场配置核对授时，禁用录制期间可能自动跳时的 `makestep`/`initstepslew` 设置，不要把示例当作任意网络都可直接使用的系统配置。

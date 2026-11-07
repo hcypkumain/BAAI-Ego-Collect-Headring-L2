@@ -8,6 +8,14 @@ from pathlib import Path
 import yaml
 from project_paths import BASE, PROJECT, SRC, devices
 LIBRARY=PROJECT/'configs/environments'
+# Use the safe C parser when installed; keep the same safe constructors and
+# a pure-Python fallback. Do not cache verdicts: deleted/changed takes must be
+# reflected on every read. Large per-take metadata otherwise stalls mode entry.
+_SAFE_YAML_LOADER = getattr(yaml, 'CSafeLoader', yaml.SafeLoader)
+
+def _load_yaml(text):
+    return yaml.load(text, Loader=_SAFE_YAML_LOADER)
+
 BAD={'failed','error','qc_error','retry','interrupted','cancelled','recording','postprocessing','deleted','archived'}
 
 def atomic_yaml(path,value):
@@ -23,7 +31,7 @@ def read(path):
     if not path.exists():return {'used':{}}
     # Ledger keys are Chinese reference-image paths; atomic_yaml writes UTF-8,
     # so read it back as UTF-8 rather than following the ambient locale.
-    value=yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+    value=_load_yaml(path.read_text(encoding='utf-8')) or {}
     if not isinstance(value,dict) or not isinstance(value.get('used',{}),dict):raise ValueError('图片台账格式错误：'+str(path))
     return value
 
@@ -32,7 +40,7 @@ def valid_used(entry):
     if isinstance(entry,dict) and entry.get('session'):
         if (Path(entry['session'])/'recording_deleted.json').is_file():return False
         meta=Path(entry['session'])/'meta.yaml'
-        if meta.is_file() and (yaml.safe_load(meta.read_text(encoding='utf-8')) or {}).get('status') in BAD:return False
+        if meta.is_file() and (_load_yaml(meta.read_text(encoding='utf-8')) or {}).get('status') in BAD:return False
     return True
 
 def images():
@@ -89,7 +97,7 @@ def migrate_legacy():
     if old.exists():
         for rel,entry in json.loads(old.read_text(encoding='utf-8')).items():
             image=PROJECT/rel;session=Path(entry['session']);meta=session/'meta.yaml'
-            if image.exists() and meta.exists() and (yaml.safe_load(meta.read_text(encoding='utf-8')) or {}).get('status')=='success':
+            if image.exists() and meta.exists() and (_load_yaml(meta.read_text(encoding='utf-8')) or {}).get('status')=='success':
                 existing=read(image.parent/'used.yaml').get('used',{}).get(image.name)
                 if existing is None or not valid_used(existing):mark(image,session,'success')
                 migrated.append(rel)

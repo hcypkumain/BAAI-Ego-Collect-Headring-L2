@@ -34,7 +34,8 @@
   let replayController=null;
   let qcOffset=0,qcNext=null,qcStream='',qcVersion=0;
   let offset = 0, nextOffset = null, zoom = 1, cx = 5000, cy = 5000, zoomVersion = 0, replayVersion = 0;
-  let installPrompt = null, wakeLock = null, keepAwake = false, networkQueue = Promise.resolve();
+  let installPrompt = null, wakeLock = null, keepAwake = false, wakePending = false, networkQueue = Promise.resolve();
+  try{keepAwake=sessionStorage.getItem('pi-keep-awake')==='1';}catch{}
   const pending = new Set(), urls = new Map(), pointers = new Map();
   const safe = () => !document.hidden && options.unlocked();
   const message = text => { $('phone-message').textContent = text; };
@@ -379,11 +380,13 @@
    else message('iPhone：Safari 分享 → 添加到主屏幕。Android：浏览器菜单 → 添加到主屏幕。局域网 HTTP 地址可能只支持快捷方式；完整安装需要受信任的 HTTPS。');
   };
   async function acquireWakeLock() {
-   if(!keepAwake || document.hidden || !safe())return;
+   if(!keepAwake || document.hidden || !safe() || wakeLock || wakePending)return;
+   wakePending=true;
    try {wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',() => {wakeLock=null;});message('已请求保持亮屏；系统省电策略仍可能锁屏。');}
    catch {message('此浏览器或当前连接不支持保持亮屏，请在手机系统中设置自动锁屏时间。');}
+   finally{wakePending=false;}
   }
-  $('phone-awake').onclick=async () => {keepAwake=!keepAwake;if(!keepAwake){if(wakeLock)await wakeLock.release();$('phone-awake').textContent='保持亮屏';}else{$('phone-awake').textContent='允许息屏';await acquireWakeLock();}};
+  $('phone-awake').onclick=async () => {keepAwake=!keepAwake;try{sessionStorage.setItem('pi-keep-awake',keepAwake?'1':'0');}catch{}if(!keepAwake){if(wakeLock)await wakeLock.release();$('phone-awake').textContent='保持亮屏';}else{$('phone-awake').textContent='允许息屏';await acquireWakeLock();}};
   document.addEventListener('visibilitychange',() => {if(document.hidden)pause();else acquireWakeLock();});
   document.addEventListener('keydown',event => {if(event.key==='Escape'&&!viewer.hidden)suspend();});
   async function references(){begin('references');await referenceLibrary?.open();}
@@ -400,6 +403,7 @@
    const keepReference=(mode==='reference'||resumeReferenceKey===referenceIdentity())&&context.split('|').slice(0,3).join('|')===value.split('|').slice(0,3).join('|');
    if(context && context!==value&&!keepManager&&!keepReference)suspend(); context=value;
    shell?.update(snapshot);
+   if(keepAwake&&!wakeLock&&!wakePending&&safe())acquireWakeLock();
    referenceLibrary?.update(snapshot);recordingManager?.update(snapshot);$('phone-reference-history').textContent=global.describeReferenceState?.(snapshot.reference_image_state)||'';
    syncReference(snapshot);
    if(!safe()){if(mode)suspend();return;}

@@ -51,7 +51,7 @@
   document.querySelector('header').insertAdjacentElement('afterend',qcCard);
   cover.setAttribute('aria-label','正在同步采集状态');
   cover.innerHTML='<div id="recording-countdown" aria-live="polite">正在同步采集状态</div><svg id="recording-stop-ring" width="180" height="180" viewBox="0 0 180 180" hidden aria-hidden="true"><circle cx="90" cy="90" r="78" fill="none" stroke="#263336" stroke-width="8"/><circle id="recording-stop-progress" cx="90" cy="90" r="78" pathLength="1" fill="none" stroke="#8edcc9" stroke-width="8" stroke-dasharray="1" stroke-dashoffset="1" transform="rotate(-90 90 90)"/></svg><p id="recording-hold-hint" hidden>长按 3 秒结束采集</p><button id="recording-discard" data-no-hold hidden style="position:relative;z-index:2;margin-top:36px;background:#392328;color:#ffe7e7;border:1px solid #a67777;padding:14px 20px;border-radius:10px">停止并放弃本段</button>';
-  let latest=null,view=null,receivedAt=0,stopping=false,renderFault='',previousNumber='',lastDraw=0,animation=null;
+  let latest=null,view=null,receivedAt=0,stopping=false,renderFault='',previousNumber='',lastDraw=0,animation=null,modeTarget=null;
   const title=document.getElementById('recording-countdown'),ring=document.getElementById('recording-stop-ring'),progress=document.getElementById('recording-stop-progress');
   const discard=document.getElementById('recording-discard');
   discard.onclick=event=>{event.stopPropagation();if(!discard.disabled)options.discard?.(view?.snapshot||latest);};
@@ -73,6 +73,7 @@
    }else if(!view?.stale&&p?.phase==='arming')value='准备倒计时';
    else if(!view?.stale&&p?.phase==='fault')value='采集异常 · 停止状态待确认';
    else if(view?.localStart)value='正在确认开始请求';
+   if(modeTarget&&p?.required===false&&s?.worker?.recording_active!==true&&!['recording','countdown'].includes(s?.state))value='正在切换到'+(modeTarget==='eeg'?'脑电版':'肌电版')+'\n正在重新连接，请稍候。';
    if(renderFault)value='页面显示异常 · 请刷新网页\n'+truth.title;
    cover.dataset.captureState=truth.title;
    cover.dataset.renderFault=renderFault?'true':'false';
@@ -95,7 +96,8 @@
   function animate(){const needed=latest?.state==='countdown'&&!document.hidden&&!cover.hidden;if(!needed){if(animation!==null)cancelAnimationFrame(animation);animation=null;return;}if(animation===null)animation=requestAnimationFrame(loop);}
   function loop(now){animation=null;if(now-lastDraw>50){paint();lastDraw=now;}animate();}
   document.addEventListener('visibilitychange',animate);
-  return {update(value){latest=value;receivedAt=performance.now();if(value.privacy?.stop_confirmed)stopping=false;paint();animate();},
+  title.style.whiteSpace='pre-line';
+  return {modeSwitch(target){modeTarget=['emg','eeg'].includes(target)?target:null;paint();},update(value){latest=value;receivedAt=performance.now();if(value.privacy?.stop_confirmed)stopping=false;paint();animate();},
    state(value){view=value;paint();animate();},
    progress(value){ring.toggleAttribute('hidden',value<=0);progress.style.strokeDashoffset=String(1-value);document.getElementById('recording-hold-hint').textContent=value>0?'保持按住，松手取消':'长按 3 秒结束采集';},
    renderFault(error){renderFault=error?String(error.message||error):'';paint();},

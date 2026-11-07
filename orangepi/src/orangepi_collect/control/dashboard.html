@@ -10,6 +10,7 @@
 
 html{background:#000;overflow:hidden}html.privacy-open{background:var(--bg);overflow:auto}
 #privacy-cover{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;background:#000;color:#8b8b8b;font-size:22px;line-height:1;cursor:none;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;outline:none}
+body.mode-transition #privacy-cover{background:#132932;color:#e8f4f5;cursor:default}
 #privacy-cover[hidden]{display:none!important}#privacy-cover:focus{outline:none}
 body.privacy-locked{overflow:hidden;background:#000!important}body.privacy-locked,body.privacy-locked *{cursor:none!important}
 body.privacy-locked>:not(#privacy-cover),body.privacy-locked>:not(#privacy-cover) *{visibility:hidden!important}
@@ -170,7 +171,7 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
    return {accepted:true,snapshot};
   }
   function revealIfSafe(snapshot){
-   if(snapshot!==latest||!authenticated||!trustedStatus||now()-lastStatusAt>TRUTH_DEADLINE||!safeIdle(snapshot)||localStart
+   if(options.holdReveal?.()||snapshot!==latest||!authenticated||!trustedStatus||now()-lastStatusAt>TRUTH_DEADLINE||!safeIdle(snapshot)||localStart
       ||registeredInstance!==seenInstance||now()-registeredAt>=REGISTRATION_DEADLINE||!visible())return false;
    stopAccepted=false;stopPending=false;stopKey='';lastAck='';showLogin(false);
    if(locked){locked=false;paintPromise=null;options.setLocked(false)}
@@ -291,6 +292,62 @@ const accessFragment=location.hash.slice(1);
 let wristPolicyDirty=false,wristPolicyPending=null,privacyScreen=null,phoneCompanion=null,recordingOverlay=null;
 let token=accessCodeRequired?(accessFragment||sessionStorage.getItem('pi-access')||''):'',status=null,inFlight=false,lastReference='',lastResult=0,online=false,lastBoot='',lastController=null;
 let collectionContext=null;
+const MODE_INTENT_KEY='pi-mode-switch-intent-v1';
+let modeIntent=null,modeReloadQueued=false,latestDisplayTruth=null;
+try{const saved=JSON.parse(sessionStorage.getItem(MODE_INTENT_KEY)||'null');if(saved&&['emg','eeg'].includes(saved.target)&&Date.now()-saved.started<120000)modeIntent=saved;else sessionStorage.removeItem(MODE_INTENT_KEY);}catch{}
+function modeOverlay(){recordingOverlay?.modeSwitch?.(modeIntent?.target||null);document.body.classList.toggle('mode-transition',!!modeIntent);}
+function beginModeIntent(target,fromContext,resultBaseline=status?.result?.time??null){
+ if(!['emg','eeg'].includes(target))return;
+ modeIntent={target,fromContext,resultBaseline,started:Date.now()};try{sessionStorage.setItem(MODE_INTENT_KEY,JSON.stringify(modeIntent));}catch{}
+ privacyScreen?.lock();modeOverlay();
+}
+function clearModeIntent(){modeIntent=null;try{sessionStorage.removeItem(MODE_INTENT_KEY);}catch{}modeOverlay();}
+function idleModeState(s){return !!s&&['device_confirm','idle','failed_wait','exhausted'].includes(s.state)&&!s.busy&&s.privacy?.phase==='idle'&&s.privacy.required===false&&s.privacy.stop_confirmed===true&&!s.worker?.recording_active&&[null,undefined,'idle','stopped'].includes(s.worker?.state);}
+function modeActionReady(){
+ const display=latestDisplayTruth||privacyScreen?.presentation?.()?.snapshot;
+ return !modeIntent&&!!status&&!!display&&status.collection_context===display.collection_context&&status.revision===display.revision&&status.privacy?.instance===display.privacy?.instance;
+}
+function reconcileModeIntent(s){
+ if(!modeIntent)return;
+ if(s.privacy?.required||s.worker?.recording_active||['recording','countdown'].includes(s.state)){clearModeIntent();return;}
+ if(s.collection_mode===modeIntent.target&&idleModeState(s)){clearModeIntent();return;}
+ if(s.collection_context===modeIntent.fromContext&&!s.busy&&s.state!=='mode_switching'&&s.result?.ok===false&&s.result.time!==modeIntent.resultBaseline){const message=s.result.error;clearModeIntent();toast(message||'切换未执行，已恢复当前采集版本。');return;}
+ if(Date.now()-modeIntent.started>45000&&s.collection_context===modeIntent.fromContext&&idleModeState(s)){
+  clearModeIntent();toast('切换尚未确认，请核对当前采集版本后重新选择。');
+ }
+}
+async function boundedJson(url,config={},milliseconds=5000){
+ const controller=new AbortController();let timer;
+ const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new DOMException('连接读取超时，将自动重试','TimeoutError'));},milliseconds);});
+ const work=(async()=>{const response=await fetch(url,{...config,signal:controller.signal,cache:'no-store'});const value=await response.json();return {response,value};})();
+ try{return await Promise.race([work,deadline]);}finally{clearTimeout(timer);controller.abort();}
+}
+function reloadModePage(){if(!modeReloadQueued){modeReloadQueued=true;suspendVisibleMedia();location.reload();}}
+async function requestCollectionMode(target){
+ if(!['emg','eeg'].includes(target)||inFlight||modeIntent||!online||privacyScreen?.isLocked())return false;
+ inFlight=true;let sent=false,accepted=false;
+ try{
+  const before=collectionContext;
+  const display=await readDisplayState();
+  const query=new URLSearchParams({signals:'',review:'0',cameras:'0',display:privacyScreen.clientId});
+  const {response,value:fresh}=await boundedJson('/api/status?'+query,{headers:authHeaders()},5000);
+  if(!response.ok)throw Error(fresh.error||'状态尚未同步，请稍候');
+  if(fresh.collection_context!==display.collection_context||fresh.privacy?.instance!==display.privacy?.instance)throw Error('采集版本正在更新，请等待界面同步');
+  if(before&&fresh.collection_context!==before){beginModeIntent(fresh.collection_mode,before);reloadModePage();return false;}
+  if(!idleModeState(display)||!idleModeState(fresh)||!fresh.actions?.includes('collection_mode'))throw Error('请先结束当前操作，再切换采集版本');
+  if(fresh.collection_mode===target)return true;
+  beginModeIntent(target,fresh.collection_context,fresh.result?.time??null);
+  sent=true;
+  const result=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders(),'X-Collection-Context':fresh.collection_context},body:JSON.stringify({action:'collection_mode',value:target,revision:display.revision,collection_context:fresh.collection_context})},6000);
+  if(!result.response.ok){sent=false;throw Error(result.value.error||'切换未执行，请核对当前状态');}
+  accepted=true;
+ }catch(error){
+  if(!sent)clearModeIntent();
+  toast(sent?'正在确认切换结果，请保持页面前台。':error.message);
+ }finally{inFlight=false;await poll();}
+ return accepted;
+}
+
 const authHeaders=()=>({...((accessCodeRequired)?{'X-Access-Token':token}:{}),...(collectionContext?{'X-Collection-Context':collectionContext}:{})}),authQuery=()=>accessCodeRequired?'token='+encodeURIComponent(token)+'&':'';
 if(location.hash)history.replaceState(null,'',location.pathname+location.search);
 if(!accessCodeRequired)$('#login').classList.add('hidden');
@@ -636,6 +693,8 @@ function render(s){
  if(s.result&&s.result.time!==lastResult){lastResult=s.result.time;if(s.result.error)toast(s.result.error)}
 }
 async function act(action,value){
+ if(action==='collection_mode')return requestCollectionMode(value);
+ if(modeIntent)return false;
  if(inFlight||!online||!status?.actions?.includes(action)||privacyScreen?.isLocked())return;
  if(action==='start'&&phoneCompanion?.beforeStart&&!phoneCompanion.beforeStart())return;
  if(action==='assign_emg_roles'&&(!emgCanAssign(status)||!emgLeftSlot||emgDraftKey!==emgContextKey(status)||value?.left_slot!==emgLeftSlot||value?.session_id!==status.emg_assignment?.session_id||value?.preview_id!==status.emg_assignment?.preview_id)){renderEmg(status);return}
@@ -648,28 +707,23 @@ async function act(action,value){
 }
 // AbortSignal.timeout is unavailable in the Pi's Chromium 91.
 async function readStatus(){
- const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),5000);
- try{
-  const display=phoneCompanion?.displayOptions?.()||{review:true,cameras:true};
-  const signals=!document.hidden&&!privacyScreen?.isLocked()?['eeg','emg_left','emg_right'].filter(name=>document.getElementById(name)?.getClientRects().length):[];
-  const query=new URLSearchParams({signals:signals.join(','),review:display.review?'1':'0',cameras:display.cameras?'1':'0',display:privacyScreen?.clientId||'web'});
-  if(display.camera)query.set('camera',display.camera);
-  const res=await fetch('/api/status?'+query,{headers:authHeaders(),signal:controller.signal});
-  if(res.status===401){privacyScreen?.unauthorized();$('#login').classList.remove('hidden');throw Error('访问码无效')}
-  if(!res.ok)throw Error('连接失败');
-  const value=await res.json();
-  if(collectionContext&&value.collection_context&&collectionContext!==value.collection_context){suspendVisibleMedia();location.reload();throw Error('正在加载新的采集模式');}
-  collectionContext=value.collection_context||null;privacyScreen?.authorized();return value;
- }finally{clearTimeout(timer)}
+ const display=phoneCompanion?.displayOptions?.()||{review:true,cameras:true};
+ const signals=!document.hidden&&!privacyScreen?.isLocked()?['eeg','emg_left','emg_right'].filter(name=>document.getElementById(name)?.getClientRects().length):[];
+ const query=new URLSearchParams({signals:signals.join(','),review:display.review?'1':'0',cameras:display.cameras?'1':'0',display:privacyScreen?.clientId||'web'});
+ if(display.camera)query.set('camera',display.camera);
+ const {response:res,value}=await boundedJson('/api/status?'+query,{headers:authHeaders()},5000);
+ if(res.status===401){privacyScreen?.unauthorized();$('#login').classList.remove('hidden');throw Error('访问码无效')}
+ if(!res.ok)throw Error(value.error||'连接失败');
+ if(value.state==='mode_switching'&&value.mode_switch_target&&!modeIntent)beginModeIntent(value.mode_switch_target,collectionContext||value.collection_context);
+ if(collectionContext&&value.collection_context&&collectionContext!==value.collection_context){beginModeIntent(value.collection_mode,collectionContext);reloadModePage();throw Error('正在加载新的采集模式');}
+ collectionContext=value.collection_context||null;privacyScreen?.authorized();return value;
 }
 async function readDisplayState(){
- const started=performance.now(),controller=new AbortController(),timer=setTimeout(()=>controller.abort(),2500);
- try{
-  const res=await fetch('/api/display-state?'+new URLSearchParams({client_id:privacyScreen.clientId}),{headers:authHeaders(),signal:controller.signal,cache:'no-store'});
-  if(res.status===401){privacyScreen?.unauthorized();throw Error('访问码无效')}
-  if(!res.ok)throw Error('屏幕状态暂不可用');
-  const value=await res.json();value._displayRequestedAt=started;return value;
- }finally{clearTimeout(timer)}
+ const started=performance.now();
+ const {response:res,value}=await boundedJson('/api/display-state?'+new URLSearchParams({client_id:privacyScreen.clientId}),{headers:authHeaders()},2500);
+ if(res.status===401){privacyScreen?.unauthorized();throw Error('访问码无效')}
+ if(!res.ok)throw Error(value.error||'屏幕状态暂不可用');
+ value._displayRequestedAt=started;latestDisplayTruth=value;return value;
 }
 let polling=false;
 async function poll(){
@@ -686,7 +740,7 @@ async function poll(){
   online=true;lastStatusReceivedAt=performance.now();if(accessCodeRequired)sessionStorage.setItem('pi-access',token);$('#login').classList.add('hidden');
   $('#connection span').textContent='已连接 Pi';$('#connection').style.background='';
   try{
-   status=s;recordingOverlay?.update(s);
+   status=s;reconcileModeIntent(s);recordingOverlay?.update(s);
    if(!s.privacy?.required){render(s);privacyScreen.revealIfSafe(s);phoneCompanion?.update(s);recordingOverlay?.renderFault(null)}
   }catch(error){
    recordingOverlay?.renderFault(error);privacyScreen.lock();
@@ -710,11 +764,8 @@ $$('#settings-card [data-action]').forEach(b=>b.onclick=()=>act(b.dataset.action
 const media=matchMedia('(max-width:760px)');function layout(){if(/^\/(?:phone\/?)?$/.test(location.pathname))return;const card=$('#settings-card');if(media.matches){$('main').append(card);card.classList.add('mobile-settings');card.style.marginTop='18px'}else{$('.side').append(card);card.classList.remove('mobile-settings');card.style.marginTop=''}}media.addEventListener('change',layout);layout();
 
 async function privacyPost(action,value){
- const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);
- try{
-  const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value}),signal:controller.signal});
-  const data=await res.json();if(!res.ok){const error=Error(data.error||'屏幕同步失败');error.status=res.status;throw error}return data;
- }finally{clearTimeout(timer)}
+ const {response:res,value:data}=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value})},4000);
+ if(!res.ok){const error=Error(data.error||'屏幕同步失败');error.status=res.status;throw error}return data;
 }
 async function privacyStop(snapshot){
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);
@@ -741,20 +792,20 @@ function suspendVisibleMedia(){
  const video=$('#review-video');video.pause();video.removeAttribute('src');video.load();video.classList.add('hidden');playingKey='';
 }
 privacyScreen=createPrivacyScreen({
- post:privacyPost,stop:privacyStop,readStatus,readDisplayState,integratedRegistration:true,refresh:poll,
+ post:privacyPost,stop:privacyStop,readStatus,readDisplayState,integratedRegistration:true,refresh:poll,holdReveal:()=>!!modeIntent,
  visible:()=>!document.hidden,needsLogin:()=>accessCodeRequired&&!token,
  setLocked:locked=>{document.body.classList.toggle('privacy-locked',locked);document.documentElement.classList.toggle('privacy-open',!locked);$('#privacy-cover').hidden=!locked},
  setLogin:shown=>{document.body.classList.toggle('privacy-login',shown);if(shown)$('#login').classList.remove('hidden')},
  onLock:suspendVisibleMedia,onState:value=>recordingOverlay?.state(value)
 });
-recordingOverlay=window.createRecordingOverlay?.({discard:privacyDiscard});recordingOverlay?.state(privacyScreen.presentation());
+recordingOverlay=window.createRecordingOverlay?.({discard:privacyDiscard});recordingOverlay?.state(privacyScreen.presentation());modeOverlay();
 bindPrivacyInput(privacyScreen,document,undefined,{progress:value=>recordingOverlay?.progress(value),commit:()=>recordingOverlay?.commit()});
 document.addEventListener('visibilitychange',()=>{privacyScreen.visibilityChanged();if(!document.hidden)poll()});
 setInterval(()=>privacyScreen.heartbeat(false),1000);
 setInterval(()=>privacyScreen.tick(),250);
 
 phoneCompanion=window.createPhoneCompanion({status:()=>status,unlocked:()=>online&&!privacyScreen.isLocked(),headers:authHeaders,action:act,
- protection:()=>privacyScreen.presentation(),pending:()=>inFlight,requiresCode:accessCodeRequired,refresh:poll,
+ protection:()=>privacyScreen.presentation(),pending:()=>inFlight||!!modeIntent,modeReady:modeActionReady,requiresCode:accessCodeRequired,refresh:poll,
  acceptToken:value=>{if(accessCodeRequired&&typeof value==='string'&&value.length>=24&&value.length<=511){token=value;sessionStorage.setItem('pi-access',token)}poll()},
  beforeSwitch:()=>{privacyScreen.disconnected();online=false},drawSignal:name=>drawSignal(name,status?.signals?.[name]||{}),renderWrist:()=>renderWrist(status)});
 async function statusLoop(){if(!document.hidden)await poll();setTimeout(statusLoop,status?.state==='countdown'||status?.privacy?.phase==='arming'?100:750)}

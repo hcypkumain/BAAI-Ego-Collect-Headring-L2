@@ -1,174 +1,31 @@
 {
   "schema_version": 1,
   "baseline_commit": "ccf2b3891275f07caec454058f65432c01ce5980",
-  "reason": "Isolated EEG/EMG runtime profiles and deliberate next-segment/discard flow",
+  "reason": "Unified EEG/EMG maintenance branch with all reviewed late field fixes",
   "files": [
     {
-      "original_path": "orangepi/src/orangepi_collect/acquisition/preview_worker.py",
-      "current_path": "orangepi/src/orangepi_collect/acquisition/preview_worker.py",
+      "original_path": ".gitignore",
+      "current_path": ".gitignore",
       "action": "moved-or-modified",
-      "baseline_sha256": "88f914b345d6d983368764ab9d8c35ce51627d5cc3c0b6543cb3632984a2542c",
-      "published_sha256": "f905dd3a3df1875c1ff5b73decb9a0a26813588d464f5ff88ccab0a0d7e9d7ad",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+      "baseline_sha256": "a9bc122fd5b6ad56041b83cb1ed9e6f7d001944c979cfefd598848b75796baf7",
+      "published_sha256": "d656df8c842c59946ffbc66bb9ef1b681ef0bc12f72072f723bcd485585f429a",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
     },
     {
-      "original_path": "orangepi/src/orangepi_collect/common/live_preview.py",
-      "current_path": "orangepi/src/orangepi_collect/common/live_preview.py",
+      "original_path": "CHANGELOG.md",
+      "current_path": "CHANGELOG.md",
       "action": "moved-or-modified",
-      "baseline_sha256": "d870c05fd8ac2150a3bb6c62ff10e971c3970f657ce488bd1207840997a21b7f",
-      "published_sha256": "c42887f4c486cf58a91d907b408a3a4d1720473e5d444e7e259b2c3fe19891dc",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+      "baseline_sha256": "ec98fc70d3ef75db412a7da0f259d1be007dc344104b54047ddf99f4ab8e9ce5",
+      "published_sha256": "3f92653940de3c61b2b687bc6db03cb7933d905b8f9ad80f54433f399ecaa338",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
     },
     {
-      "original_path": "orangepi/src/orangepi_collect/common/wrist_preview_transport.py",
-      "current_path": "orangepi/src/orangepi_collect/common/wrist_preview_transport.py",
+      "original_path": "README.md",
+      "current_path": "README.md",
       "action": "moved-or-modified",
-      "baseline_sha256": "9b7b14d1f0bd815ef5a34bd45b46d7d7934e5d8b33c121b77caa8d3229490dd6",
-      "published_sha256": "5a2b0c7dae826e4feb2af8e8ff2ea9306b8cecdc6a9f14cfb3cf9f21ada3f95c",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_app.css",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_app.css",
-      "action": "moved-or-modified",
-      "baseline_sha256": "58470a460ad7948f1cb266df25d84113f54a799ccd4f9211a93813263ecea9d3",
-      "published_sha256": "6e07271ba07fdb56687f2da54ef257d6a799a6a446fd4a44c1e1b5a4c8f865c2",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_shell.js",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_shell.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "a757f393c96933e7f12564479057ad25d526b74945bb00ad5d0f5e434b9f4a15",
-      "published_sha256": "8178fca98d9395f438b4eac9cc4e78b4990d2ec7be8e17b3022a60ae91483028",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/reference_access.py",
-      "current_path": "orangepi/src/orangepi_collect/control/reference_access.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "f6741b5db016a43a91a139a5469cbac7245c7e8e9a7f3ead8355a883e8fd40a0",
-      "published_sha256": "afc260fed615fdb56650a4a86fad2ca5f0d1cbce13ca56e4817c17ec982cf976",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/reference_credentials.py",
-      "current_path": "orangepi/src/orangepi_collect/control/reference_credentials.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "4bd99d3ef8c25d30fe13733800b479b44d5a2a255e1a300a0d6e76faf2e1d59d",
-      "published_sha256": "27aba75cda754e106e10ab16e907524d13387c17defc6a938bd812b22f9cc8ab",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/reference_library_http.py",
-      "current_path": "orangepi/src/orangepi_collect/control/reference_library_http.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "b8ee4b9602e085e299682782262a8b0e43a31b95b688334198bbe6e556116021",
-      "published_sha256": "7e70bc4968c3ac0ef16f946fbb74718b47ad26210aba8a89189b2153d768bc90",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/references.html",
-      "current_path": "orangepi/src/orangepi_collect/control/references.html",
-      "action": "moved-or-modified",
-      "baseline_sha256": "c984c7194d5baf34932949bbd50337fa3f5a6569e8fde6de379c6dc26b73544a",
-      "published_sha256": "a97aaa7361e795f9efa2c483b0d72af81dc21dd57321e5c3f13c898af126565d",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/dual_wrist_preview.py",
-      "current_path": "services/rv06-preview/dual_wrist_preview.py",
-      "action": "removed",
-      "baseline_sha256": "79fa40cc592c77d4fbcbc94e3f08e70dda744e4c4559217424d66b223504a5b6",
-      "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
-      "original_path": "services/rv06-preview/frame_stream.py",
-      "current_path": "services/phone-media/frame_stream.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "8a31ce3f9ed6733dc997f2d0429c3718e354fd5048935360c1a5c42e37731ac9",
-      "published_sha256": "8a31ce3f9ed6733dc997f2d0429c3718e354fd5048935360c1a5c42e37731ac9",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/headphone_http.py",
-      "current_path": "services/phone-media/headphone_http.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "297c11813bb1233739c767b537db2849ce2ab8f5b0f894fc188e5f5e168fe926",
-      "published_sha256": "d6edb9eda9fdbff8a8ee6e9b12c4cf083bae707e19844bc8d65b6787ac46b90c",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/headphone_manager.py",
-      "current_path": "services/phone-media/headphone_manager.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "1a21e6285fd5f42e96ed274749b9e94540a9ceac9e40394b1554a96a73b9c8df",
-      "published_sha256": "4b4ed1a7b61e8af2b0e30cffb24feea72900e7ee3f41d0947218db4f08b79369",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/preview_sidecar.py",
-      "current_path": "services/phone-media/phone_media.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "9a3a85c3bd3c35ed32d346120036c408480a992b323dc12fba4d8ead7d314d12",
-      "published_sha256": "f974ace06c7e266d900c650a9cbe1adf570f1991672aa158f2bc1a73445c3de0",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/qc_details.py",
-      "current_path": "services/phone-media/qc_details.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "5246f2aeefc442308fcf20fe67ee896b89415dfcd656778081abc21cbee51811",
-      "published_sha256": "676364ac8b075116dee375b1f576ed3d937b4dc5a30513911a44620e4248b781",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/recording_replay.py",
-      "current_path": "services/phone-media/recording_replay.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "5c6e6d4377ae3c76f8bde4872b0275fdcb08b3b22f6d546e2c3c5c9281c1f975",
-      "published_sha256": "495c9ccd1357f4b28265a732086f85ede673a81fb93abdcc41dc9f7768a145e5",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/reference_preview.py",
-      "current_path": "services/phone-media/reference_preview.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "1dfbd3a899e79b7626b4a481da48f9299b4d746c1aacc876f8bd8b3f20fef100",
-      "published_sha256": "1dfbd3a899e79b7626b4a481da48f9299b4d746c1aacc876f8bd8b3f20fef100",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/replay_runtime.py",
-      "current_path": "services/phone-media/replay_runtime.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "d5aa8fb2bd3d44787e6ab8b8af006d862a4cd1b902a51c84bf290eb70baf0774",
-      "published_sha256": "d48699710bd0e9621ae744333f4c36fabe78dfb1c870c8c89f5d7bddad3be8a5",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/replay_video.py",
-      "current_path": "services/phone-media/replay_video.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "1fe2f93262a4cc17d4b3065da785e8ff95622289ae97083a51e6c08c26cc030d",
-      "published_sha256": "1fe2f93262a4cc17d4b3065da785e8ff95622289ae97083a51e6c08c26cc030d",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/wrist_preview_transport.py",
-      "current_path": "services/phone-media/wrist_preview_transport.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "9b7b14d1f0bd815ef5a34bd45b46d7d7934e5d8b33c121b77caa8d3229490dd6",
-      "published_sha256": "5a2b0c7dae826e4feb2af8e8ff2ea9306b8cecdc6a9f14cfb3cf9f21ada3f95c",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "services/rv06-preview/headphone-test.wav",
-      "current_path": "services/phone-media/headphone-test.wav",
-      "action": "moved-or-modified",
-      "baseline_sha256": "2f5069054f00c85622f0e763fec963bbfdd762cf984643e063236bbaad82c539",
-      "published_sha256": "2f5069054f00c85622f0e763fec963bbfdd762cf984643e063236bbaad82c539",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+      "baseline_sha256": "f982001f8b1dacbb845f5f1103e96f7fb7fb33533aa45a86e505ac047d828146",
+      "published_sha256": "bbcf9a0928c35a2967246c795746c1cfebfc53e7c9a4429b1b90299e4a7a952c",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
     },
     {
       "original_path": "deployment/os-reference/pulse/default.pa",
@@ -176,7 +33,38 @@
       "action": "moved-or-modified",
       "baseline_sha256": "839bcb4a5b7705be6f8df5f14680d3416cdb477cec282ea6f6caa2e1759a9fff",
       "published_sha256": "bc83b2de280a3bb7a4230dd21ff066b9d1dddcd2132f5038dc87fb9622d20135",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "deployment/systemd/egorecord.service",
+      "current_path": "deployment/systemd/egorecord.service",
+      "action": "removed",
+      "baseline_sha256": "1b8f36b9f629366e69031a1fc4e43b7d1cbb52a440c9226dfadebd9ff6877ee4",
+      "reason": "Retired duplicate or unused runtime in the EEG edition"
+    },
+    {
+      "original_path": "deployment/systemd/embodied-pi-collect.service",
+      "current_path": "deployment/systemd/embodied-pi-collect.service",
+      "action": "moved-or-modified",
+      "baseline_sha256": "237196f104589e263d186ff31d6d50591e4760a3c7b1e8205ef0c1021d737c2f",
+      "published_sha256": "ff7eaa69432e0f4e2e17543f53f469b7cb1cbd097843bf9ac624b45cd33c207d",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "deployment/systemd/embodied-pi-collect.service.d/60-impedance-preflight.conf",
+      "current_path": "deployment/systemd/embodied-pi-collect.service.d/60-impedance-preflight.conf",
+      "action": "moved-or-modified",
+      "baseline_sha256": "fdd4aca433008ba85f0eccb0cfdfa74489c028e33b060a1d48715a95b12d67ec",
+      "published_sha256": "fdd4aca433008ba85f0eccb0cfdfa74489c028e33b060a1d48715a95b12d67ec",
       "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "deployment/systemd/embodied-pi-collect.service.d/70-camd-migration.conf",
+      "current_path": "deployment/systemd/embodied-pi-collect.service.d/70-camd-migration.conf",
+      "action": "moved-or-modified",
+      "baseline_sha256": "56e4ac98c613e5c94f106e8fd79475e774e0e793e49e1ed96840cac98c8caf2a",
+      "published_sha256": "309a31919dee06310ac0c135711030f4254b394a808d726d08f3e88a34bd999c",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
     },
     {
       "original_path": "deployment/systemd/rv06-preview.service",
@@ -184,7 +72,7 @@
       "action": "moved-or-modified",
       "baseline_sha256": "85eb3978791fbb9d1913afc75a31dd8fda4afd80a262883372868477c2f72631",
       "published_sha256": "2f2151410f74953e088c2d17c81d3ee427b114e5f6e51cebcdb8ed065c4932d8",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
     },
     {
       "original_path": "deployment/systemd/rv06-preview.service.d/headphone-control.conf",
@@ -213,668 +101,6 @@
       "action": "removed",
       "baseline_sha256": "294eb2f7e89644d30d21c0e27f9e7fd4c7f827928a24358b996f2dfc84827564",
       "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/dashboard.html",
-      "current_path": "orangepi/src/orangepi_collect/control/dashboard.html",
-      "action": "moved-or-modified",
-      "baseline_sha256": "f8b60e59d6e659febc0a3474e0f333ad21d51f0f8d0b4b3effd3f901fcfffe29",
-      "published_sha256": "ed86d05997e0c705fdbeba6d35b64babbec3931561eb5d538f8a6816f43a7601",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_app.js",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_app.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "b896d9a3c8256bfc841242e4aa8af7bd2e6acfbe575f9aa8da07a5a8fceb17fe",
-      "published_sha256": "be0b84b9e77e418d2075a41591993bb6c456eec52e996374f503f0cbd261995b",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_http.py",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_http.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "a2ee2edc6dcd7c5b7bc677ee7eb2af5b37726dd291c15ba6048256be2fff3cd1",
-      "published_sha256": "467a4371a5776980e3ae7091cdc9c7b53beadc840227d070990872bb5ef00120",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_worker.py",
-      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_worker.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "813cb98508f6e7ae658803ca9fbb104f7fc8cd79ebc8ebfdc1bb01a259c43d98",
-      "published_sha256": "3984914cbcc8a1f207d64dd092ed9211ea4ccf62064e6627ccfbfdf1f7233b3d",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/acquisition/scan_devices.py",
-      "current_path": "orangepi/src/orangepi_collect/acquisition/scan_devices.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "8fdcd6b8703c7061174ab749669d05bf1c47286abcf032d0c0a5c3a35b0a968c",
-      "published_sha256": "82bd76e3b80eda32604478135ec120abcc3aba2ef49d268e1988f79210514c47",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/serial_v1_impedance.py",
-      "current_path": "orangepi/src/orangepi_collect/common/serial_v1_impedance.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "d6b6a5114336130a980329f1ae0d9f4caf648ba67898d057ab0dfb39f2c87694",
-      "published_sha256": "abc1802530d2547dd5e81421ec52f3718eb13ba0a6bfd9d2908fe9626afeab29",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/dashboard.py",
-      "current_path": "orangepi/src/orangepi_collect/control/dashboard.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "bc974ad84705e96f657f23be08328e788850eb866bf7d1050a62fdc7c8ccf0a1",
-      "published_sha256": "38b470ff60d4282afd2d34e001633be37f7bbf683528f13cbe1a65f81719ad3e",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_references.js",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_references.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "f87776ee385fd43d44b721cb27a9618555c629acd0d9134b6390c3376e70fe28",
-      "published_sha256": "75f109974bc9262e84fab4f2b4e2d7d43ca3dae7322e80a55683a35445cb358e",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/reference_catalog.py",
-      "current_path": "orangepi/src/orangepi_collect/control/reference_catalog.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "8b11b78d95bd6ce8261ea14bb47f4dae93c60c78cfb304dc709c0436900ba55f",
-      "published_sha256": "bd142fc5f0e6e1dce9c48fcd7f44ede86ac2680c8f29f85ff80006fca4194b25",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/reference_controls.py",
-      "current_path": "orangepi/src/orangepi_collect/control/reference_controls.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "dfdd22522018f3fa7c084dafba474a4efabd4768cea6e920cbc30262ba2fa58f",
-      "published_sha256": "6fba532ac9bd34e9a1fc3e9620f47e02749f0fe663bcf69bbe0f407f458ddecd",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/framework_qc.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/framework_qc.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "2784e64076ae3f3509aaa162f77b5e1a476aeb4eb5ac9b1c80510c635ed95d34",
-      "published_sha256": "25af4a0d0ab3676b03f3a3372f0ba2aeb9c18ccac1bec74547fb6105201213b5",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_screen_sync.cjs",
-      "current_path": "orangepi/tests/test_screen_sync.cjs",
-      "action": "moved-or-modified",
-      "baseline_sha256": "47104de211d1689b3055984f10e78dccd89c65b857576016e0060dfe45ffe608",
-      "published_sha256": "d0f06bdb2e2cdebd73e7071c32edb8600e5934ca3685f9b10992a82c029ae786",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/cloud_worker.py",
-      "current_path": "orangepi/src/orangepi_collect/control/cloud_worker.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "9c62c3ea461081b84d450f8a63c51687efea52ca8c737e4d8de6941c0b6ee355",
-      "published_sha256": "6de6569ed58985a99ab1f8ad91600d4c84605a61594c981d18bf758e63990ede",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/configs/devices.yaml",
-      "current_path": "orangepi/configs/devices.yaml",
-      "action": "moved-or-modified",
-      "baseline_sha256": "9bb713ef0f2376b1edcf47c93d4ab4c239fba1d11f03cbc589c9418b43507d4d",
-      "published_sha256": "c0273fb4df2600363c9ac870c751865033cdfe695efdca88fed2940502f59213",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/configs/environments/eeg/requirements.txt",
-      "current_path": "orangepi/configs/environments/eeg/requirements.txt",
-      "action": "moved-or-modified",
-      "baseline_sha256": "3d988e758011f5d6c14069f358390b23dc82349b077dd0416de043a483fdf5e7",
-      "published_sha256": "3d988e758011f5d6c14069f358390b23dc82349b077dd0416de043a483fdf5e7",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/configs/environments/ros/pyproject.toml",
-      "current_path": "orangepi/configs/environments/ros/pyproject.toml",
-      "action": "removed",
-      "baseline_sha256": "42eed25b07a90b100d2bbc81b21058de9392e1a2db5b0f19a50332441ee9e88c",
-      "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
-      "original_path": "orangepi/configs/environments/ros/uv.lock",
-      "current_path": "orangepi/configs/environments/ros/uv.lock",
-      "action": "removed",
-      "baseline_sha256": "6dbbe027f8c64edf1e248cca2bca2f8a766435bec3e1f5cfdc33ee11b7c7a54d",
-      "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
-      "original_path": "orangepi/scripts/check.sh",
-      "current_path": "orangepi/scripts/check.sh",
-      "action": "moved-or-modified",
-      "baseline_sha256": "60158eb4718897e9e2d7816dfd06e91299d15b601a023f6eff63d73df2dcd106",
-      "published_sha256": "a27e291231001e926e0ddcc3c5f89ef21dc41b986bbadfac13cc70dc1aac5c74",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/scripts/env.sh",
-      "current_path": "orangepi/scripts/env.sh",
-      "action": "moved-or-modified",
-      "baseline_sha256": "54b3ee0608a6ad6892d94487e407d135a4ffd29accfd764339092e803264ecf9",
-      "published_sha256": "4bb3d2472cd2bea5460184a18fc7c9ec77e27c6ec40da8c5cbadadb14f1e99cb",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/scripts/package_delivery.sh",
-      "current_path": "orangepi/scripts/package_delivery.sh",
-      "action": "moved-or-modified",
-      "baseline_sha256": "70d46ac25d241803f4706c0f0ef3a2c3e137b1187775d32dd1a3290ccc9b9bc0",
-      "published_sha256": "14850c7ac37dad3442f93ca3201684ac0ffaec8a9294175e74636c436c49009a",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/scripts/run.sh",
-      "current_path": "orangepi/scripts/run.sh",
-      "action": "moved-or-modified",
-      "baseline_sha256": "e557a208b537584a4bc956cc9bb79e099590d1910d3c4b8f7d9a7f3015cfe3f7",
-      "published_sha256": "40bbfda8324d44c229c87808a1248dcc77e2fd47a7cf38791a605c6dd20a927d",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/scripts/setup_eeg.sh",
-      "current_path": "orangepi/scripts/setup_eeg.sh",
-      "action": "moved-or-modified",
-      "baseline_sha256": "4720bef9d5f7e82f37b007d9bae0c187627484165170c59fb9d4e1953baf0c81",
-      "published_sha256": "4720bef9d5f7e82f37b007d9bae0c187627484165170c59fb9d4e1953baf0c81",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/scripts/setup_envs.sh",
-      "current_path": "orangepi/scripts/setup_envs.sh",
-      "action": "moved-or-modified",
-      "baseline_sha256": "75030841ecbe896ee62d0afad988bbefb6f2a6c805eff07b82a7168a131838c6",
-      "published_sha256": "57d925585ffb04ea7b9f1b4e65ae62bc22c9cb41e2cc18b33c6cdbebf99b7edc",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/scripts/diagnostics/check_busy_device.py",
-      "current_path": "orangepi/scripts/diagnostics/check_busy_device.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "8a94850f763257f8025e428a72ecb89155d2ea767a664054f25bfcc4c5f15a8c",
-      "published_sha256": "c92478f7221d1863273aa5c654cfc80acc10d1b92826b0c94ce7830de044dd97",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/scripts/diagnostics/eeg_smoke.py",
-      "current_path": "orangepi/scripts/diagnostics/eeg_smoke.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "fee89c22a5d5909fc706977dea47cf3a43a92f2c45caf969911254433745e7f5",
-      "published_sha256": "fee89c22a5d5909fc706977dea47cf3a43a92f2c45caf969911254433745e7f5",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/scripts/diagnostics/system_observer.py",
-      "current_path": "orangepi/scripts/diagnostics/system_observer.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "adcb637f672f585fdb1771791ae55216d3a8e7543a6e68821679234068d9ceea",
-      "published_sha256": "fd65af32a0f22bd18b0fc3e565654ac2d3c0143aea8f8aa4809af73955f9b223",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/acquisition/capture.py",
-      "current_path": "orangepi/src/orangepi_collect/acquisition/capture.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "d0a88bbbd1f57422dbb3164f2227e9deec58772d8d985cd0c44ff61e5469a8dc",
-      "published_sha256": "8ba2ea735cd6b90c1dd652610f4b1b841ed93ebf7ddc1df3d893400f5c1226fd",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_bridge.py",
-      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_bridge.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "b5e3d1bb6f88a66bc33c903d62ac54e385124518238c58ab8400e9c04341c455",
-      "published_sha256": "b5e3d1bb6f88a66bc33c903d62ac54e385124518238c58ab8400e9c04341c455",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_filter.py",
-      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_filter.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "5384666a8fbd12bf82d7c895150b4f21623da28b918b340e3c048acd56a2755e",
-      "published_sha256": "5384666a8fbd12bf82d7c895150b4f21623da28b918b340e3c048acd56a2755e",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_frontend.py",
-      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_frontend.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "feed368783d7db8d792763d1c66bb89d187ebfb80267072dc15dc68cf5cef239",
-      "published_sha256": "feed368783d7db8d792763d1c66bb89d187ebfb80267072dc15dc68cf5cef239",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/acquisition/imu_source.py",
-      "current_path": "orangepi/src/orangepi_collect/acquisition/imu_source.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "0341045b6717d61af8ea258cc47bc130d085c472b6a4468a442a440a3cadced0",
-      "published_sha256": "1b41ded5054f2b02f95b2d26e1abd447a3d934901dc7fcc481d27e278e867d6a",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/audio/startup_fatal.py",
-      "current_path": "orangepi/src/orangepi_collect/audio/startup_fatal.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "a6eef6bed2dac764e5cdc605c4477a298b1993dc5026cb07a3cdd620cc86d5bb",
-      "published_sha256": "78e5fd69c82e8228b2516d4d3168c48b1926ab36e53b912927c77670b59b8980",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/device_discovery.py",
-      "current_path": "orangepi/src/orangepi_collect/common/device_discovery.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "4975c4419428c6f66739e9502c2421e7bec4c3213bfd5b1539e0708f71f60277",
-      "published_sha256": "64a1d9557b52fff1ea6fc28d77c812ad9f863a6016912c4aba6661130b78a00f",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/display_demand.py",
-      "current_path": "orangepi/src/orangepi_collect/common/display_demand.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "04cc7dc932e2178b938e334b495d7aa99407057fbd394cf4f19087ef66c4550f",
-      "published_sha256": "04cc7dc932e2178b938e334b495d7aa99407057fbd394cf4f19087ef66c4550f",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/eeg_impedance.py",
-      "current_path": "orangepi/src/orangepi_collect/common/eeg_impedance.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "c5e6fc15426a33cfa8c03dbcc3f296a79f475d6895dd84bdd023c7c500273104",
-      "published_sha256": "c5e6fc15426a33cfa8c03dbcc3f296a79f475d6895dd84bdd023c7c500273104",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/eeg_settings.py",
-      "current_path": "orangepi/src/orangepi_collect/common/eeg_settings.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "330acc2822e2966a35e1e770ac6a005f453c7ed69adf21982b5ade2da0f506c5",
-      "published_sha256": "330acc2822e2966a35e1e770ac6a005f453c7ed69adf21982b5ade2da0f506c5",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/emg_insertion.py",
-      "current_path": "orangepi/src/orangepi_collect/common/emg_insertion.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "62dbbbb6fcb5dfcdb1ea1b93ea613ffd15b6b1ded555bb044ce5f65f9f5e917d",
-      "published_sha256": "f17bc597c4956a4416b8d65ad1a3a811ed6dcfcc69b0bae453b5c728096bbfaa",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/impedance_estimator.py",
-      "current_path": "orangepi/src/orangepi_collect/common/impedance_estimator.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "c0ab3d10cbad1bd820d193b36f6440c7e6c223f9eb6aae2b9e9d6b45a8b279be",
-      "published_sha256": "c0ab3d10cbad1bd820d193b36f6440c7e6c223f9eb6aae2b9e9d6b45a8b279be",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/impedance_quality.py",
-      "current_path": "orangepi/src/orangepi_collect/common/impedance_quality.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "b46fd30276c758c74ccdbe90468f6551d28a36be4878f12a922f9ea57fcccef4",
-      "published_sha256": "b46fd30276c758c74ccdbe90468f6551d28a36be4878f12a922f9ea57fcccef4",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/impedance_record.py",
-      "current_path": "orangepi/src/orangepi_collect/common/impedance_record.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "8eb1524cddcd56e02b73305914076bd9e1e95d9305c3706d9e17b8457b924a94",
-      "published_sha256": "8eb1524cddcd56e02b73305914076bd9e1e95d9305c3706d9e17b8457b924a94",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/common/project_paths.py",
-      "current_path": "orangepi/src/orangepi_collect/common/project_paths.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "e0367ea28ba3a2871efdd8993cc72fb64d6815eef74107d2679093c49d97922b",
-      "published_sha256": "94585ec667d188d155fd88eafda9ed4196c90a3c0c49f6ffa9b949b43126322b",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/camera_check.py",
-      "current_path": "orangepi/src/orangepi_collect/control/camera_check.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "7ecdbf25c123de081dd5ad5aedea008dda40a7d5194f736f4c3e60acac1d3cce",
-      "published_sha256": "1c56f6831e7b113150b825dcca2ece664db9f7a7d37351eb795dd5991be2495c",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/cloud_common.py",
-      "current_path": "orangepi/src/orangepi_collect/control/cloud_common.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "a5a6ee206140e10df8f8dee71a694ceec2c15c82d3f5890e847afc6e8acc009b",
-      "published_sha256": "64b06513871847645fbcfcfae5d6c29d76e62fc4bab377889336d82212854be7",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/cloud_http.py",
-      "current_path": "orangepi/src/orangepi_collect/control/cloud_http.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "e853d92f082515d44b97f666f3a749e07010e0785ae64f2407de7d2b07acca1e",
-      "published_sha256": "330d172ee4f9ebf87215932db14e89685a77d46586d9e7d0edf81642cb45c444",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/cloud_uploads.py",
-      "current_path": "orangepi/src/orangepi_collect/control/cloud_uploads.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "7ade1cdb9a8c54d8dac02f14ed99ccdbe32a63a745076c94fe5ec4caa0249ae7",
-      "published_sha256": "db952b92427003c4a414fd6ae791b5ae7320810c2d777c4f7c0250a0b49c7cef",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/device_diagnostics.py",
-      "current_path": "orangepi/src/orangepi_collect/control/device_diagnostics.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "1df9579b0eef10cd26288f9ed9f6d57305c78acf553461e19520f10e17b72573",
-      "published_sha256": "1df9579b0eef10cd26288f9ed9f6d57305c78acf553461e19520f10e17b72573",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/launcher.py",
-      "current_path": "orangepi/src/orangepi_collect/control/launcher.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "1cf9edb98a65ba9f2ad060109d484036ada14e9a97a690b9a6103e5438b176e8",
-      "published_sha256": "ac7ae932456a745a6a0987652d3450a648783fe8abcae26ec3e426c76f88578c",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_recording.js",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_recording.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "be38051f5bb262bbe1cefb113ca11fd241615e4c1d86b8e747f7dcfeb537ef07",
-      "published_sha256": "6eb2769abc4a7d567dd6d2ef8b16d55f151600856365a625d6c554e0e2d53f20",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_recordings.js",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_recordings.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "956dd0292524858bc519a4748f9539be7ed460378f43f85f3ea9712b6e6e84f8",
-      "published_sha256": "bed865feb1e8ebaa2808317dc39e0cbfd198b903478f32b848a4eb7a4c4ddc4e",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_transport.js",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_transport.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "b115046e720afbf2145320c04645d434fe08ee965941ecfe1e351e30e88ccac8",
-      "published_sha256": "6c122593647d003961b7c4ce9e6fdf3549ca63008304a25eee48c4f8279ca45e",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/phone_uploads.js",
-      "current_path": "orangepi/src/orangepi_collect/control/phone_uploads.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "6b0ec008161fddddc41b46066890197a7646400a132e2c25d2ebcff26a83aa86",
-      "published_sha256": "f80c9bc321178382ff46a187f091abc5a709e6a91441e3fa2db847667e96e42f",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/qc_details.py",
-      "current_path": "orangepi/src/orangepi_collect/control/qc_details.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "5246f2aeefc442308fcf20fe67ee896b89415dfcd656778081abc21cbee51811",
-      "published_sha256": "676364ac8b075116dee375b1f576ed3d937b4dc5a30513911a44620e4248b781",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/recording_review.py",
-      "current_path": "orangepi/src/orangepi_collect/control/recording_review.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "faef4f52bc131634dbfbb85dfeadf65eb1605d023009446cc230fef8cf6e2f74",
-      "published_sha256": "dcb39f5e1f0949328ac2d4f24a506c684e8d5089be91a96cf25606784cff84cd",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/recording_store.py",
-      "current_path": "orangepi/src/orangepi_collect/control/recording_store.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "33322d720f0dace20f1b3f2c5449d97577bc9f589bc83cd2b2573af56ea4fcd6",
-      "published_sha256": "440f67d8157125cf765512c4d19b2c81dd0e5e060e1cf8c6381466a6a6c2ee3d",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/signal_quality.js",
-      "current_path": "orangepi/src/orangepi_collect/control/signal_quality.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "67f38beadc727a633b9b799a5823a593312f7b208e735af4de34c88adc188cd6",
-      "published_sha256": "67f38beadc727a633b9b799a5823a593312f7b208e735af4de34c88adc188cd6",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/waveform_plot.js",
-      "current_path": "orangepi/src/orangepi_collect/control/waveform_plot.js",
-      "action": "moved-or-modified",
-      "baseline_sha256": "080979b4233b494105e325c0310f43dbc0dbe907ae5e9eea8669c5a4187bf88d",
-      "published_sha256": "080979b4233b494105e325c0310f43dbc0dbe907ae5e9eea8669c5a4187bf88d",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/control/web_controls.py",
-      "current_path": "orangepi/src/orangepi_collect/control/web_controls.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "18841f57c83970645ae4449406d3b11b27286e4de0abde3a2d09cf303c198704",
-      "published_sha256": "572b6fbd3f9b4bf76b558483621fdd41573995d38cb5fe0907d6b0a52633dc96",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/capture_integrity.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/capture_integrity.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "46c50de12a63f102ed424877cec6a6436a4b96979cf8c7525cf39b9130bd5323",
-      "published_sha256": "65172cdb5d17ec448d2ee45389af428a40aebd0f922c74fd6854f61a6072aee7",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/eeg_qc.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/eeg_qc.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "9f9749ea369378a8f1e73987095616bd8683c5ee52598dc5aee49a9b9fc7c1b0",
-      "published_sha256": "9f9749ea369378a8f1e73987095616bd8683c5ee52598dc5aee49a9b9fc7c1b0",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/framework_recorder.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/framework_recorder.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "87900f16223d0542ae9cb4c8b14d1b7de53746b80957091af969fe848cf76cae",
-      "published_sha256": "56d612992eb42d7fc9938297133b34785858886e3daa2f7d3ea0ff4b3a58a456",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/gap_thresholds.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/gap_thresholds.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "39a5f12d8dacfda72e6e251083603e50bc43cf8fd35938095f84ac804c48d81b",
-      "published_sha256": "aaf1ab0a02a54e916b80a0f887f4f8cab53f04c379c8b9f8757b3af085c6d823",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/mpp_qc.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/mpp_qc.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "ec42f98d2e998da33e147b5b84b358b94af097dce133b80de6c81ce7fc28c187",
-      "published_sha256": "0e9e08afd5fad8989cfe40839669fba194af72e37cbd6a4d58938d0dbfb7e2e1",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/mpp_video_worker.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/mpp_video_worker.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "c3f991016f5d6b923879204447633dc5410a725f12edccc722b50e076591c640",
-      "published_sha256": "9f1a3031e77e9ce1e3465cc0b5d01a32717105eb2f4b8ef9218fb8afda16c4e2",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/practical_evidence.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/practical_evidence.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "9ad74d44e6854bf15e8ba60dfc1cd638606b9be2ae9ece5c4f16c49593410bb4",
-      "published_sha256": "9ad74d44e6854bf15e8ba60dfc1cd638606b9be2ae9ece5c4f16c49593410bb4",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/framework/qc_policy.py",
-      "current_path": "orangepi/src/orangepi_collect/framework/qc_policy.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "83b8e67312982d8edf358205ba37f3e5cba81bca48f3cba69ce7ea2d9a0fd214",
-      "published_sha256": "c4457629e35b16e2efab97f386a5a9b2e507149f72cf8d4e252ae5765f8672b4",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/recorders/camera/h264_preview.py",
-      "current_path": "orangepi/src/orangepi_collect/recorders/camera/h264_preview.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "6e99cb440dbc793a089b8ba8f6bf0a86ddbfccc51df45155c0bef359206c8de6",
-      "published_sha256": "d29cf67de21cf2d3847c17347509e38724c801d39a2c0008f7dd8c87201a8502",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/recorders/camera/mpp_camera_recorder.py",
-      "current_path": "orangepi/src/orangepi_collect/recorders/camera/mpp_camera_recorder.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "1653ae9fea9501314cf33f7ea03a5b47c77ec311200382646b41717772ebed89",
-      "published_sha256": "6cf1df606e23db03159b5f55cd961f825a0f3636f0ef5f910b0c05c6aa69d495",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/recorders/camera/uvc_source.py",
-      "current_path": "orangepi/src/orangepi_collect/recorders/camera/uvc_source.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "cdc56bf5f938081ecad48f049474a91f0c4cdf63f6a4fa77620697703e79b676",
-      "published_sha256": "3bea08f554ea5e835901f7c4d4a830322a992cfa7cf94adc3cc0264f7ffbc000",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/src/orangepi_collect/storage/ledger.py",
-      "current_path": "orangepi/src/orangepi_collect/storage/ledger.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "bbccf117de61713437c853141084aff15469f3381d3f82c9e83fd93bbfe7020e",
-      "published_sha256": "41737f7796abd53a93d395576e16a95b45fe83d33ec76d08e6d1ab9f657316ce",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_adc_preview_bounds.py",
-      "current_path": "orangepi/tests/test_adc_preview_bounds.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "9c0bbad7eca41ebf84f2c9d29ffedbc0c8114008f5dc631a70a00eb75b29b3a8",
-      "published_sha256": "9c0bbad7eca41ebf84f2c9d29ffedbc0c8114008f5dc631a70a00eb75b29b3a8",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_device_diagnostics.py",
-      "current_path": "orangepi/tests/test_device_diagnostics.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "a198d0957b312eff997501cb91a7bce9a70aba5c654811870af5672bb5a6bab7",
-      "published_sha256": "a198d0957b312eff997501cb91a7bce9a70aba5c654811870af5672bb5a6bab7",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_discard_flow.py",
-      "current_path": "orangepi/tests/test_discard_flow.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "68d25fb074671a59901057b5a808d0f67ed1a057e74cfae3fbde955768c0b963",
-      "published_sha256": "6446fc106bb057d5a2cd76fd95a553b13caef1b3ae4647d72fa06697a837bfd8",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_eeg_control.py",
-      "current_path": "orangepi/tests/test_eeg_control.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "c3c171dc3dd48e02eefbde36886aec85ecc48be24052c55a55c852066613a1a4",
-      "published_sha256": "c3c171dc3dd48e02eefbde36886aec85ecc48be24052c55a55c852066613a1a4",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_eeg_framework.py",
-      "current_path": "orangepi/tests/test_eeg_framework.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "4c166560bd32d3918bb206a2009f001a8f395aea90c338ed0ee61382f38a77f6",
-      "published_sha256": "4c166560bd32d3918bb206a2009f001a8f395aea90c338ed0ee61382f38a77f6",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_eeg_gate_finalization.py",
-      "current_path": "orangepi/tests/test_eeg_gate_finalization.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "ae0c807ada39833f8b15b4aa9a8de1589fc39fa08afb7de2b3220fc49705c25e",
-      "published_sha256": "ae0c807ada39833f8b15b4aa9a8de1589fc39fa08afb7de2b3220fc49705c25e",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_eeg_waveform_preview.py",
-      "current_path": "orangepi/tests/test_eeg_waveform_preview.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "7caf64ace252ab5c76c47d302945f7dcfd48832aaebe470958dc358b20b202fb",
-      "published_sha256": "7caf64ace252ab5c76c47d302945f7dcfd48832aaebe470958dc358b20b202fb",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_eeg_worker.py",
-      "current_path": "orangepi/tests/test_eeg_worker.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "6d9c2e0fb6597779e1c08217ca4f54ae332d535f5092b5d67036bd2beebe67e9",
-      "published_sha256": "6d9c2e0fb6597779e1c08217ca4f54ae332d535f5092b5d67036bd2beebe67e9",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_emg_manual_ui.cjs",
-      "current_path": "orangepi/tests/test_emg_manual_ui.cjs",
-      "action": "moved-or-modified",
-      "baseline_sha256": "c5cd0531182ade5b853527b8d66f048448cbe2d476a42d703705b2d799b52668",
-      "published_sha256": "70c3a48da6d83ef57947e2eb903fad31b788f05693d2aafee1956b647293a6c5",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_impedance_advisory.py",
-      "current_path": "orangepi/tests/test_impedance_advisory.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "5426cb8d5b83dec101d10be5dfa48437145ce4e00a61e43dc84566d82bab3a6e",
-      "published_sha256": "5426cb8d5b83dec101d10be5dfa48437145ce4e00a61e43dc84566d82bab3a6e",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_preview_nonblocking.py",
-      "current_path": "orangepi/tests/test_preview_nonblocking.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "34746843f205ddc3285b74c02b820dcea76ac9438792dfa88bff6a5061e4ba83",
-      "published_sha256": "563a01dac9244a428ca9de439b990824b276ccaaa84d61a6f434b45a458618e8",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_recording_overlay.cjs",
-      "current_path": "orangepi/tests/test_recording_overlay.cjs",
-      "action": "moved-or-modified",
-      "baseline_sha256": "78396152813d9635e7d8f056288da305dc151d9828b3b0bdb6d84d1973f5a3a0",
-      "published_sha256": "cc8b66216038fc6892076eb0ac0631a8f94644064d36bfe220c3be725790f54a",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_v4.py",
-      "current_path": "orangepi/tests/test_v4.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "1b51eb75eac9305e3aa78ce6e1f5c833b7843682ae4a5e33ecd3e3eb33162227",
-      "published_sha256": "1b51eb75eac9305e3aa78ce6e1f5c833b7843682ae4a5e33ecd3e3eb33162227",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "orangepi/tests/test_wrist_camera_dashboard.py",
-      "current_path": "orangepi/tests/test_wrist_camera_dashboard.py",
-      "action": "moved-or-modified",
-      "baseline_sha256": "bd5253754aeda259f538e0a6070f16fff4527a2dad2788cf9f8a39b9e04fc984",
-      "published_sha256": "7cf2b0141370c9855548f3843d64b2633cb32ea7597b1a2fb99bc83107dbc266",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
     },
     {
       "original_path": "legacy/alternate-project/scripts/install_neurodance.py",
@@ -937,6 +163,34 @@
       "current_path": "legacy/alternate-project/scripts/timestamp_rebuild.py",
       "action": "removed",
       "baseline_sha256": "b93a4609e2b24ca0f60b606f320c225ddc7e612fe3c2cb529b56249a8f42fa69",
+      "reason": "Retired duplicate or unused runtime in the EEG edition"
+    },
+    {
+      "original_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/PKG-INFO",
+      "current_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/PKG-INFO",
+      "action": "removed",
+      "baseline_sha256": "17d16a9a91d84fc04a0c2414634d4de545980ab6316a2a4bde6a6eeea2d85e74",
+      "reason": "Retired duplicate or unused runtime in the EEG edition"
+    },
+    {
+      "original_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/SOURCES.txt",
+      "current_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/SOURCES.txt",
+      "action": "removed",
+      "baseline_sha256": "b37f445e9efc3d016cf286fcf9f3cb923c517fee85e33d0c054c6b00ff05d970",
+      "reason": "Retired duplicate or unused runtime in the EEG edition"
+    },
+    {
+      "original_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/dependency_links.txt",
+      "current_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/dependency_links.txt",
+      "action": "removed",
+      "baseline_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
+      "reason": "Retired duplicate or unused runtime in the EEG edition"
+    },
+    {
+      "original_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/top_level.txt",
+      "current_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/top_level.txt",
+      "action": "removed",
+      "baseline_sha256": "11f0930c5f2f682f95d0d6615d5afc7db3d79929f673d2c6955004ddcb0aaedc",
       "reason": "Retired duplicate or unused runtime in the EEG edition"
     },
     {
@@ -1014,13 +268,6 @@
       "current_path": "legacy/alternate-project/src/embodied_brain_collect/recorders/base.py",
       "action": "removed",
       "baseline_sha256": "bfc355a98a6a38671a125e2b3900dcaa199293b26cadd8dad4a970048de76e53",
-      "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
-      "original_path": "legacy/alternate-project/src/embodied_brain_collect/recorders/ffmpeg_writer.py",
-      "current_path": "legacy/alternate-project/src/embodied_brain_collect/recorders/ffmpeg_writer.py",
-      "action": "removed",
-      "baseline_sha256": "2a8c51578f221856447fbfe58f01569ae21c29094383761a1ae2aa0fb709a6c4",
       "reason": "Retired duplicate or unused runtime in the EEG edition"
     },
     {
@@ -1164,6 +411,13 @@
       "reason": "Retired duplicate or unused runtime in the EEG edition"
     },
     {
+      "original_path": "legacy/alternate-project/src/embodied_brain_collect/recorders/ffmpeg_writer.py",
+      "current_path": "legacy/alternate-project/src/embodied_brain_collect/recorders/ffmpeg_writer.py",
+      "action": "removed",
+      "baseline_sha256": "2a8c51578f221856447fbfe58f01569ae21c29094383761a1ae2aa0fb709a6c4",
+      "reason": "Retired duplicate or unused runtime in the EEG edition"
+    },
+    {
       "original_path": "legacy/alternate-project/src/embodied_brain_collect/recorders/hand_pose/manus_hand_pose_recorder.py",
       "current_path": "legacy/alternate-project/src/embodied_brain_collect/recorders/hand_pose/manus_hand_pose_recorder.py",
       "action": "removed",
@@ -1283,34 +537,6 @@
       "reason": "Retired duplicate or unused runtime in the EEG edition"
     },
     {
-      "original_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/PKG-INFO",
-      "current_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/PKG-INFO",
-      "action": "removed",
-      "baseline_sha256": "17d16a9a91d84fc04a0c2414634d4de545980ab6316a2a4bde6a6eeea2d85e74",
-      "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
-      "original_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/SOURCES.txt",
-      "current_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/SOURCES.txt",
-      "action": "removed",
-      "baseline_sha256": "b37f445e9efc3d016cf286fcf9f3cb923c517fee85e33d0c054c6b00ff05d970",
-      "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
-      "original_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/dependency_links.txt",
-      "current_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/dependency_links.txt",
-      "action": "removed",
-      "baseline_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b",
-      "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
-      "original_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/top_level.txt",
-      "current_path": "legacy/alternate-project/src/embodied_brain_collect.egg-info/top_level.txt",
-      "action": "removed",
-      "baseline_sha256": "11f0930c5f2f682f95d0d6615d5afc7db3d79929f673d2c6955004ddcb0aaedc",
-      "reason": "Retired duplicate or unused runtime in the EEG edition"
-    },
-    {
       "original_path": "legacy/alternate-project/tests/checkers/test_checks.py",
       "current_path": "legacy/alternate-project/tests/checkers/test_checks.py",
       "action": "removed",
@@ -1388,43 +614,618 @@
       "reason": "Retired duplicate or unused runtime in the EEG edition"
     },
     {
-      "original_path": "deployment/systemd/embodied-pi-collect.service",
-      "current_path": "deployment/systemd/embodied-pi-collect.service",
+      "original_path": "orangepi/configs/devices.yaml",
+      "current_path": "orangepi/configs/devices.yaml",
       "action": "moved-or-modified",
-      "baseline_sha256": "237196f104589e263d186ff31d6d50591e4760a3c7b1e8205ef0c1021d737c2f",
-      "published_sha256": "2a55c8a42c96f38e38cc86fec929533373c36106b93f422d3540f0c221af2dff",
+      "baseline_sha256": "9bb713ef0f2376b1edcf47c93d4ab4c239fba1d11f03cbc589c9418b43507d4d",
+      "published_sha256": "c0273fb4df2600363c9ac870c751865033cdfe695efdca88fed2940502f59213",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/configs/environments/eeg/requirements.txt",
+      "current_path": "orangepi/configs/environments/eeg/requirements.txt",
+      "action": "moved-or-modified",
+      "baseline_sha256": "3d988e758011f5d6c14069f358390b23dc82349b077dd0416de043a483fdf5e7",
+      "published_sha256": "3d988e758011f5d6c14069f358390b23dc82349b077dd0416de043a483fdf5e7",
       "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
     },
     {
-      "original_path": "deployment/systemd/embodied-pi-collect.service.d/60-impedance-preflight.conf",
-      "current_path": "deployment/systemd/embodied-pi-collect.service.d/60-impedance-preflight.conf",
-      "action": "moved-or-modified",
-      "baseline_sha256": "fdd4aca433008ba85f0eccb0cfdfa74489c028e33b060a1d48715a95b12d67ec",
-      "published_sha256": "fdd4aca433008ba85f0eccb0cfdfa74489c028e33b060a1d48715a95b12d67ec",
-      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
-    },
-    {
-      "original_path": "deployment/systemd/egorecord.service",
-      "current_path": "deployment/systemd/egorecord.service",
+      "original_path": "orangepi/configs/environments/ros/pyproject.toml",
+      "current_path": "orangepi/configs/environments/ros/pyproject.toml",
       "action": "removed",
-      "baseline_sha256": "1b8f36b9f629366e69031a1fc4e43b7d1cbb52a440c9226dfadebd9ff6877ee4",
+      "baseline_sha256": "42eed25b07a90b100d2bbc81b21058de9392e1a2db5b0f19a50332441ee9e88c",
       "reason": "Retired duplicate or unused runtime in the EEG edition"
     },
     {
-      "original_path": ".gitignore",
-      "current_path": ".gitignore",
+      "original_path": "orangepi/configs/environments/ros/uv.lock",
+      "current_path": "orangepi/configs/environments/ros/uv.lock",
+      "action": "removed",
+      "baseline_sha256": "6dbbe027f8c64edf1e248cca2bca2f8a766435bec3e1f5cfdc33ee11b7c7a54d",
+      "reason": "Retired duplicate or unused runtime in the EEG edition"
+    },
+    {
+      "original_path": "orangepi/scripts/check.sh",
+      "current_path": "orangepi/scripts/check.sh",
       "action": "moved-or-modified",
-      "baseline_sha256": "a9bc122fd5b6ad56041b83cb1ed9e6f7d001944c979cfefd598848b75796baf7",
-      "published_sha256": "d656df8c842c59946ffbc66bb9ef1b681ef0bc12f72072f723bcd485585f429a",
+      "baseline_sha256": "60158eb4718897e9e2d7816dfd06e91299d15b601a023f6eff63d73df2dcd106",
+      "published_sha256": "e487ca552b30c92e0ec976592dd41360db017b7dead002ed044fc04045954e29",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/scripts/diagnostics/check_busy_device.py",
+      "current_path": "orangepi/scripts/diagnostics/check_busy_device.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "8a94850f763257f8025e428a72ecb89155d2ea767a664054f25bfcc4c5f15a8c",
+      "published_sha256": "c92478f7221d1863273aa5c654cfc80acc10d1b92826b0c94ce7830de044dd97",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/scripts/diagnostics/eeg_smoke.py",
+      "current_path": "orangepi/scripts/diagnostics/eeg_smoke.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "fee89c22a5d5909fc706977dea47cf3a43a92f2c45caf969911254433745e7f5",
+      "published_sha256": "fee89c22a5d5909fc706977dea47cf3a43a92f2c45caf969911254433745e7f5",
       "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
     },
     {
-      "original_path": "README.md",
-      "current_path": "README.md",
+      "original_path": "orangepi/scripts/diagnostics/system_observer.py",
+      "current_path": "orangepi/scripts/diagnostics/system_observer.py",
       "action": "moved-or-modified",
-      "baseline_sha256": "f982001f8b1dacbb845f5f1103e96f7fb7fb33533aa45a86e505ac047d828146",
-      "published_sha256": "52bdc8f4f45ff171e6de97759a2e57621cba38533cbb3d8bf1573c7f5bf3d037",
+      "baseline_sha256": "adcb637f672f585fdb1771791ae55216d3a8e7543a6e68821679234068d9ceea",
+      "published_sha256": "92da5d6beb026f3d40d577e1c9513254677820db264ff154f21c0f06208e2104",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/scripts/env.sh",
+      "current_path": "orangepi/scripts/env.sh",
+      "action": "moved-or-modified",
+      "baseline_sha256": "54b3ee0608a6ad6892d94487e407d135a4ffd29accfd764339092e803264ecf9",
+      "published_sha256": "4bb3d2472cd2bea5460184a18fc7c9ec77e27c6ec40da8c5cbadadb14f1e99cb",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/scripts/package_delivery.sh",
+      "current_path": "orangepi/scripts/package_delivery.sh",
+      "action": "moved-or-modified",
+      "baseline_sha256": "70d46ac25d241803f4706c0f0ef3a2c3e137b1187775d32dd1a3290ccc9b9bc0",
+      "published_sha256": "14850c7ac37dad3442f93ca3201684ac0ffaec8a9294175e74636c436c49009a",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/scripts/run.sh",
+      "current_path": "orangepi/scripts/run.sh",
+      "action": "moved-or-modified",
+      "baseline_sha256": "e557a208b537584a4bc956cc9bb79e099590d1910d3c4b8f7d9a7f3015cfe3f7",
+      "published_sha256": "a80a05bf4f63ff0a86f84d9307e694db0317dd8f5b98c4e9d17bef1f81684974",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/scripts/setup_eeg.sh",
+      "current_path": "orangepi/scripts/setup_eeg.sh",
+      "action": "moved-or-modified",
+      "baseline_sha256": "4720bef9d5f7e82f37b007d9bae0c187627484165170c59fb9d4e1953baf0c81",
+      "published_sha256": "4720bef9d5f7e82f37b007d9bae0c187627484165170c59fb9d4e1953baf0c81",
       "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/scripts/setup_envs.sh",
+      "current_path": "orangepi/scripts/setup_envs.sh",
+      "action": "moved-or-modified",
+      "baseline_sha256": "75030841ecbe896ee62d0afad988bbefb6f2a6c805eff07b82a7168a131838c6",
+      "published_sha256": "099c2d17650de3bda7e5369e66f452f23ec0fe8a22e885165f154bcebc82f137",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/capture.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/capture.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "d0a88bbbd1f57422dbb3164f2227e9deec58772d8d985cd0c44ff61e5469a8dc",
+      "published_sha256": "8ba2ea735cd6b90c1dd652610f4b1b841ed93ebf7ddc1df3d893400f5c1226fd",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_bridge.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_bridge.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "b5e3d1bb6f88a66bc33c903d62ac54e385124518238c58ab8400e9c04341c455",
+      "published_sha256": "b5e3d1bb6f88a66bc33c903d62ac54e385124518238c58ab8400e9c04341c455",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_filter.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_filter.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "5384666a8fbd12bf82d7c895150b4f21623da28b918b340e3c048acd56a2755e",
+      "published_sha256": "5384666a8fbd12bf82d7c895150b4f21623da28b918b340e3c048acd56a2755e",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_frontend.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_frontend.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "feed368783d7db8d792763d1c66bb89d187ebfb80267072dc15dc68cf5cef239",
+      "published_sha256": "feed368783d7db8d792763d1c66bb89d187ebfb80267072dc15dc68cf5cef239",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/eeg_worker.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/eeg_worker.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "813cb98508f6e7ae658803ca9fbb104f7fc8cd79ebc8ebfdc1bb01a259c43d98",
+      "published_sha256": "3984914cbcc8a1f207d64dd092ed9211ea4ccf62064e6627ccfbfdf1f7233b3d",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/imu_source.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/imu_source.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "0341045b6717d61af8ea258cc47bc130d085c472b6a4468a442a440a3cadced0",
+      "published_sha256": "1b41ded5054f2b02f95b2d26e1abd447a3d934901dc7fcc481d27e278e867d6a",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/preview_worker.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/preview_worker.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "88f914b345d6d983368764ab9d8c35ce51627d5cc3c0b6543cb3632984a2542c",
+      "published_sha256": "f905dd3a3df1875c1ff5b73decb9a0a26813588d464f5ff88ccab0a0d7e9d7ad",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/acquisition/scan_devices.py",
+      "current_path": "orangepi/src/orangepi_collect/acquisition/scan_devices.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "8fdcd6b8703c7061174ab749669d05bf1c47286abcf032d0c0a5c3a35b0a968c",
+      "published_sha256": "82bd76e3b80eda32604478135ec120abcc3aba2ef49d268e1988f79210514c47",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/audio/startup_fatal.py",
+      "current_path": "orangepi/src/orangepi_collect/audio/startup_fatal.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "a6eef6bed2dac764e5cdc605c4477a298b1993dc5026cb07a3cdd620cc86d5bb",
+      "published_sha256": "78e5fd69c82e8228b2516d4d3168c48b1926ab36e53b912927c77670b59b8980",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/device_discovery.py",
+      "current_path": "orangepi/src/orangepi_collect/common/device_discovery.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "4975c4419428c6f66739e9502c2421e7bec4c3213bfd5b1539e0708f71f60277",
+      "published_sha256": "64a1d9557b52fff1ea6fc28d77c812ad9f863a6016912c4aba6661130b78a00f",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/display_demand.py",
+      "current_path": "orangepi/src/orangepi_collect/common/display_demand.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "04cc7dc932e2178b938e334b495d7aa99407057fbd394cf4f19087ef66c4550f",
+      "published_sha256": "04cc7dc932e2178b938e334b495d7aa99407057fbd394cf4f19087ef66c4550f",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/eeg_impedance.py",
+      "current_path": "orangepi/src/orangepi_collect/common/eeg_impedance.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "c5e6fc15426a33cfa8c03dbcc3f296a79f475d6895dd84bdd023c7c500273104",
+      "published_sha256": "c5e6fc15426a33cfa8c03dbcc3f296a79f475d6895dd84bdd023c7c500273104",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/eeg_settings.py",
+      "current_path": "orangepi/src/orangepi_collect/common/eeg_settings.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "330acc2822e2966a35e1e770ac6a005f453c7ed69adf21982b5ade2da0f506c5",
+      "published_sha256": "330acc2822e2966a35e1e770ac6a005f453c7ed69adf21982b5ade2da0f506c5",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/emg_insertion.py",
+      "current_path": "orangepi/src/orangepi_collect/common/emg_insertion.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "62dbbbb6fcb5dfcdb1ea1b93ea613ffd15b6b1ded555bb044ce5f65f9f5e917d",
+      "published_sha256": "f17bc597c4956a4416b8d65ad1a3a811ed6dcfcc69b0bae453b5c728096bbfaa",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/impedance_estimator.py",
+      "current_path": "orangepi/src/orangepi_collect/common/impedance_estimator.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "c0ab3d10cbad1bd820d193b36f6440c7e6c223f9eb6aae2b9e9d6b45a8b279be",
+      "published_sha256": "c0ab3d10cbad1bd820d193b36f6440c7e6c223f9eb6aae2b9e9d6b45a8b279be",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/impedance_quality.py",
+      "current_path": "orangepi/src/orangepi_collect/common/impedance_quality.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "b46fd30276c758c74ccdbe90468f6551d28a36be4878f12a922f9ea57fcccef4",
+      "published_sha256": "b46fd30276c758c74ccdbe90468f6551d28a36be4878f12a922f9ea57fcccef4",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/impedance_record.py",
+      "current_path": "orangepi/src/orangepi_collect/common/impedance_record.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "8eb1524cddcd56e02b73305914076bd9e1e95d9305c3706d9e17b8457b924a94",
+      "published_sha256": "8eb1524cddcd56e02b73305914076bd9e1e95d9305c3706d9e17b8457b924a94",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/live_preview.py",
+      "current_path": "orangepi/src/orangepi_collect/common/live_preview.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "d870c05fd8ac2150a3bb6c62ff10e971c3970f657ce488bd1207840997a21b7f",
+      "published_sha256": "c42887f4c486cf58a91d907b408a3a4d1720473e5d444e7e259b2c3fe19891dc",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/project_paths.py",
+      "current_path": "orangepi/src/orangepi_collect/common/project_paths.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "e0367ea28ba3a2871efdd8993cc72fb64d6815eef74107d2679093c49d97922b",
+      "published_sha256": "94585ec667d188d155fd88eafda9ed4196c90a3c0c49f6ffa9b949b43126322b",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/serial_v1_impedance.py",
+      "current_path": "orangepi/src/orangepi_collect/common/serial_v1_impedance.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "d6b6a5114336130a980329f1ae0d9f4caf648ba67898d057ab0dfb39f2c87694",
+      "published_sha256": "abc1802530d2547dd5e81421ec52f3718eb13ba0a6bfd9d2908fe9626afeab29",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/common/wrist_preview_transport.py",
+      "current_path": "orangepi/src/orangepi_collect/common/wrist_preview_transport.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9b7b14d1f0bd815ef5a34bd45b46d7d7934e5d8b33c121b77caa8d3229490dd6",
+      "published_sha256": "5a2b0c7dae826e4feb2af8e8ff2ea9306b8cecdc6a9f14cfb3cf9f21ada3f95c",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/camera_check.py",
+      "current_path": "orangepi/src/orangepi_collect/control/camera_check.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "7ecdbf25c123de081dd5ad5aedea008dda40a7d5194f736f4c3e60acac1d3cce",
+      "published_sha256": "1c56f6831e7b113150b825dcca2ece664db9f7a7d37351eb795dd5991be2495c",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/cloud_common.py",
+      "current_path": "orangepi/src/orangepi_collect/control/cloud_common.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "a5a6ee206140e10df8f8dee71a694ceec2c15c82d3f5890e847afc6e8acc009b",
+      "published_sha256": "64b06513871847645fbcfcfae5d6c29d76e62fc4bab377889336d82212854be7",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/cloud_http.py",
+      "current_path": "orangepi/src/orangepi_collect/control/cloud_http.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "e853d92f082515d44b97f666f3a749e07010e0785ae64f2407de7d2b07acca1e",
+      "published_sha256": "330d172ee4f9ebf87215932db14e89685a77d46586d9e7d0edf81642cb45c444",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/cloud_uploads.py",
+      "current_path": "orangepi/src/orangepi_collect/control/cloud_uploads.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "7ade1cdb9a8c54d8dac02f14ed99ccdbe32a63a745076c94fe5ec4caa0249ae7",
+      "published_sha256": "db952b92427003c4a414fd6ae791b5ae7320810c2d777c4f7c0250a0b49c7cef",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/cloud_worker.py",
+      "current_path": "orangepi/src/orangepi_collect/control/cloud_worker.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9c62c3ea461081b84d450f8a63c51687efea52ca8c737e4d8de6941c0b6ee355",
+      "published_sha256": "6de6569ed58985a99ab1f8ad91600d4c84605a61594c981d18bf758e63990ede",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/dashboard.html",
+      "current_path": "orangepi/src/orangepi_collect/control/dashboard.html",
+      "action": "moved-or-modified",
+      "baseline_sha256": "f8b60e59d6e659febc0a3474e0f333ad21d51f0f8d0b4b3effd3f901fcfffe29",
+      "published_sha256": "562a8a9b86f0579aec16530d3fbd9951cb3f65a13aa1062ee31f8d58569509d0",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/dashboard.py",
+      "current_path": "orangepi/src/orangepi_collect/control/dashboard.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "bc974ad84705e96f657f23be08328e788850eb866bf7d1050a62fdc7c8ccf0a1",
+      "published_sha256": "ca0894eba7a29170c3ab9265dd8b94b9fde2567e4099b391ea92ef6512cf7ccd",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/device_diagnostics.py",
+      "current_path": "orangepi/src/orangepi_collect/control/device_diagnostics.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1df9579b0eef10cd26288f9ed9f6d57305c78acf553461e19520f10e17b72573",
+      "published_sha256": "1df9579b0eef10cd26288f9ed9f6d57305c78acf553461e19520f10e17b72573",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/launcher.py",
+      "current_path": "orangepi/src/orangepi_collect/control/launcher.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1cf9edb98a65ba9f2ad060109d484036ada14e9a97a690b9a6103e5438b176e8",
+      "published_sha256": "35094f4df4756533b798b0544bf0bb0a63d881bd85e3f8191bb6ffe42f7f8b3c",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_app.css",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_app.css",
+      "action": "moved-or-modified",
+      "baseline_sha256": "58470a460ad7948f1cb266df25d84113f54a799ccd4f9211a93813263ecea9d3",
+      "published_sha256": "6e07271ba07fdb56687f2da54ef257d6a799a6a446fd4a44c1e1b5a4c8f865c2",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_app.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_app.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "b896d9a3c8256bfc841242e4aa8af7bd2e6acfbe575f9aa8da07a5a8fceb17fe",
+      "published_sha256": "114d2ccf87a83a2843249bfd87351c5b12f0a14c846f341d69572acc0905e84d",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_http.py",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_http.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "a2ee2edc6dcd7c5b7bc677ee7eb2af5b37726dd291c15ba6048256be2fff3cd1",
+      "published_sha256": "467a4371a5776980e3ae7091cdc9c7b53beadc840227d070990872bb5ef00120",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_recording.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_recording.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "be38051f5bb262bbe1cefb113ca11fd241615e4c1d86b8e747f7dcfeb537ef07",
+      "published_sha256": "117606c338315ea373b52b3fc96ad7cbc3e900a89cb92a857bd25e148d3807ae",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_recordings.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_recordings.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "956dd0292524858bc519a4748f9539be7ed460378f43f85f3ea9712b6e6e84f8",
+      "published_sha256": "bed865feb1e8ebaa2808317dc39e0cbfd198b903478f32b848a4eb7a4c4ddc4e",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_references.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_references.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "f87776ee385fd43d44b721cb27a9618555c629acd0d9134b6390c3376e70fe28",
+      "published_sha256": "75f109974bc9262e84fab4f2b4e2d7d43ca3dae7322e80a55683a35445cb358e",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_shell.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_shell.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "a757f393c96933e7f12564479057ad25d526b74945bb00ad5d0f5e434b9f4a15",
+      "published_sha256": "b91f2a10c2934ec0f6baee767deee0608d19914e47d2996579df423a1abcbde7",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_transport.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_transport.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "b115046e720afbf2145320c04645d434fe08ee965941ecfe1e351e30e88ccac8",
+      "published_sha256": "6c122593647d003961b7c4ce9e6fdf3549ca63008304a25eee48c4f8279ca45e",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_uploads.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_uploads.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "6b0ec008161fddddc41b46066890197a7646400a132e2c25d2ebcff26a83aa86",
+      "published_sha256": "f80c9bc321178382ff46a187f091abc5a709e6a91441e3fa2db847667e96e42f",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/qc_details.py",
+      "current_path": "orangepi/src/orangepi_collect/control/qc_details.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "5246f2aeefc442308fcf20fe67ee896b89415dfcd656778081abc21cbee51811",
+      "published_sha256": "676364ac8b075116dee375b1f576ed3d937b4dc5a30513911a44620e4248b781",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/recording_review.py",
+      "current_path": "orangepi/src/orangepi_collect/control/recording_review.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "faef4f52bc131634dbfbb85dfeadf65eb1605d023009446cc230fef8cf6e2f74",
+      "published_sha256": "dcb39f5e1f0949328ac2d4f24a506c684e8d5089be91a96cf25606784cff84cd",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/recording_store.py",
+      "current_path": "orangepi/src/orangepi_collect/control/recording_store.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "33322d720f0dace20f1b3f2c5449d97577bc9f589bc83cd2b2573af56ea4fcd6",
+      "published_sha256": "440f67d8157125cf765512c4d19b2c81dd0e5e060e1cf8c6381466a6a6c2ee3d",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_access.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_access.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "f6741b5db016a43a91a139a5469cbac7245c7e8e9a7f3ead8355a883e8fd40a0",
+      "published_sha256": "afc260fed615fdb56650a4a86fad2ca5f0d1cbce13ca56e4817c17ec982cf976",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_catalog.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_catalog.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "8b11b78d95bd6ce8261ea14bb47f4dae93c60c78cfb304dc709c0436900ba55f",
+      "published_sha256": "bd142fc5f0e6e1dce9c48fcd7f44ede86ac2680c8f29f85ff80006fca4194b25",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_controls.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_controls.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "dfdd22522018f3fa7c084dafba474a4efabd4768cea6e920cbc30262ba2fa58f",
+      "published_sha256": "6fba532ac9bd34e9a1fc3e9620f47e02749f0fe663bcf69bbe0f407f458ddecd",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_credentials.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_credentials.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "4bd99d3ef8c25d30fe13733800b479b44d5a2a255e1a300a0d6e76faf2e1d59d",
+      "published_sha256": "27aba75cda754e106e10ab16e907524d13387c17defc6a938bd812b22f9cc8ab",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/reference_library_http.py",
+      "current_path": "orangepi/src/orangepi_collect/control/reference_library_http.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "b8ee4b9602e085e299682782262a8b0e43a31b95b688334198bbe6e556116021",
+      "published_sha256": "7e70bc4968c3ac0ef16f946fbb74718b47ad26210aba8a89189b2153d768bc90",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/references.html",
+      "current_path": "orangepi/src/orangepi_collect/control/references.html",
+      "action": "moved-or-modified",
+      "baseline_sha256": "c984c7194d5baf34932949bbd50337fa3f5a6569e8fde6de379c6dc26b73544a",
+      "published_sha256": "a97aaa7361e795f9efa2c483b0d72af81dc21dd57321e5c3f13c898af126565d",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/signal_quality.js",
+      "current_path": "orangepi/src/orangepi_collect/control/signal_quality.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "67f38beadc727a633b9b799a5823a593312f7b208e735af4de34c88adc188cd6",
+      "published_sha256": "67f38beadc727a633b9b799a5823a593312f7b208e735af4de34c88adc188cd6",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/waveform_plot.js",
+      "current_path": "orangepi/src/orangepi_collect/control/waveform_plot.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "080979b4233b494105e325c0310f43dbc0dbe907ae5e9eea8669c5a4187bf88d",
+      "published_sha256": "080979b4233b494105e325c0310f43dbc0dbe907ae5e9eea8669c5a4187bf88d",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/control/web_controls.py",
+      "current_path": "orangepi/src/orangepi_collect/control/web_controls.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "18841f57c83970645ae4449406d3b11b27286e4de0abde3a2d09cf303c198704",
+      "published_sha256": "efcea1cddfe9acfd6698a53213c4899456bb3d17e67251a8faa71798f6d2acab",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/capture_integrity.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/capture_integrity.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "46c50de12a63f102ed424877cec6a6436a4b96979cf8c7525cf39b9130bd5323",
+      "published_sha256": "65172cdb5d17ec448d2ee45389af428a40aebd0f922c74fd6854f61a6072aee7",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/eeg_qc.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/eeg_qc.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9f9749ea369378a8f1e73987095616bd8683c5ee52598dc5aee49a9b9fc7c1b0",
+      "published_sha256": "9f9749ea369378a8f1e73987095616bd8683c5ee52598dc5aee49a9b9fc7c1b0",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/framework_qc.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/framework_qc.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "2784e64076ae3f3509aaa162f77b5e1a476aeb4eb5ac9b1c80510c635ed95d34",
+      "published_sha256": "079e6ce413303652167315cc37247ecc2bfd69a0e555e52401c0aeef360bdf7c",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/framework_recorder.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/framework_recorder.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "87900f16223d0542ae9cb4c8b14d1b7de53746b80957091af969fe848cf76cae",
+      "published_sha256": "42c2b08e3e59728c09ca2be951d0807bf7615dfd7f6178d79792ef76f69739ec",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/gap_thresholds.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/gap_thresholds.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "39a5f12d8dacfda72e6e251083603e50bc43cf8fd35938095f84ac804c48d81b",
+      "published_sha256": "aaf1ab0a02a54e916b80a0f887f4f8cab53f04c379c8b9f8757b3af085c6d823",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/mpp_qc.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/mpp_qc.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "ec42f98d2e998da33e147b5b84b358b94af097dce133b80de6c81ce7fc28c187",
+      "published_sha256": "0e9e08afd5fad8989cfe40839669fba194af72e37cbd6a4d58938d0dbfb7e2e1",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/mpp_video_worker.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/mpp_video_worker.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "c3f991016f5d6b923879204447633dc5410a725f12edccc722b50e076591c640",
+      "published_sha256": "9f1a3031e77e9ce1e3465cc0b5d01a32717105eb2f4b8ef9218fb8afda16c4e2",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/practical_evidence.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/practical_evidence.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9ad74d44e6854bf15e8ba60dfc1cd638606b9be2ae9ece5c4f16c49593410bb4",
+      "published_sha256": "9ad74d44e6854bf15e8ba60dfc1cd638606b9be2ae9ece5c4f16c49593410bb4",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/framework/qc_policy.py",
+      "current_path": "orangepi/src/orangepi_collect/framework/qc_policy.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "83b8e67312982d8edf358205ba37f3e5cba81bca48f3cba69ce7ea2d9a0fd214",
+      "published_sha256": "f8681125fc4069664a9202a8e7a7df1c3cbf3189d9dd070843607be203303d92",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/recorders/camera/h264_preview.py",
+      "current_path": "orangepi/src/orangepi_collect/recorders/camera/h264_preview.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "6e99cb440dbc793a089b8ba8f6bf0a86ddbfccc51df45155c0bef359206c8de6",
+      "published_sha256": "d29cf67de21cf2d3847c17347509e38724c801d39a2c0008f7dd8c87201a8502",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/recorders/camera/mpp_camera_recorder.py",
+      "current_path": "orangepi/src/orangepi_collect/recorders/camera/mpp_camera_recorder.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1653ae9fea9501314cf33f7ea03a5b47c77ec311200382646b41717772ebed89",
+      "published_sha256": "6cf1df606e23db03159b5f55cd961f825a0f3636f0ef5f910b0c05c6aa69d495",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/recorders/camera/uvc_source.py",
+      "current_path": "orangepi/src/orangepi_collect/recorders/camera/uvc_source.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "cdc56bf5f938081ecad48f049474a91f0c4cdf63f6a4fa77620697703e79b676",
+      "published_sha256": "3bea08f554ea5e835901f7c4d4a830322a992cfa7cf94adc3cc0264f7ffbc000",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/src/orangepi_collect/storage/ledger.py",
+      "current_path": "orangepi/src/orangepi_collect/storage/ledger.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "bbccf117de61713437c853141084aff15469f3381d3f82c9e83fd93bbfe7020e",
+      "published_sha256": "25c1dcc76d9e18df7cdfb19e34b9dbedae0972feca5b037091e4664e6272e808",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
     },
     {
       "original_path": "orangepi/src/orangepi_collect/storage/storage_paths.py",
@@ -1432,7 +1233,222 @@
       "action": "moved-or-modified",
       "baseline_sha256": "7cd36fffc513fab6d94c4af4a12ea1b23e21296dd4f65805ed4834794eda242f",
       "published_sha256": "7f2f2a3b346e08cb945aa5ac0253cb84968fb7010a66fc6585f4e3dded32b2ab",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/tests/test_adc_preview_bounds.py",
+      "current_path": "orangepi/tests/test_adc_preview_bounds.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9c0bbad7eca41ebf84f2c9d29ffedbc0c8114008f5dc631a70a00eb75b29b3a8",
+      "published_sha256": "9c0bbad7eca41ebf84f2c9d29ffedbc0c8114008f5dc631a70a00eb75b29b3a8",
       "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_device_diagnostics.py",
+      "current_path": "orangepi/tests/test_device_diagnostics.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "a198d0957b312eff997501cb91a7bce9a70aba5c654811870af5672bb5a6bab7",
+      "published_sha256": "a198d0957b312eff997501cb91a7bce9a70aba5c654811870af5672bb5a6bab7",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_discard_flow.py",
+      "current_path": "orangepi/tests/test_discard_flow.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "68d25fb074671a59901057b5a808d0f67ed1a057e74cfae3fbde955768c0b963",
+      "published_sha256": "6446fc106bb057d5a2cd76fd95a553b13caef1b3ae4647d72fa06697a837bfd8",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/tests/test_eeg_control.py",
+      "current_path": "orangepi/tests/test_eeg_control.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "c3c171dc3dd48e02eefbde36886aec85ecc48be24052c55a55c852066613a1a4",
+      "published_sha256": "c3c171dc3dd48e02eefbde36886aec85ecc48be24052c55a55c852066613a1a4",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_eeg_framework.py",
+      "current_path": "orangepi/tests/test_eeg_framework.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "4c166560bd32d3918bb206a2009f001a8f395aea90c338ed0ee61382f38a77f6",
+      "published_sha256": "4c166560bd32d3918bb206a2009f001a8f395aea90c338ed0ee61382f38a77f6",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_eeg_gate_finalization.py",
+      "current_path": "orangepi/tests/test_eeg_gate_finalization.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "ae0c807ada39833f8b15b4aa9a8de1589fc39fa08afb7de2b3220fc49705c25e",
+      "published_sha256": "ae0c807ada39833f8b15b4aa9a8de1589fc39fa08afb7de2b3220fc49705c25e",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_eeg_waveform_preview.py",
+      "current_path": "orangepi/tests/test_eeg_waveform_preview.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "7caf64ace252ab5c76c47d302945f7dcfd48832aaebe470958dc358b20b202fb",
+      "published_sha256": "7caf64ace252ab5c76c47d302945f7dcfd48832aaebe470958dc358b20b202fb",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_eeg_worker.py",
+      "current_path": "orangepi/tests/test_eeg_worker.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "6d9c2e0fb6597779e1c08217ca4f54ae332d535f5092b5d67036bd2beebe67e9",
+      "published_sha256": "6d9c2e0fb6597779e1c08217ca4f54ae332d535f5092b5d67036bd2beebe67e9",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_emg_manual_ui.cjs",
+      "current_path": "orangepi/tests/test_emg_manual_ui.cjs",
+      "action": "moved-or-modified",
+      "baseline_sha256": "c5cd0531182ade5b853527b8d66f048448cbe2d476a42d703705b2d799b52668",
+      "published_sha256": "70c3a48da6d83ef57947e2eb903fad31b788f05693d2aafee1956b647293a6c5",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/tests/test_impedance_advisory.py",
+      "current_path": "orangepi/tests/test_impedance_advisory.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "5426cb8d5b83dec101d10be5dfa48437145ce4e00a61e43dc84566d82bab3a6e",
+      "published_sha256": "5426cb8d5b83dec101d10be5dfa48437145ce4e00a61e43dc84566d82bab3a6e",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_preview_nonblocking.py",
+      "current_path": "orangepi/tests/test_preview_nonblocking.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "34746843f205ddc3285b74c02b820dcea76ac9438792dfa88bff6a5061e4ba83",
+      "published_sha256": "563a01dac9244a428ca9de439b990824b276ccaaa84d61a6f434b45a458618e8",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/tests/test_recording_overlay.cjs",
+      "current_path": "orangepi/tests/test_recording_overlay.cjs",
+      "action": "moved-or-modified",
+      "baseline_sha256": "78396152813d9635e7d8f056288da305dc151d9828b3b0bdb6d84d1973f5a3a0",
+      "published_sha256": "cc8b66216038fc6892076eb0ac0631a8f94644064d36bfe220c3be725790f54a",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/tests/test_screen_sync.cjs",
+      "current_path": "orangepi/tests/test_screen_sync.cjs",
+      "action": "moved-or-modified",
+      "baseline_sha256": "47104de211d1689b3055984f10e78dccd89c65b857576016e0060dfe45ffe608",
+      "published_sha256": "d0f06bdb2e2cdebd73e7071c32edb8600e5934ca3685f9b10992a82c029ae786",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "orangepi/tests/test_v4.py",
+      "current_path": "orangepi/tests/test_v4.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1b51eb75eac9305e3aa78ce6e1f5c833b7843682ae4a5e33ecd3e3eb33162227",
+      "published_sha256": "1b51eb75eac9305e3aa78ce6e1f5c833b7843682ae4a5e33ecd3e3eb33162227",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "orangepi/tests/test_wrist_camera_dashboard.py",
+      "current_path": "orangepi/tests/test_wrist_camera_dashboard.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "bd5253754aeda259f538e0a6070f16fff4527a2dad2788cf9f8a39b9e04fc984",
+      "published_sha256": "7cf2b0141370c9855548f3843d64b2633cb32ea7597b1a2fb99bc83107dbc266",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "services/rv06-preview/dual_wrist_preview.py",
+      "current_path": "services/rv06-preview/dual_wrist_preview.py",
+      "action": "removed",
+      "baseline_sha256": "79fa40cc592c77d4fbcbc94e3f08e70dda744e4c4559217424d66b223504a5b6",
+      "reason": "Retired duplicate or unused runtime in the EEG edition"
+    },
+    {
+      "original_path": "services/rv06-preview/frame_stream.py",
+      "current_path": "services/phone-media/frame_stream.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "8a31ce3f9ed6733dc997f2d0429c3718e354fd5048935360c1a5c42e37731ac9",
+      "published_sha256": "8a31ce3f9ed6733dc997f2d0429c3718e354fd5048935360c1a5c42e37731ac9",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "services/rv06-preview/headphone-test.wav",
+      "current_path": "services/phone-media/headphone-test.wav",
+      "action": "moved-or-modified",
+      "baseline_sha256": "2f5069054f00c85622f0e763fec963bbfdd762cf984643e063236bbaad82c539",
+      "published_sha256": "2f5069054f00c85622f0e763fec963bbfdd762cf984643e063236bbaad82c539",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "services/rv06-preview/headphone_http.py",
+      "current_path": "services/phone-media/headphone_http.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "297c11813bb1233739c767b537db2849ce2ab8f5b0f894fc188e5f5e168fe926",
+      "published_sha256": "d6edb9eda9fdbff8a8ee6e9b12c4cf083bae707e19844bc8d65b6787ac46b90c",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "services/rv06-preview/headphone_manager.py",
+      "current_path": "services/phone-media/headphone_manager.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1a21e6285fd5f42e96ed274749b9e94540a9ceac9e40394b1554a96a73b9c8df",
+      "published_sha256": "4b4ed1a7b61e8af2b0e30cffb24feea72900e7ee3f41d0947218db4f08b79369",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "services/rv06-preview/preview_sidecar.py",
+      "current_path": "services/phone-media/phone_media.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9a3a85c3bd3c35ed32d346120036c408480a992b323dc12fba4d8ead7d314d12",
+      "published_sha256": "f974ace06c7e266d900c650a9cbe1adf570f1991672aa158f2bc1a73445c3de0",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "services/rv06-preview/qc_details.py",
+      "current_path": "services/phone-media/qc_details.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "5246f2aeefc442308fcf20fe67ee896b89415dfcd656778081abc21cbee51811",
+      "published_sha256": "676364ac8b075116dee375b1f576ed3d937b4dc5a30513911a44620e4248b781",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "services/rv06-preview/recording_replay.py",
+      "current_path": "services/phone-media/recording_replay.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "5c6e6d4377ae3c76f8bde4872b0275fdcb08b3b22f6d546e2c3c5c9281c1f975",
+      "published_sha256": "495c9ccd1357f4b28265a732086f85ede673a81fb93abdcc41dc9f7768a145e5",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "services/rv06-preview/reference_preview.py",
+      "current_path": "services/phone-media/reference_preview.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1dfbd3a899e79b7626b4a481da48f9299b4d746c1aacc876f8bd8b3f20fef100",
+      "published_sha256": "1dfbd3a899e79b7626b4a481da48f9299b4d746c1aacc876f8bd8b3f20fef100",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "services/rv06-preview/replay_runtime.py",
+      "current_path": "services/phone-media/replay_runtime.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "d5aa8fb2bd3d44787e6ab8b8af006d862a4cd1b902a51c84bf290eb70baf0774",
+      "published_sha256": "d48699710bd0e9621ae744333f4c36fabe78dfb1c870c8c89f5d7bddad3be8a5",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
+    },
+    {
+      "original_path": "services/rv06-preview/replay_video.py",
+      "current_path": "services/phone-media/replay_video.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "1fe2f93262a4cc17d4b3065da785e8ff95622289ae97083a51e6c08c26cc030d",
+      "published_sha256": "1fe2f93262a4cc17d4b3065da785e8ff95622289ae97083a51e6c08c26cc030d",
+      "reason": "Preserve common QC and EEG support with isolated capture profiles and manual segment control"
+    },
+    {
+      "original_path": "services/rv06-preview/wrist_preview_transport.py",
+      "current_path": "services/phone-media/wrist_preview_transport.py",
+      "action": "moved-or-modified",
+      "baseline_sha256": "9b7b14d1f0bd815ef5a34bd45b46d7d7934e5d8b33c121b77caa8d3229490dd6",
+      "published_sha256": "5a2b0c7dae826e4feb2af8e8ff2ea9306b8cecdc6a9f14cfb3cf9f21ada3f95c",
+      "reason": "Unified runtime, late field fixes, early web startup and authorized USB phone support"
     }
   ]
 }

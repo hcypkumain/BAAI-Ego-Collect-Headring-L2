@@ -42,7 +42,7 @@ def digest(path):
         for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
     return h.hexdigest()
 
-def save_pending(path,summary,base,project,emg_report=None):
+def save_pending(path,summary,base,project,emg_report=None,eeg_report=None):
     from orangepi_collect.storage.durability import sync_session
     from orangepi_collect.storage.ledger import atomic_yaml
     path=Path(path)
@@ -55,8 +55,8 @@ def save_pending(path,summary,base,project,emg_report=None):
     pending=dict(version=1,request_id=uuid.uuid4().hex,session_id=path.name,state='pending',
                  native_sha256=digest(path/'native_capture_summary.json'),
                  reference_sha256=raw.get('reference_sha256'),created_at=time.time())
-    failed=emg_report is not None and emg_report['level']=='ERROR'
-    mode='emg_only' if emg_report is not None else 'deferred'
+    failed=any(r is not None and r['level']=='ERROR' for r in (emg_report,eeg_report))
+    mode='emg_only' if emg_report is not None or eeg_report is not None else 'deferred'
     status='qc_error' if failed else 'pending_qc'
     summary=dict(summary,status=status,capture_status='success',qc_state='partial_error' if failed else 'pending',
                  qc_level='ERROR' if failed else 'PENDING',qc_mode=mode,recording_active=False,qc_request_id=pending['request_id'])
@@ -68,6 +68,12 @@ def save_pending(path,summary,base,project,emg_report=None):
             try:preprocessing=json.loads((path/'emg_preprocessing.json').read_text())
             except (OSError,ValueError):pass
             summary['errors']=list(summary.get('errors',[]))+emg_error_messages(emg_report,preprocessing)
+    if eeg_report is not None:
+        atomic(path/'eeg_qc_report.json',eeg_report);summary['eeg_qc_level']=eeg_report['level']
+        if eeg_report['level']=='ERROR':
+            reasons=[f.get('message','脑电检查未通过') for s in [eeg_report]+list(eeg_report.get('streams',{}).values()) for f in s.get('findings',[]) if f.get('level')=='ERROR']
+            summary['errors']=list(summary.get('errors',[]))+['脑电检查：'+x for x in reasons]
+    summary['local_qc_scopes']=[name for name,report in [('emg',emg_report),('eeg',eeg_report)] if report is not None]
     template=Path(project)/'configs/meta.yaml'
     meta=yaml.safe_load(template.read_text(encoding='utf-8')) if template.exists() else {}
     meta=dict(meta or {},**raw)

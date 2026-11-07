@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-BASE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+BASE="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 cd "$BASE/.."
 mkdir -p "$BASE/runtime" "$BASE/tests/results"
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
@@ -76,7 +76,7 @@ start)
     ;;
 service)
     ensure_runtime
-    ensure_hardware
+    export ORANGEPI_EARLY_WEB=1
     exec "$HARDWARE_PYTHON" -u "$BASE/src/orangepi_collect/control/launcher.py"
     ;;
 foreground)
@@ -112,4 +112,3 @@ status)
     exit 2
     ;;
 esac
-

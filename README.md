@@ -1,10 +1,10 @@
-# BAAI Ego Collect · 脑电默认版
+# BAAI Ego Collect · 头环统一版
 
-基于 Orange Pi / RK3588 运行程序整理的手机采集项目，已同步 **2026-11-06** 最新采集程序及三台设备验证过的 `headring-common-20261106-v3` 公共模块。
+基于 Orange Pi / RK3588 的统一手机采集系统，当前版本为 **`headring-unified-20261107-v2`**，包含后续快速启动、模式切换恢复、原始 QC、台账读取优化与 USB 手机自动接入修复。
 包含主采集框架、手机控制页、六路视频、肌电/IMU、任务 ZIP 导入、QC、云端上传及配套服务。
-本次版本的功能、质检规则、环境迁移和验证范围见 [11 月 6 日版本说明](docs/RELEASE_2026-11-06.md)。
-本分支为 `feat/eeg-include`；GitHub 默认分支 `feat/emg-only` 默认采肌电。手机总览支持实际切换脑电 / 肌电配置，数据、图库、进度和上传队列隔离。详见 [版本切换与手动流程](docs/COLLECTION_PROFILES.md)。
-脑电、阻抗检查及原有通道/滤波协议保留，并合并公共 QC、肌电错误说明、任务切换和预览修复。详见 [脑电版更新说明](docs/EEG_RELEASE_2026-11-06.md)。
+统一入口是 **`feat/unified-headring`**。所有头环使用同一套程序，在手机总览切换肌电 / 脑电，不再需要切换 Git 分支。旧 `feat/emg-only`、`feat/eeg-include` 仅保留历史，不作为后续更新入口。
+新安装默认肌电；升级保留本机当前模式。编号、标定、存储 UUID、绑定、参考图库和进度仍属于各设备。两种模式的数据、图库、进度与队列隔离，切换不会改写旧录制。详见 [统一版说明](docs/UNIFIED_RELEASE_2026-11-07.md) 和 [版本切换与手动流程](docs/COLLECTION_PROFILES.md)。
+脑电、阻抗检查及原有通道/滤波协议保留。历史变更见 [11 月 6 日版本说明](docs/RELEASE_2026-11-06.md) 和 [脑电更新记录](docs/EEG_RELEASE_2026-11-06.md)。
 
 | 路径 | 内容 |
 |---|---|
@@ -39,7 +39,7 @@
 先阅读 [部署说明](docs/DEPLOYMENT.md)。仓库不包含整个操作系统镜像或完整 EgoRecord GUI。
 
 ```bash
-git clone --branch feat/eeg-include https://github.com/hcypkumain/BAAI-Ego-Collect-Headring-L2.git
+git clone --branch feat/unified-headring https://github.com/hcypkumain/BAAI-Ego-Collect-Headring-L2.git
 cd BAAI-Ego-Collect-Headring-L2
 python3 tools/configure_station.py --collector-id L3-001
 bash orangepi/scripts/setup_envs.sh
@@ -53,6 +53,8 @@ sudo python3 scripts/install_pi_services.py --apply   # 安装配置，不自动
 
 手机入口：`http://<Pi当前IP>:8765/phone`。热点 DHCP 变化后使用新 IP；
 热点宿主 vivo 手机不保证能解析 `.local` 域名。
+
+Android 手机也可开启 USB 调试、插入 Pi 数据口并首次确认授权，自动建立 USB 网页通道，无需预先绑定手机或连接同一 Wi-Fi。非录制状态下尝试自动打开 `http://127.0.0.1:8765/phone`。首次 Android 授权不能绕过，每台 Pi 使用自己的 ADB 密钥。详见 [USB 手机接入](docs/USB_PHONE.md)。
 
 耳机连接 Pi；手机的“总览 → 耳机设置”或“连接设置 → 蓝牙耳机”支持无屏配对、保存选择、自动重连和状态显示。
 详细步骤见 [蓝牙耳机使用说明](docs/HEADPHONES.md)。

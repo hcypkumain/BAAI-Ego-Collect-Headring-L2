@@ -1,0 +1,9 @@
+[Unit]
+Description=Retry LAN clock alignment only when collection is safely idle
+After=network-online.target chrony.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/headring-lan-time
+TimeoutStartSec=20
+UMask=0077

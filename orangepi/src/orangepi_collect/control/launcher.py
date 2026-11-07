@@ -128,6 +128,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             raise ValueError('请等待设备确认停止后切换')
         uploads=getattr(self.dashboard,'cloud_uploads',None)
         previous=self.state
+        self.mode_switch_target=mode
         if uploads is not None:
             with uploads.lock:
                 if uploads.active:raise ValueError('请等待当前上传结束或先暂停上传，再切换模式')
@@ -461,7 +462,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.state_write()
         from qc_deferred import load as qc_execution
         mode=qc_execution(BASE)['mode']
-        self.voice.say('采集已停止，正在保存并'+('完成肌电检查，其余待主机质检。' if mode=='emg_only' else '标记待主机质检。' if mode=='deferred' else '检验，请等待。'))
+        self.voice.say('采集已停止，正在保存并'+('完成肌电/脑电检查，其余待主机质检。' if mode=='emg_only' else '标记待主机质检。' if mode=='deferred' else '检验，请等待。'))
 
     def discard_recording(self):
         if self.state == 'recording':
@@ -1192,5 +1193,6 @@ if __name__=='__main__':
         # All owners, previews and HTTP workers have closed before re-importing
         # the new profile. Keep systemd's main process and global lock.
         lock.close()
+        os.environ['ORANGEPI_EARLY_WEB']='1'
         os.execv(sys.executable,[sys.executable,'-u',str(SRC/'control/launcher.py')]+sys.argv[1:])
     sys.exit(result)

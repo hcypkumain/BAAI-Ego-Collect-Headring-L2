@@ -41,7 +41,7 @@ def selection(code_base):
                 or value['generation']<1):raise ValueError('采集模式设置无效')
         return value
     default=base/'configs/collection_mode.json'
-    mode=json.loads(default.read_text(encoding='utf-8'))['default_mode'] if default.exists() else 'eeg'
+    mode=json.loads(default.read_text(encoding='utf-8'))['default_mode'] if default.exists() else 'emg'
     if mode not in MODES:raise ValueError('默认采集模式无效')
     return dict(version=1,active_mode=mode,legacy_mode=mode,generation=0)
 

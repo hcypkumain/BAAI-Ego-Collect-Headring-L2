@@ -4,7 +4,7 @@ BASE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 export UV_CACHE_DIR="$BASE/.uv-cache"
 command -v uv >/dev/null || { echo 'Install uv first; see README.' >&2; exit 1; }
 mkdir -p "$BASE/.venvs"
-# GI/GStreamer use distro ABI-bound packages; keep the system Python runtime.
+# ROS and GI are distro ABI-bound. Do not replace this with CPython 3.11.
 if [[ ! -x "$BASE/.venvs/hardware/bin/python" ]]; then
     uv venv --system-site-packages --python /usr/bin/python3 "$BASE/.venvs/hardware"
 fi
@@ -17,5 +17,5 @@ set -u
 "$BASE/.venvs/hardware/bin/python" -c 'import gi,numpy,yaml; gi.require_version("Gst","1.0"); from gi.repository import Gst; print("Hardware runtime OK")'
 "$BASE/.venvs/framework/bin/python" -c 'import numpy,cv2,yaml,loguru,dashscope; from dashscope.audio.qwen_tts_realtime import QwenTtsRealtime; import embodied_brain_collect.checkers; print("Framework runtime OK")'
 
-# EEG edition retains the isolated CPython 3.11 OmniBCI owner.
+# Both capture modes retain their isolated CPython 3.11 OmniBCI owner.
 bash "$BASE/scripts/setup_eeg.sh"

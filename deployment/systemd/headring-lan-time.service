@@ -1,0 +1,15 @@
+[Unit]
+Description=Best effort LAN clock alignment before camera startup
+Wants=network-online.target chrony.service
+After=network-online.target chrony.service
+Before=camd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/headring-lan-time --boot
+RemainAfterExit=yes
+TimeoutStartSec=20
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

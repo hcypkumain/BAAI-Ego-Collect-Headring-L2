@@ -192,7 +192,7 @@ def _finding_class(report):
     return Finding
 
 
-def apply_policy(report, config=None):
+def apply_policy(report, config=None,preserve_streams=None):
     """Return (effective_report, audit), without mutating the original report.
 
     Only positively verified timing/full-frame evidence can lower raw ERROR.
@@ -219,11 +219,11 @@ def apply_policy(report, config=None):
     else:
         finding_type = _finding_class(report)
         for name, stream in effective.streams.items():
-            if name in ('emg_left','emg_right','board_imu'):
-                audit['evidence'][name]=dict(rule_set='original-framework-v1')
+            if name in ('emg_left','emg_right','board_imu') or name in (preserve_streams or ()):
+                audit['evidence'][name]=dict(rule_set='verified-Pi-local-result' if name in (preserve_streams or ()) else 'original-framework-v1')
                 for index,finding in enumerate(stream.findings):
                     audit['decisions'].append(dict(stream=name,finding_index=index,check=finding.check,
-                        raw_level=finding.level,effective_level=finding.level,reason=('original_IMU_framework_severity_preserved' if name=='board_imu' else 'original_EMG_framework_severity_preserved')))
+                        raw_level=finding.level,effective_level=finding.level,reason=('verified_Pi_local_QC_preserved' if name in (preserve_streams or ()) else 'original_IMU_framework_severity_preserved' if name=='board_imu' else 'original_EMG_framework_severity_preserved')))
                 continue
             video = _full_video(stream)
             timing = _timing_series(stream)

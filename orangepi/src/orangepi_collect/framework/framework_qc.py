@@ -217,6 +217,26 @@ def pi_qc_inputs(path):
             if child.is_dir() or child.name in PI_QC_STREAMS or child.name=='ego_headband':
                 finding('ERROR','采集目录不能是符号链接：'+child.name,'PiSelection',child.name)
         elif child.is_dir():directories.append(child)
+    history=Path(root)/'qc_history'
+    if history.exists():
+        try:
+            _qc_real_directory(history);checked=[]
+            for item in history.rglob('*'):
+                if item.is_symlink():raise ValueError('history contains a link')
+                if item.is_dir():continue
+                if len(checked)>=200 or item.suffix.lower() not in ('.json','.jsonl','.yaml','.yml'):raise ValueError('history is not a bounded report-only tree')
+                raw=_qc_regular_bytes(item,4*1024*1024)
+                if item.suffix=='.json':json.loads(raw)
+                elif item.suffix=='.jsonl':
+                    for line in raw.splitlines():
+                        if line.strip():json.loads(line)
+                else:yaml.safe_load(raw)
+                checked.append(dict(path=str(item.relative_to(history)),sha256=hashlib.sha256(raw).hexdigest()))
+            if not checked:raise ValueError('history contains no report evidence')
+            directories=[p for p in directories if p.name!='qc_history'];metadata.append('qc_history')
+            finding('INFO','历史质检元数据已识别，不作为采集流','QCHistory','qc_history',dict(files=checked))
+        except (OSError,ValueError,TypeError,yaml.YAMLError) as exc:
+            finding('ERROR','历史质检目录不可验证：'+str(exc),'QCHistory','qc_history')
     # This directory contains YAML/CSV/overview PNG, not NPZ/video samples.
     # Validate its exact frozen manifest instead of applying StreamPresent.
     if (root/'reference_bundle').exists() or (root/'reference_bundle').is_symlink():
@@ -535,7 +555,7 @@ def performance():
         value.update(qc_video_backend='cv2',qc_workers=int(os.environ.get('ORANGEPI_HOST_QC_WORKERS','4')))
     return value
 
-def parallel_qc_session(path, cfg, workers=None, progress=None, only=None):
+def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused_streams=None):
     """Same original checkers, thresholds and report order; concurrent independent streams."""
     from concurrent.futures import ThreadPoolExecutor
     import threading,time
@@ -571,6 +591,8 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None):
     report.findings.extend(Finding(**item) for item in inputs['findings'])
     classes=(PiEegChecker,BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in framework.CHECKERS if c not in (CameraChecker,PiCameraChecker,BoardImuChecker,PiEegChecker) and c.__name__ != 'EegChecker')
     def check(directory):
+        if reused_streams and directory.name in reused_streams:
+            return reused_streams[directory.name]
         cls=next((c for c in classes if directory.name.startswith(c.matches)),None)
         if cls is None:
             return StreamReport(stream=directory.name,files=sorted(p.name for p in directory.iterdir() if p.is_file()),
@@ -608,10 +630,10 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None):
             else:futures[directory.name]=pool.submit(measured,directory)
         for name,future in futures.items():report.streams[name]=future.result()
     report.pi_timing={'workers':count,'streams':timings,'elapsed_seconds':time.monotonic()-started,
-                      'metadata_only_directories':inputs['metadata_only']}
+                      'metadata_only_directories':inputs['metadata_only'],'reused_streams':sorted(reused_streams or {})}
     return report
 
-def check_session(path,html=False,progress=None):
+def check_session(path,html=False,progress=None,reused_streams=None,local_findings=None):
     import cv2
     cv2.setNumThreads(1)
     original=framework.CHECKERS
@@ -622,19 +644,20 @@ def check_session(path,html=False,progress=None):
         black_cfg=next((v for k,v in cfg.items() if k.lower().replace('_','')=='blackframe'),{})
         settings['qc_mpp_black_lum_thr']=black_cfg.get('lum_thr',8.) if isinstance(black_cfg,dict) else 8.
         with video_backend(settings) as video_decodes:
-            report=parallel_qc_session(path,cfg,progress=progress)
+            report=parallel_qc_session(path,cfg,progress=progress,reused_streams=reused_streams)
         if hasattr(report,'pi_timing'):
             report.pi_timing['video_decodes']=video_decodes
     finally:
         framework.CHECKERS=original
     # The original findings remain available. Only the explicit Pi acceptance
     # policy determines which results prevent saving and normal downstream pack.
+    report.findings.extend(local_findings or [])
     raw=report.to_dict()
     raw_path=Path(path)/'qc_raw_report.json'
     atomic_json(raw_path,raw)
     try:
         policy_config=load_policy(BASE/'configs/qc_policy.json')
-        report,audit=apply_policy(report,policy_config)
+        report,audit=apply_policy(report,policy_config,preserve_streams=set(reused_streams or {}))
     except ValueError as exc:
         import copy
         report=copy.deepcopy(report)
@@ -688,7 +711,27 @@ def check_emg(path,progress=None):
     audit['emg_SN_loss_warn_fraction']=.001
     audit['emg_SN_loss_error_fraction']=None
     data=report.to_dict();data['scope']='emg_only';data['remaining_qc']='pending_linux_host'
+    data['qc_rules']='original-framework-v1'
     atomic_json(Path(path)/'emg_qc_policy.json',audit)
+    atomic_json(Path(path)/'emg_qc_report.json',data)
+    from local_qc_receipt import write
+    write(path,'emg')
+    return data
+
+def check_eeg(path,progress=None):
+    cfg=load_checker()
+    selected=json.loads((Path(path)/'device_selection.json').read_text())['selected']
+    if 'eeg' not in selected:raise ValueError('EEG was not selected')
+    report=parallel_qc_session(path,cfg,workers=1,progress=progress,only={'eeg'})
+    raw=report.to_dict();atomic_json(Path(path)/'eeg_qc_raw_report.json',raw)
+    report,audit=apply_policy(report,load_policy(BASE/'configs/qc_policy.json'))
+    data=report.to_dict();data['scope']='eeg_only';data['remaining_qc']='pending_linux_host'
+    data['qc_rules']='PiEegChecker-v1'
+    atomic_json(Path(path)/'eeg_qc_policy.json',audit)
+    if hasattr(report,'pi_timing'):atomic_json(Path(path)/'eeg_qc_timing.json',report.pi_timing)
+    atomic_json(Path(path)/'eeg_qc_report.json',data)
+    from local_qc_receipt import write
+    write(path,'eeg')
     return data
 
 if __name__=='__main__':

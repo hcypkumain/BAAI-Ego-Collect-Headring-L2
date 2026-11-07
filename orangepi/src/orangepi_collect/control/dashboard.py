@@ -197,7 +197,7 @@ class Dashboard:
                 super().setup();self.connection.settimeout(5)
             def send(self,status,data,content='application/json; charset=utf-8',extra_headers=None):
                 if isinstance(data,dict):
-                    data=dict(data,collection_context=owner.snapshot.get('collection_context'),collection_mode=owner.snapshot.get('collection_mode'))
+                    data=dict(data,collection_context=owner.snapshot.get('collection_context'),collection_mode=owner.snapshot.get('collection_mode'),mode_recovery_version='20261107.2')
                 if not isinstance(data,bytes):data=json.dumps(data,ensure_ascii=False).encode()
                 self.send_response(status);self.send_header('Content-Type',content)
                 self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
@@ -352,7 +352,7 @@ class Dashboard:
             if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
                 raise ValueError('采集模式已变化，请刷新页面后操作')
             if (self.busy and not self.prompting) or self.pending is not None:raise ValueError('正在执行上一步，请等待')
-            if data.get('revision')!=self.snapshot.get('revision'):raise ValueError('流程已变化，请刷新后操作')
+            if data.get('action')!='collection_mode' and data.get('revision')!=self.snapshot.get('revision'):raise ValueError('流程已变化，请刷新后操作')
             if data.get('action') not in snapshot_actions(dict(self.snapshot,privacy=self.privacy.snapshot())):raise ValueError('当前步骤不允许这个操作')
             if data['action']=='collection_mode' and data.get('value') not in ('emg','eeg'):
                 raise ValueError('请选择脑电或肌电')

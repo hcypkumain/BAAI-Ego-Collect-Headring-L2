@@ -155,17 +155,21 @@ class PiBundleRecorder(BaseRecorder):
         from qc_deferred import save_pending
         mode=json.loads((path/'meta.json').read_text(encoding='utf-8')).get('qc_mode','immediate')
         if mode in ('deferred','emg_only'):
-            partial=None
+            partial=None;eeg_partial=None
             if mode=='emg_only':
-                from framework_qc import standardize_emg,standardize_marker,check_emg
+                from framework_qc import standardize_emg,standardize_marker,check_emg,check_eeg,standardize_eeg,atomic_npz
                 began=time.time()
                 atomic_json(path/'status.json',dict(state='postprocessing',pid=os.getpid(),time=time.time(),processing_started=began,qc_scope='emg_only',recording_active=False))
-                summary=standardize_emg(path);standardize_marker(path,summary)
+                summary=standardize_emg(path)
+                selected=json.loads((path/'device_selection.json').read_text())['selected']
+                if 'eeg' in selected:standardize_eeg(path,summary,atomic_npz)
+                standardize_marker(path,summary)
                 def emg_progress(value):
                     atomic_json(path/'status.json',dict(state='checking',pid=os.getpid(),time=time.time(),processing_started=began,progress=value,qc_scope='emg_only',recording_active=False))
-                partial=check_emg(path,emg_progress)
+                if any(name in selected for name in ('emg_left','emg_right')):partial=check_emg(path,emg_progress)
+                if 'eeg' in selected:eeg_partial=check_eeg(path,emg_progress)
                 summary['emg_qc_elapsed_seconds']=time.time()-began
-            save_pending(path,summary,BASE,PROJECT,partial)
+            save_pending(path,summary,BASE,PROJECT,partial,eeg_partial)
             return
         # Acquisition exited: bounded parallel QC, with CPU/memory headroom.
         allowed=os.sched_getaffinity(0)
