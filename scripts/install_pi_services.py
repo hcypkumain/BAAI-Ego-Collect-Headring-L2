@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Plan/install the reviewed Pi files. Never starts or stops collection."""
-import argparse,datetime,os,platform,re,shutil,subprocess,tempfile
+"""Install reviewed Pi files and mandatory guarded USB-host policy; never starts capture."""
+import argparse,datetime,importlib.util,os,platform,re,shutil,subprocess,tempfile
 from pathlib import Path
 
 USB_ROOT=Path('/home/orangepi/maintenance/usb-phone-adb')
@@ -11,7 +11,8 @@ def plan(root,include_vendor,include_lan_time=False):
         if source.is_file() and '__pycache__' not in source.parts and source.suffix in ('.py','.wav'):
             result.append((source,Path('/opt/pi-phone-media')/source.relative_to(root/'services/phone-media'),False))
     result.append((root/'services/usb-phone-link/usb_phone_link.py',USB_ROOT/'usb_phone_link.py',False))
-    units=['camd.service','embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service','usb-phone-link.service']
+    result.append((root/'services/usb-phone-link/usb_data_host.py',Path('/usr/local/sbin/headring-usb-data-host'),False))
+    units=['camd.service','embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service','usb-phone-link.service','headring-usb-data-host.service']
     if include_lan_time:
         units+=['headring-lan-time.service','headring-lan-time-refresh.service','headring-lan-time-refresh.timer']
         result.append((root/'deployment/lan-time/headring_lan_time.py',Path('/usr/local/sbin/headring-lan-time'),False))
@@ -68,6 +69,10 @@ def main():
     adb=usb_adb()
     if not adb.is_file():parser.error('Install the matching system adb package or retain the existing private adb runtime first')
     if not re.fullmatch(r'/[A-Za-z0-9_./-]+',str(root)):parser.error('use an absolute deployment path without spaces or shell characters')
+    spec=importlib.util.spec_from_file_location('install_usb_data_host',root/'services/usb-phone-link/usb_data_host.py')
+    host_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(host_module)
+    allowed,reason=host_module.CaptureGuard(root/'orangepi').allowed()
+    if not allowed:parser.error('Finish capture/initialization and use the active station root before installing: '+reason)
     backup=Path('/var/backups/baai-ego-collect')/datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     for source,target,unit in operations:
         if target.is_symlink():raise RuntimeError('Refusing to overwrite a symlink: '+str(target))
@@ -93,7 +98,15 @@ def main():
     initialize_usb(adb)
     subprocess.run(['systemctl','daemon-reload'],check=True)
     subprocess.run(['udevadm','control','--reload-rules'],check=True)
+    # Mandatory for every installation: initialize this Pi as a USB data host
+    # and keep the guarded policy active across boot and reconnect. Do not
+    # start/restart any recorder, camera, or media service here.
+    subprocess.run(['systemctl','enable','headring-usb-data-host.service'],check=True)
+    subprocess.run(['systemctl','start','headring-usb-data-host.service'],check=True)
+    host=subprocess.run(['/usr/local/sbin/headring-usb-data-host','--once','--base',str(root/'orangepi')],capture_output=True,text=True,check=True,timeout=20)
+    print('USB data-host initialization: '+host.stdout.strip())
     print('Installed. Existing-file backups: '+str(backup))
-    print('No services were started/stopped; no USB events were triggered.')
+    print('USB data-host policy is enabled and active; busy/unsupported role changes are reported and deferred safely.')
+    print('No capture/camera/media service was started or stopped. Android authorization remains a user action.')
 
 if __name__=='__main__':main()

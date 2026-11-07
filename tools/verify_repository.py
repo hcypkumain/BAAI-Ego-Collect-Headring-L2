@@ -34,6 +34,8 @@ def main():
     release=json.loads((ROOT/'deployment/manifests'/release_name).read_text(encoding='utf-8'))
     for relative,expected in release['files'].items():
         assert hashlib.sha256((ROOT/relative).read_bytes()).hexdigest()==expected,'Fleet release drift: '+relative
+    for relative,expected in release.get('installer_sources',{}).items():
+        assert hashlib.sha256((ROOT/relative).read_bytes()).hexdigest()==expected,'Installer source drift: '+relative
     syntax=0
     for folder in ('services','orangepi/src','deployment/systemd'):
         for path in (ROOT/folder).rglob('*'):

@@ -1,6 +1,8 @@
 # 头环统一版 · 2026-11-07
 
-版本：`headring-unified-20261107-v2`。维护分支：`feat/unified-headring`。
+版本：`headring-unified-20261107-v3`。维护分支：`feat/unified-headring`。
+
+v3 修复 USB-C 接入时 Pi 被协商为外设而无法触发手机调试授权的问题：安装时必须初始化并启用受保护的数据主机策略，开机/重插后继续处理；不直接写供电角色，不代替用户确认 Android 授权。详见 [USB 手机接入](USB_PHONE.md)。
 
 ## 一套程序，两种模式
 

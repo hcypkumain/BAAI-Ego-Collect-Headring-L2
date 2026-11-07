@@ -1,0 +1,19 @@
+[Unit]
+Description=Guarded headring USB data-host initialization and reconnect policy
+After=local-fs.target systemd-udevd.service
+Before=camd.service embodied-pi-collect.service usb-phone-link.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=root
+ExecStartPre=/usr/local/sbin/headring-usb-data-host --once --boot --base /home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi
+ExecStart=/usr/local/sbin/headring-usb-data-host --base /home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=15
+TimeoutStopSec=5
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

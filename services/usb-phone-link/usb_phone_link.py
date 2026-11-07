@@ -20,7 +20,7 @@ _BUNDLED_ADB = ROOT / 'root/usr/bin/adb'
 ADB = _BUNDLED_ADB if _BUNDLED_ADB.is_file() else Path(shutil.which('adb') or '/usr/bin/adb')
 PORT = 5038
 URL = 'http://127.0.0.1:8765/phone'
-VERSION = 'usb-auto-phone-20261107-v1'
+VERSION = 'usb-auto-phone-20261107-v2'
 SERIAL = re.compile(r'[A-Za-z0-9._:-]{1,128}')
 
 def atomic(path, value):
@@ -69,10 +69,20 @@ def choose(rows):
     if not rows: return None, 'phone_missing'
     return None, 'multiple_phones'
 
+def data_role_state():
+    try:
+        value = json.loads(Path('/run/headring-usb-data-host.json').read_text())
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError): return {}
+
 def once():
     row, error = choose(devices())
     result = dict(version=VERSION, pi_id=pi_id(), url=URL, transport='USB_ADB', connected=False, binding_required=False)
     if not row:
+        role = data_role_state()
+        if error == 'phone_missing' and role.get('state') not in (None, 'host'):
+            return dict(result, state='usb_data_role_pending', data_role_state=role.get('state'),
+                        message=role.get('message', '等待 Pi 完成 USB 数据主机角色切换')), None
         message = '等待手机接入USB数据口；开启USB调试并允许此Pi' if error == 'phone_missing' else '发现多部USB手机，请只保留一部；不会任意选择手机'
         return dict(result, state=error, message=message), None
     result.update(phone_serial_suffix=row['serial'][-4:], usb_path=row['usb'])
