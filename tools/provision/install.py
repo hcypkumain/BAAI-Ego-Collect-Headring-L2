@@ -79,7 +79,14 @@ def embedded(client, expression, hardware=False):
     code = "import base64,json;ns={'__name__':'headring_installer'};exec(base64.b64decode(%r),ns);" % module
     code += expression
     python = BASE + '/.venvs/hardware/bin/python' if hardware else '/usr/bin/python3'
-    return run(client, shlex.quote(python) + ' -c ' + shlex.quote(code), timeout=75)
+    # The unified manifest is too large for Linux's per-argument limit. Stream
+    # trusted installer code and its request over SSH stdin, not a shell argv.
+    stdin, out, err = client.exec_command(shlex.quote(python) + ' -', timeout=75)
+    stdin.write(code + '\n'); stdin.flush(); stdin.channel.shutdown_write()
+    stdout, stderr = out.read().decode('utf-8', 'replace'), err.read().decode('utf-8', 'replace')
+    if out.channel.recv_exit_status():
+        raise RuntimeError((stderr or stdout)[-1800:])
+    return stdout.strip()
 
 
 def check_ip_conflict(seed, vpn_ip, target_key):
