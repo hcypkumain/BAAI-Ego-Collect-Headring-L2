@@ -2,27 +2,38 @@
 (function(global){
  'use strict';
  global.createCameraFitCheck=function(options){
-  const root=options.root;root.innerHTML='<div class="phone-fit-toolbar"><button id="phone-fit-back">返回参考图与采集准备</button><button id="phone-fit-abandon">放弃本次采集</button><button id="phone-fit-export" disabled>倒计时拍照（5秒）</button><a id="phone-fit-save" hidden>保存刚拍的照片</a></div><p id="phone-fit-note" role="status">正在读取全部相机…</p><div id="phone-fit-stage"><img id="phone-fit-image" hidden alt="全部启用相机的同屏检查图"><div id="phone-photo-countdown" hidden><b id="phone-photo-number">5</b><span>请平伸手掌，倒计时结束后拍照</span><button id="phone-photo-cancel">取消拍照</button></div></div><button id="phone-fit-start" class="primary" disabled>确认画面方向，返回准备页</button>';
-  const $=id=>document.getElementById(id);let snapshot=null,version=0,controller=null,timer=null,url='',blob=null,metadata=null,context='',starting=false,shot=null,shotVersion=0,shotURL='',receivedAt=0;
+  const root=options.root;root.innerHTML='<div class="phone-fit-toolbar"><button id="phone-fit-back">返回参考图与采集准备</button><button id="phone-fit-abandon">放弃本次采集</button><button id="phone-fit-export" disabled>倒计时拍照（5秒）</button><a id="phone-fit-save" hidden>保存刚拍的照片</a></div><p id="phone-fit-note" role="status">正在读取全部相机…</p><div id="phone-fit-stage"><canvas id="phone-fit-image" hidden role="img" aria-label="全部启用相机的同屏检查图"></canvas><div id="phone-photo-countdown" hidden><b id="phone-photo-number">5</b><span>请平伸手掌，倒计时结束后拍照</span><button id="phone-photo-cancel">取消拍照</button></div></div><button id="phone-fit-start" class="primary" disabled>确认画面方向，返回准备页</button>';
+  const $=id=>document.getElementById(id);let snapshot=null,version=0,controller=null,timer=null,blob=null,metadata=null,context='',starting=false,shot=null,shotVersion=0,shotURL='',receivedAt=0;
   function active(){return options.active()&&!document.hidden&&options.unlocked();}
-  function stop(clear=true){cancelShot();if(shotURL){URL.revokeObjectURL(shotURL);shotURL='';}$('phone-fit-save').hidden=true;version++;clearTimeout(timer);timer=null;controller?.abort();controller=null;if(clear){metadata=blob=null;if(url)URL.revokeObjectURL(url);url='';$('phone-fit-image').hidden=true;$('phone-fit-image').removeAttribute('src');$('phone-fit-export').disabled=true;$('phone-fit-start').disabled=true;}}
-  function controls(){$('phone-fit-abandon').hidden=!snapshot?.actions?.includes('abandon');$('phone-fit-abandon').disabled=starting;const eligible=snapshot?.camera_check?.eligible===true;$('phone-fit-start').disabled=starting||!!shot||!eligible||!metadata?.complete;$('phone-fit-export').disabled=!blob||starting||!!shot;}
+  function stop(){cancelShot();if(shotURL){URL.revokeObjectURL(shotURL);shotURL='';}$('phone-fit-save').hidden=true;version++;clearTimeout(timer);timer=null;controller?.abort();controller=null;metadata=blob=null;const canvas=$('phone-fit-image');canvas.hidden=true;canvas.width=canvas.height=0;$('phone-fit-export').disabled=true;$('phone-fit-start').disabled=true;}
+  function controls(){$('phone-fit-abandon').hidden=!snapshot?.actions?.includes('abandon');$('phone-fit-abandon').disabled=starting;const eligible=snapshot?.camera_check?.eligible===true;$('phone-fit-start').disabled=!active()||starting||!!shot||!eligible||!metadata?.complete;$('phone-fit-export').disabled=!active()||!blob||starting||!!shot;}
   function schedule(delay=0){clearTimeout(timer);timer=null;if(active())timer=setTimeout(()=>{timer=null;load();},delay);}
-  async function load(){
-   if(!active()||controller)return;const identity=version,started=performance.now(),request=new AbortController();controller=request;const timeout=null;
+  async function showFrame(identity,request,nextMeta,nextBlob){
+   if(identity!==version||!active()||request.signal.aborted){request.abort();return;}
+   const bitmap=await createImageBitmap(nextBlob);
    try{
-    const columns=innerHeight>innerWidth?2:3;
-    await global.readPhoneFrames('/api/phone/camera-check/stream?columns='+columns,{headers:options.headers(),signal:request.signal,onFrame:async(nextMeta,nextBlob)=>{
-    if(identity!==version||!active()){request.abort();return;}
-    const nextURL=URL.createObjectURL(nextBlob),candidate=new Image();candidate.src=nextURL;
-    try{if(candidate.decode)await candidate.decode();else await new Promise((resolve,reject)=>{candidate.onload=resolve;candidate.onerror=reject;});}
-    catch(error){URL.revokeObjectURL(nextURL);throw error;}
-    if(identity!==version||!active()){URL.revokeObjectURL(nextURL);return;}
-    const previous=url;url=nextURL;blob=nextBlob;metadata=nextMeta;$('phone-fit-image').src=url;$('phone-fit-image').hidden=false;if(previous)URL.revokeObjectURL(previous);
-    $('phone-fit-note').textContent=metadata.camera_count+' 路相机 · 请检查头环佩戴是否端正、腕部相机朝向是否正确。'+(!metadata.complete?'有相机缺少新画面，暂不可确认。':snapshot?.camera_check?.eligible?'确认只完成检查；返回准备页后可继续看参考图，再独立开始正式采集。':'可预览和导出；请先完成设备准备与阻抗确认。');controls();
-    }});
-   }catch(error){if(identity===version&&active()){metadata=null;controls();$('phone-fit-note').textContent=error.name==='AbortError'?'读取超时，正在重新同步…':error.message;}}
-   finally{clearTimeout(timeout);if(controller===request)controller=null;if(identity===version)schedule(Math.max(100,400-(performance.now()-started)));}
+    if(identity!==version||!active()||request.signal.aborted)return;
+    const canvas=$('phone-fit-image');canvas.width=bitmap.width;canvas.height=bitmap.height;canvas.getContext('2d').drawImage(bitmap,0,0);
+   }finally{bitmap.close();}
+   const canvas=$('phone-fit-image');
+   blob=nextBlob;metadata=nextMeta;canvas.hidden=false;
+   $('phone-fit-note').textContent=metadata.camera_count+' 路相机 · 请检查头环佩戴是否端正、腕部相机朝向是否正确。'+(!metadata.complete?'有相机缺少新画面，暂不可确认。':snapshot?.camera_check?.eligible?'确认只完成检查；返回准备页后可继续看参考图，再独立开始正式采集。':'可预览和导出；请先完成设备准备与阻抗确认。');controls();
+  }
+  async function load(){
+   if(!active()||controller)return;const identity=version,started=performance.now(),request=new AbortController();controller=request;
+   const timeout=setTimeout(()=>request.abort(),2200);
+   try{
+     const columns=innerHeight>innerWidth?2:3;
+     // Short snapshot requests avoid buffered-stream/slot exhaustion while
+     // preserving the server's exact fresh-frame acknowledgement proof.
+     const response=await fetch('/api/phone/camera-check.jpg?columns='+columns,{headers:options.headers(),signal:request.signal,cache:'no-store'});
+     if(!response.ok)throw Error('相机快照暂不可用，请重试');
+     const meta=JSON.parse(response.headers.get('X-Camera-Check-Meta')||'{}');
+     if(typeof meta.check_id!=='string'||!/^cc_[0-9a-f]{32}$/.test(meta.check_id)||typeof meta.complete!=='boolean')throw Error('相机检查证明无效');
+     const nextBlob=await response.blob();
+     await showFrame(identity,request,meta,nextBlob);
+    }catch(error){if(identity===version&&active()){metadata=null;controls();$('phone-fit-note').textContent=error.name==='AbortError'?'读取超时，正在重新同步…':error.message;}}
+   finally{clearTimeout(timeout);if(controller===request)controller=null;if(identity===version)schedule(Math.max(150,600-(performance.now()-started)));}
   }
   $('phone-fit-abandon').onclick=()=>options.action('abandon');
   $('phone-fit-back').onclick=()=>options.back();
@@ -62,6 +73,6 @@
    }catch(error){$('phone-fit-note').textContent=error.message;}
    finally{starting=false;controls();}
   };
-  return {open(){stop();schedule();},suspend(){stop();},update(value){snapshot=value;receivedAt=performance.now();const key=value.camera_check?.context||'';if(context&&context!==key)stop();context=key;controls();if(active()&&!controller&&timer===null)schedule();else if(!active()&&controller)stop();}};
+  return {open(){stop();schedule();},suspend(){stop();},update(value){snapshot=value;receivedAt=performance.now();const key=value.camera_check?.context||'';if(context&&context!==key)stop();context=key;controls();if(active()&&!controller&&timer===null)schedule();else if(!active()&&(controller||metadata||blob))stop();}};
  };
 })(window);

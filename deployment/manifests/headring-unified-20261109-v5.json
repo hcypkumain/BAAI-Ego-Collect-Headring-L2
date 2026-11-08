@@ -99,7 +99,7 @@
     "orangepi/src/orangepi_collect/control/manual_reference.py": "b943b8b785e32d67ffa93cc5b81d8353c3781ff719a8f963365b97d7ea831a8e",
     "orangepi/src/orangepi_collect/control/phone_app.css": "6e07271ba07fdb56687f2da54ef257d6a799a6a446fd4a44c1e1b5a4c8f865c2",
     "orangepi/src/orangepi_collect/control/phone_app.js": "114d2ccf87a83a2843249bfd87351c5b12f0a14c846f341d69572acc0905e84d",
-    "orangepi/src/orangepi_collect/control/phone_capture.js": "45288cba34cb51cb500d6270e69aa6d75fd25ef207d3b37e15380031101d0df0",
+    "orangepi/src/orangepi_collect/control/phone_capture.js": "8a09973756513083654192df46c0561831d5d63836d0738c554859b42c0834c6",
     "orangepi/src/orangepi_collect/control/phone_connections.js": "dd4f9570a2bf65eb1916af4428ff499df7f67b693094f06612ff35c290b57b47",
     "orangepi/src/orangepi_collect/control/phone_diagnostics.js": "ddf278f74e9dce935355631dc23e7f8353d80f6bfb74cbbc3d2b2922758a255f",
     "orangepi/src/orangepi_collect/control/phone_headphones.js": "7662bb6e0bd0d699b1fe3cc4c1bc1335d9fc75937170d63a11b32eb7f43725dd",

@@ -21,7 +21,7 @@ const fixtureHtml=source.replace('<body>','<body data-access-code-required="fals
  .replace(/^if\(!phoneCompanion\?\.managesPreview\).*statusLoop\(\);$/m,'');
 const clone=value=>JSON.parse(JSON.stringify(value));
 function snapshot(){
- const s={state:'emg_manual',revision:7,preview_id:'preview-1',server_time:1000,
+ const s={state:'emg_manual',collection_mode:'emg',collection_context:'emg:fixture',revision:7,preview_id:'preview-1',server_time:1000,
   system:{boot_id:'boot-1',controller_pid:101},actions:['assign_emg_roles'],
   emg_assignment:{session_id:'session-1',preview_id:'preview-1',sources:{emg_left:'/dev/test-a',emg_right:'/dev/test-b'}},
   emg_calibration:{valid:false},emg_serial_roles:{emg_left:'UNTRUSTED11111',emg_right:'UNTRUSTED22222'},
@@ -104,10 +104,10 @@ async function main(){
    }
    assert.equal(h.posts.length,0);
   });
-  await test('confirmation posts exact session/preview/left_slot/revision only',async h=>{
+   await test('confirmation binds exact session/preview/left_slot/revision and collection context',async h=>{
    await h.pick('emg_right','left');await h.page.click('#confirm-emg');
    await h.page.waitForFunction(()=>!inFlight);
-   assert.deepEqual(h.posts,[{action:'assign_emg_roles',value:{session_id:'session-1',preview_id:'preview-1',left_slot:'emg_right'},revision:7}]);
+    assert.deepEqual(h.posts,[{action:'assign_emg_roles',value:{session_id:'session-1',preview_id:'preview-1',left_slot:'emg_right'},revision:7,collection_context:'emg:fixture'}]);
   });
   await test('one stale/missing/wrong-source/wrong-preview signal clears draft and drawing',async h=>{
    const mutations=[s=>s.signals.emg_left.live=false,s=>delete s.signals.emg_right,
@@ -175,13 +175,13 @@ async function main(){
    await h.pick('emg_left','left');await h.page.evaluate(()=>document.activeElement?.blur());
    await h.page.keyboard.press('a');await h.page.keyboard.press('b');assert.equal(h.posts.length,0);
   });
-  await test('EEG removed; wrist-manual and exposure controls remain available',async h=>{
-   assert.equal(await h.page.locator('#eeg').count(),0);
+   await test('unified EEG markup stays gated; wrist-manual and exposure controls remain available',async h=>{
+    assert.equal(await h.page.locator('#eeg').count(),1);
    assert.equal(await h.page.locator('#wrist-methods button').count(),2);
    const s=snapshot();s.state='idle';s.actions=['wrist_camera_settings'];s.emg_assignment=null;
    await h.set(s);await h.page.getByRole('button',{name:'设置',exact:true}).click();await h.page.selectOption('#wrist-fps-policy','false');await h.page.click('#set-wrist-fps-policy');
    await h.page.waitForFunction(()=>!inFlight);assert.equal(h.posts[0].action,'wrist_camera_settings');assert.equal(h.posts[0].value,false);
-   assert.equal(await h.page.locator('#set-eeg-filter').count(),0);
+    assert.equal(await h.page.locator('#set-eeg-filter').count(),1);assert(await h.page.locator('#set-eeg-filter').isDisabled());
   });
   const h=await harness({width:390,height:844});
   try{

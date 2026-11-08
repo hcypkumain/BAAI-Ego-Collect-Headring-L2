@@ -16,7 +16,7 @@
       "current_path": "CHANGELOG.md",
       "action": "moved-or-modified",
       "baseline_sha256": "ec98fc70d3ef75db412a7da0f259d1be007dc344104b54047ddf99f4ab8e9ce5",
-      "published_sha256": "03f7ded0e8eb064a9bd6944e76b2ea0c0608e55cd5b36eefc2b5a4e1a1428936",
+      "published_sha256": "09ae0d875ca60445a1e8bcbbe47de11705ef66df6f6bb24c749fe719e3c33d7c",
       "reason": "Manual host custody handoff and verified-cloud retention"
     },
     {
@@ -972,6 +972,14 @@
       "reason": "Manual host custody handoff and verified-cloud retention"
     },
     {
+      "original_path": "orangepi/src/orangepi_collect/control/phone_capture.js",
+      "current_path": "orangepi/src/orangepi_collect/control/phone_capture.js",
+      "action": "moved-or-modified",
+      "baseline_sha256": "45288cba34cb51cb500d6270e69aa6d75fd25ef207d3b37e15380031101d0df0",
+      "published_sha256": "8a09973756513083654192df46c0561831d5d63836d0738c554859b42c0834c6",
+      "reason": "Manual host custody handoff and verified-cloud retention"
+    },
+    {
       "original_path": "orangepi/src/orangepi_collect/control/phone_http.py",
       "current_path": "orangepi/src/orangepi_collect/control/phone_http.py",
       "action": "moved-or-modified",
@@ -1304,7 +1312,7 @@
       "current_path": "orangepi/tests/test_emg_manual_ui.cjs",
       "action": "moved-or-modified",
       "baseline_sha256": "c5cd0531182ade5b853527b8d66f048448cbe2d476a42d703705b2d799b52668",
-      "published_sha256": "70c3a48da6d83ef57947e2eb903fad31b788f05693d2aafee1956b647293a6c5",
+      "published_sha256": "680702018c5b4cff3d9e629f79bc6fe11bb713fdfb0d587ebdc95831a3f94cdf",
       "reason": "Manual host custody handoff and verified-cloud retention"
     },
     {
