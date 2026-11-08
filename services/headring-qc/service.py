@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """LAN QC queue: verified copies, unchanged checker rules, acknowledged cleanup."""
-import collections,concurrent.futures,contextlib,datetime,hashlib,hmac,http.server,json,os,re,shlex,shutil,sqlite3,subprocess,threading,time,traceback,uuid
+import collections,concurrent.futures,contextlib,datetime,hashlib,hmac,http.server,json,os,re,shlex,shutil,sqlite3,subprocess,sys,threading,time,traceback,uuid
 from pathlib import Path
 from host_storage import require_storage, storage_path
 ROOT=Path(__file__).resolve().parent
 CONFIG=json.loads((ROOT/'config.json').read_text())
 DATA=Path(CONFIG['data_root']);DB=DATA/'state/queue.sqlite3'
 STOP=threading.Event();QC_LOCK=threading.Lock();CLAIM_LOCK=threading.Lock()
+RECEIVER=None
 WORK_CHANGED=threading.Condition();WORK_VERSION=0
 TRANSFER_PARALLELISM=max(1,min(8,int(CONFIG.get('transfer_parallelism',4))))
 TRANSFER_KIB_S=max(0,int(CONFIG.get('transfer_kib_s',0)))
@@ -459,21 +460,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
         super().setup();self.connection.settimeout(15)
     def do_GET(self):
         try:
+            if RECEIVER is not None:
+                from receiver_http import get
+                if get(self,RECEIVER):return
+                if self.path=='/health':
+                    from receiver_http import send
+                    send(self,200,dict(ok=True,receive_strategy='manual_handoff_v1',storage=RECEIVER.snapshot()['storage']));return
+                if self.path.split('?')[0] in ('/','/api/status'):
+                    if self.path.split('?')[0]=='/api/status':
+                        from receiver_http import send
+                        try:value=snapshot();value['manual_receiver']=RECEIVER.snapshot()
+                        except Exception:value=RECEIVER.snapshot()
+                        send(self,200,value);return
+                    data=(ROOT/'receiver.html').read_bytes();mime='text/html; charset=utf-8'
+                    self.send_response(200);self.send_header('Content-Type',mime)
+                    self.send_header('Content-Length',str(len(data)));self.send_header('Cache-Control','no-store')
+                    self.end_headers();self.wfile.write(data);return
             if self.path.split('?')[0]=='/api/status':data=json.dumps(snapshot(),ensure_ascii=False,allow_nan=False).encode();mime='application/json; charset=utf-8'
             elif self.path=='/health':require_storage(CONFIG);data=b'{"ok":true}';mime='application/json'
             elif self.path.split('?')[0]=='/':data=(ROOT/'index.html').read_bytes();mime='text/html; charset=utf-8'
             else:self.send_error(404);return
             self.send_response(200);self.send_header('Content-Type',mime);self.send_header('Cache-Control','no-store');self.send_header('Content-Length',str(len(data)));self.end_headers();self.wfile.write(data)
         except Exception as exc:self.send_error(500,str(exc))
+    def do_POST(self):
+        try:
+            if RECEIVER is not None:
+                from receiver_http import post
+                if post(self,RECEIVER):return
+            self.send_error(404)
+        except Exception:
+            from receiver_http import send
+            send(self,503,dict(error='control_unavailable',message='控制账本暂不可用，未执行新的删除授权'))
     def log_message(self,*args):pass
 
 def main():
+    global RECEIVER
     import faulthandler,signal
     faulthandler.register(signal.SIGUSR1,all_threads=True)
-    initialize()
-    threading.Thread(target=scanner,daemon=True).start()
-    for _ in range(CONFIG.get('upload_workers',4)):threading.Thread(target=worker,args=('upload',),daemon=True).start()
-    for _ in range(CONFIG.get('processor_workers',2)):threading.Thread(target=worker,args=('process',),daemon=True).start()
+    if CONFIG.get('receive_strategy')=='manual_handoff_v1':
+        from handoff_receiver import HandoffReceiver
+        RECEIVER=HandoffReceiver(sys.modules[__name__]);RECEIVER.start()
+    else:
+        initialize()
+        threading.Thread(target=scanner,daemon=True).start()
+        for _ in range(CONFIG.get('upload_workers',4)):threading.Thread(target=worker,args=('upload',),daemon=True).start()
+        for _ in range(CONFIG.get('processor_workers',2)):threading.Thread(target=worker,args=('process',),daemon=True).start()
     server=http.server.ThreadingHTTPServer(('0.0.0.0',CONFIG.get('port',8788)),Handler)
     try:server.serve_forever()
     finally:STOP.set();wake_workers();server.server_close()

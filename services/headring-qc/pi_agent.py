@@ -8,6 +8,7 @@ import project_paths
 import yaml
 import ledger,storage_paths
 from cloud_common import atomic,session_lock,source_manifest,same_manifest,sync_dir
+from raw_handoff import RAW_PURPOSE,RESULT_PURPOSE,validate_raw_receipt,verify_signature,sha_value,same_file_bytes
 
 ID_RE=re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z')
 TERMINAL=('pending_qc','success','qc_error')
@@ -108,6 +109,10 @@ def scan(request):
         report=load(path/'qc_report.json');mode=None
         if pending and not applied and pending.get('created_at',0)<=cutoff:mode='qc'
         elif (day=='*' or capture_day==day) and summary.get('status')=='success' and worker.get('state')=='success' and report.get('level') in ('INFO','WARN') and report.get('scope','full')=='full':mode='archive'
+        if request.get('manual_handoff') is True:
+            # Only saved terminal captures. Native errors/cancelled takes are
+            # not turned into transferable, confirmed episodes by this flag.
+            if pending or applied or (summary.get('status')=='success' and report):mode='handoff'
         if not mode:continue
         total=0
         for parent,dirs,files in os.walk(path):
@@ -192,6 +197,7 @@ def prepare_results(request):
 
 def cleanup(request):
     signed=request['receipt'];signature=signed.get('signature','');receipt={k:v for k,v in signed.items() if k!='signature'}
+    if receipt.get('purpose') not in (None,'legacy_qc_archive_v1'):raise ValueError('Not a legacy QC cleanup receipt')
     key=(B/'private/server_qc_hmac').read_bytes()
     if not hmac.compare_digest(hmac.new(key,signable(receipt),hashlib.sha256).hexdigest(),signature):raise ValueError('Invalid server archive signature')
     identifier=receipt['session_id'];expected=receipt['manifest']
@@ -234,7 +240,6 @@ def cleanup(request):
                           archive_path=receipt['archive_path'],server_id=receipt['server_id'],passed=receipt['passed'],
                           manifest_digest=expected['digest'],receipt_signature=signature,trash_path=str(target),started_at=time.time())
             atomic(record,previous);path.rename(target);sync_dir(root);sync_dir(trashroot)
-        # The same-filesystem rename quarantines exactly the verified closed tree.
         if target.exists():
             if target.is_symlink() or target.resolve().parent!=trashroot.resolve():raise ValueError('Deletion boundary invalid')
             actual=source_manifest(target,hashes=recovering,progress=idle_progress())
@@ -242,6 +247,195 @@ def cleanup(request):
             idle();shutil.rmtree(str(target));sync_dir(trashroot)
         previous.update(state='deleted',deleted_at=time.time());atomic(record,previous)
         return previous
+
+def _handoff_key():return (B/'private/server_qc_hmac').read_bytes()
+
+def _handoff_record(identifier):
+    if not isinstance(identifier,str) or not ID_RE.fullmatch(identifier):raise ValueError('Invalid handoff id')
+    return STATE/'handoffs'/(identifier+'.json')
+
+def _capture_lease():
+    # The active profile owns capture.lock, while custody records are shared.
+    path=project_paths.BASE/'runtime/capture.lock';path.parent.mkdir(parents=True,exist_ok=True)
+    handle=path.open('a')
+    try:fcntl.flock(handle,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    except BaseException:handle.close();raise
+    return handle
+
+def _remaining_handoff_files(target,expected):
+    """After a committed delete began, missing files are valid crash recovery."""
+    wanted={row['path']:row for row in expected['files']}
+    for parent,dirs,names in os.walk(target,followlinks=False):
+        if any(Path(parent,n).is_symlink() for n in dirs):raise ValueError('Link in handoff trash')
+        for name in names:
+            path=Path(parent,name);relative=path.relative_to(target).as_posix();row=wanted.get(relative)
+            if row is None or path.is_symlink() or not path.is_file():raise ValueError('Unexpected handoff trash file')
+            if path.stat().st_size!=row['bytes']:raise ValueError('Handoff trash size changed')
+            digest=hashlib.sha256()
+            with path.open('rb') as f:
+                for block in iter(lambda:f.read(1024*1024),b''):digest.update(block)
+            if digest.hexdigest()!=row['sha256']:raise ValueError('Handoff trash SHA changed')
+
+def handoff_status(request):
+    identifier=request['session_id'];record=load(_handoff_record(identifier))
+    if record and record.get('receipt_sha256')!=request.get('handoff_receipt_sha256'):
+        raise ValueError('Wrong custody transaction query')
+    return dict(device_id=identity(),session_id=identifier,state=record.get('state','missing'),
+        receipt_sha256=record.get('receipt_sha256'),deleted_at=record.get('deleted_at'))
+
+def _handoff_roots(source_root):
+    current_root,current_volume=roots()
+    if str(current_root)==source_root:return current_root,current_volume,project_paths.PROJECT
+    current=storage_paths.config()
+    configs=[B/'configs/storage.yaml']+[B.parent/'profiles'/mode/'orangepi/configs/storage.yaml' for mode in ('emg','eeg')]
+    for path in configs:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size>1024*1024:continue
+        cfg=yaml.safe_load(path.read_text())
+        if not isinstance(cfg,dict) or cfg.get('mode')!='sd':continue
+        if (cfg.get('mount_point')!=current.get('mount_point')
+                or str(cfg.get('expected_uuid','')).upper()!=str(current.get('expected_uuid','')).upper()):continue
+        fields=[cfg.get(key) for key in ('directory','device_id','shift')]
+        if any(not isinstance(v,str) or not v or Path(v).name!=v or v in ('.','..') for v in fields):continue
+        volume=Path(cfg['mount_point']).resolve()/cfg['directory']/cfg['device_id']
+        mode=cfg.get('capture_profile')
+        if mode is not None:
+            if mode not in ('emg','eeg'):continue
+            volume=volume/'profiles'/mode
+        root=volume/'data'/cfg['shift']
+        if root.resolve()!=root or volume.resolve()!=volume:continue
+        if str(root)==source_root:return root,volume,path.parent.parent.parent
+    raise ValueError('Handoff root is not an explicitly configured capture profile')
+
+def _handoff_session(root,identifier):
+    path=root/identifier
+    if path.is_symlink() or not path.is_dir() or path.resolve().parent!=root:
+        raise ValueError('Frozen handoff session missing or changed')
+    return path
+
+def raw_handoff(request):
+    signed=request['receipt'];root,volume,reference_project=_handoff_roots(signed.get('manifest',{}).get('root'))
+    receipt=validate_raw_receipt(signed,_handoff_key(),identity(),
+        load(STATE/'server_identity.json').get('server_id'),root)
+    identifier=receipt['session_id'];record=_handoff_record(identifier)
+    with session_lock(B,identifier),_capture_lease():
+        previous=load(record)
+        if previous:
+            if previous.get('receipt_signature')!=signed['signature']:raise ValueError('Conflicting handoff receipt')
+            if previous.get('state')=='deleted':return previous
+        idle();trash=volume/'.server-handoff-trash'
+        if trash.is_symlink():raise ValueError('Handoff trash must not be a link')
+        trash.mkdir(exist_ok=True)
+        if trash.resolve().parent!=volume:raise ValueError('Invalid handoff trash boundary')
+        target=trash/(identifier+'-'+receipt['transaction_id']);path=root/identifier
+        if target.is_symlink():raise ValueError('Invalid detached handoff path')
+        if path.exists() and target.exists():raise ValueError('Original handoff name was reused')
+        if not previous:
+            path=_handoff_session(root,identifier);finalized(path)
+            actual=source_manifest(path,progress=idle_progress())
+            if not same_file_bytes(receipt['manifest'],dict(actual,native_sha256=hashlib.sha256((path/'native_capture_summary.json').read_bytes()).hexdigest())):
+                raise ValueError('Raw tree changed before handoff')
+            if hashlib.sha256((path/'native_capture_summary.json').read_bytes()).hexdigest()!=receipt['manifest']['native_sha256']:
+                raise ValueError('Raw capture identity changed')
+            pending=load(path/'qc_pending.json');request_id=receipt.get('qc_request_id')
+            if pending and pending.get('request_id')!=request_id:raise ValueError('QC request identity changed')
+            meta=load(path/'meta.json')
+            previous=dict(version=1,purpose=RAW_PURPOSE,state='prepared',session_id=identifier,
+                device_id=identity(),server_id=receipt['server_id'],receipt_signature=signed['signature'],
+                receipt_sha256=sha_value(signed),receipt=signed,trash_path=str(target),source_path=str(path),
+                source_meta=meta,reference_project=str(reference_project),
+                qc_request_id=request_id,native_sha256=receipt['manifest']['native_sha256'],started_at=time.time())
+            atomic(record,previous)
+        if path.exists():
+            finalized(path)
+            if not same_file_bytes(receipt['manifest'],dict(source_manifest(path,progress=idle_progress()),native_sha256=hashlib.sha256((path/'native_capture_summary.json').read_bytes()).hexdigest())):
+                raise ValueError('Raw tree changed during handoff recovery')
+            path.rename(target);sync_dir(root);sync_dir(trash)
+        if not target.exists() and previous.get('state')!='deleting_files':
+            raise ValueError('Detached raw tree missing before committed deletion')
+        if target.exists():
+            if previous.get('state')=='deleting_files':_remaining_handoff_files(target,receipt['manifest'])
+            else:
+                if not same_file_bytes(receipt['manifest'],dict(source_manifest(target,progress=idle_progress()),native_sha256=hashlib.sha256((target/'native_capture_summary.json').read_bytes()).hexdigest())):
+                    raise ValueError('Detached raw tree changed')
+                previous.update(state='deleting_files');atomic(record,previous)
+            idle();shutil.rmtree(str(target));sync_dir(trash)
+        previous.update(state='deleted',deleted_at=time.time());atomic(record,previous)
+        return previous
+
+def prepare_handoff_results(request):
+    idle();identifier=request['session_id'];record=load(_handoff_record(identifier))
+    if record.get('purpose')!=RAW_PURPOSE or record.get('state')!='deleted':raise ValueError('No completed raw handoff')
+    if record.get('receipt_sha256')!=request.get('handoff_receipt_sha256'):raise ValueError('Wrong raw handoff')
+    for parent in [RESULTS.parent,RESULTS,RESULTS/identifier]:
+        if parent.is_symlink():raise ValueError('Linked handoff result destination')
+        parent.mkdir(parents=True,exist_ok=True)
+    return dict(device_id=identity(),session_id=identifier,result_directory=str(RESULTS/identifier),ready=True)
+
+def _apply_handoff_result(request):
+    envelope=verify_signature(request['receipt'],_handoff_key(),RESULT_PURPOSE)
+    identifier=envelope.get('session_id');record=load(_handoff_record(identifier));idle()
+    if (envelope.get('device_id')!=identity() or envelope.get('server_id')!=record.get('server_id')
+            or record.get('state')!='deleted' or envelope.get('handoff_receipt_sha256')!=record.get('receipt_sha256')):
+        raise ValueError('QC result does not belong to this completed handoff')
+    resultdir=RESULTS/identifier
+    if resultdir.is_symlink() or resultdir.resolve().parent!=RESULTS.resolve():raise ValueError('Invalid result directory')
+    result=load(resultdir/'result.json');digest=hashlib.sha256((resultdir/'result.json').read_bytes()).hexdigest()
+    if (digest!=envelope.get('result_sha256') or result.get('session_id')!=identifier
+            or result.get('request_id')!=record.get('qc_request_id')
+            or result.get('native_sha256')!=record.get('native_sha256')
+            or result.get('level') not in ('INFO','WARN','ERROR')):raise ValueError('Frozen result mismatch')
+    output=STATE/'results'/(identifier+'.json');previous=load(output)
+    if previous:
+        if previous.get('result_sha256')!=digest:raise ValueError('Conflicting post-handoff QC result')
+        return previous
+    artifacts=result.get('artifacts',{})
+    if 'qc_report.json' not in artifacts:raise ValueError('QC report missing')
+    for relative,sha in artifacts.items():
+        p=Path(relative);source=resultdir/'artifacts'/p
+        if (p.is_absolute() or '..' in p.parts or source.is_symlink()
+                or (resultdir/'artifacts').resolve() not in source.resolve().parents
+                or hashlib.sha256(source.read_bytes()).hexdigest()!=sha):raise ValueError('QC artifact changed')
+    report=load(resultdir/'artifacts/qc_report.json')
+    if report.get('level')!=result['level']:raise ValueError('Result/report level mismatch')
+    meta=record['source_meta'];reference=meta.get('reference_image');retake=result['level']=='ERROR'
+    if reference:
+        project=Path(record['reference_project']).resolve()
+        allowed=[B.parent.resolve(),(B.parent/'profiles/emg').resolve(),(B.parent/'profiles/eeg').resolve()]
+        if project not in allowed:raise ValueError('Unknown frozen reference project')
+        image=(project/reference).resolve();image.relative_to((project/'configs/environments').resolve())
+        if not image.is_file() or hashlib.sha256(image.read_bytes()).hexdigest()!=meta.get('reference_sha256'):
+            raise ValueError('Frozen reference changed; result retained without ledger overwrite')
+        target=image.parent/'used.yaml';base=project/'orangepi';(base/'runtime').mkdir(exist_ok=True)
+        with (base/'runtime/ledger.lock').open('a') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX);book=ledger.read(target)
+            if target.exists():
+                backup=base/'runtime/ledger_backups';backup.mkdir(exist_ok=True)
+                (backup/(hashlib.sha256(str(target).encode()).hexdigest()[:16]+'_'+str(time.time_ns())+'_handoff.yaml')).write_bytes(target.read_bytes())
+            attempts=book.setdefault('attempts',{}).setdefault(image.name,[])
+            item=next((v for v in attempts if v.get('session')==record['source_path']),None)
+            if item is None:item={'session':record['source_path']};attempts.append(item)
+            item.update(status='error' if retake else 'success',qc_level=result['level'],server_qc=True,
+                has_data=True,deleted=False,retained=True,data_location='host',pi_original_deleted=True,
+                server_path=envelope.get('server_path'),retake_required=retake)
+            used=book.setdefault('used',{});owner=used.get(image.name)
+            other=isinstance(owner,dict) and owner.get('session')!=record['source_path'] and ledger.valid_used(owner)
+            if not other:
+                if retake:
+                    if isinstance(owner,dict) and owner.get('session')==record['source_path']:used.pop(image.name,None)
+                    book.setdefault('failed',{})[image.name]=dict(session=record['source_path'],status='error',retake_required=True)
+                else:
+                    used[image.name]=dict(session=record['source_path'],status='success',qc_level=result['level'],data_location='host')
+                    book.get('failed',{}).pop(image.name,None)
+            ledger.atomic_yaml(target,book)
+    value=dict(version=1,purpose=RESULT_PURPOSE,session_id=identifier,result_sha256=digest,level=result['level'],
+        raw_level=result.get('raw_level'),passed=not retake,retake_required=retake,applied_at=time.time(),
+        server_path=envelope.get('server_path'),data_location='host',pi_original_deleted=True)
+    atomic(output,value);atomic(project_paths.BASE/'runtime/qc_results_revision.json',dict(at=time.time(),session_id=identifier))
+    return value
+
+def apply_handoff_result(request):
+    identifier=request.get('receipt',{}).get('session_id','')
+    with session_lock(B,identifier):return _apply_handoff_result(request)
 
 def main():
     request=json.load(sys.stdin)
@@ -254,6 +448,10 @@ def main():
     elif action=='apply':value=apply(request)
     elif action=='prepare_results':value=prepare_results(request)
     elif action=='cleanup':value=cleanup(request)
+    elif action=='raw_handoff':value=raw_handoff(request)
+    elif action=='prepare_handoff_results':value=prepare_handoff_results(request)
+    elif action=='apply_handoff_result':value=apply_handoff_result(request)
+    elif action=='handoff_status':value=handoff_status(request)
     else:raise ValueError('Unknown action')
     print(json.dumps(value,ensure_ascii=False,allow_nan=False),flush=True)
 
