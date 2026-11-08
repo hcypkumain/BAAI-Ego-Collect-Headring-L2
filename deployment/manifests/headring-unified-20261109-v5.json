@@ -557,7 +557,7 @@
     "services/headring-qc/cloud_client.py": "844b51522157fbd438f6253e5885230afdb1e7a752ef323e38caa031256d00e0",
     "services/headring-qc/cloud_scope.py": "5dfd91488847ceb721a68336af97258703398b185dbb770b867aa4334e7b37ab",
     "services/headring-qc/cloud_upload_cli.py": "0b5ed4fb499390e64609daff0bd3a67d8801233050941595e8af570221fd44f8",
-    "services/headring-qc/handoff_receiver.py": "ccf0cbc532a4f8dfcd02442227d3ec552970c9ffdbeefdfa28b553a362466b4e",
+    "services/headring-qc/handoff_receiver.py": "f5ba6e9774125082ebdfd7904c57e528e84d87c020f8af98a656c8a1b1d8bd3d",
     "services/headring-qc/host_storage.py": "7739cafa927daa1e60e18fd423a8178fb2c1a57a1abee87dc3eac7bba83c94da",
     "services/headring-qc/index.html": "3223b3fde6be4dbbc05792403f8c6cbf7dadaf9bf1b4ad1c9814f415f75b8fb4",
     "services/headring-qc/pc_retention.py": "ed9eb8a3670efe9831acabac65884c373b6eaf93ad903e62e8552d558db2a525",

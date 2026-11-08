@@ -106,6 +106,8 @@ class HandoffReceiver:
             if result.get('device_id')!=device:raise ValueError('Pi identity mismatch')
             self.store.device(device,online=True,state=result.get('state'),active_session=result.get('current_session'))
             for item in result.get('items',[]):
+                only=self.config.get('accept_only_sessions')
+                if only is not None and item.get('session_id') not in only:continue
                 if item.get('day','')<self.config.get('minimum_capture_date','2026-11-01'):continue
                 if item.get('stop_time',0)<definition.get('minimum_stop_time',0):continue
                 # Already archived old protocol jobs are not silently migrated/re-uploaded.
@@ -392,4 +394,5 @@ class HandoffReceiver:
             row['bytes']=job.get('details',{}).get('bytes',0);visible.append(row)
         return dict(control=dict(state,stopping=stopping),jobs=visible,devices=self.store.devices(),storage=storage,
             data_root=str(self.data),retention=dict(seconds=259200,starts_at='verified_cloud_confirmation',
-            delete_before_cloud=False),cloud_scope=['EGOL2','EGOL3_hand'],now=time.time())
+            delete_before_cloud=False),cloud_scope=['EGOL2','EGOL3_hand'],
+            test_session_filter=self.config.get('accept_only_sessions'),now=time.time())
