@@ -30,7 +30,7 @@ class ProvisionTests(unittest.TestCase):
     def test_controller_uses_current_unified_release(self):
         tree=ast.parse((ROOT/'tools/provision/install.py').read_text())
         version=next(node.value.value for node in tree.body if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id=='VERSION' for t in node.targets))
-        self.assertEqual(version,'headring-unified-20261107-v3')
+        self.assertEqual(version,'headring-unified-20261108-v4')
 
     def test_fresh_activation_requires_host_before_starting_collector(self):
         text=(ROOT/'tools/provision/device_setup.py').read_text()

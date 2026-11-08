@@ -49,6 +49,16 @@ def initialize_usb(adb):
         env=dict(os.environ,LD_LIBRARY_PATH=str(USB_ROOT/'root/usr/lib/aarch64-linux-gnu/android')+':'+str(USB_ROOT/'root/usr/lib/aarch64-linux-gnu'))
         subprocess.run(['runuser','-u','orangepi','--',str(adb),'keygen',str(key)],env=env,check=True,timeout=15)
 
+def initialize_qc_results():
+    import pwd
+    user=pwd.getpwnam('orangepi')
+    for directory in [Path('/home/orangepi/maintenance/server-qc'),Path('/home/orangepi/maintenance/server-qc/results')]:
+        if directory.is_symlink():raise RuntimeError('QC result destination must not be a symlink: '+str(directory))
+        created=not directory.exists()
+        directory.mkdir(parents=True,exist_ok=True)
+        if created or directory.stat().st_uid!=user.pw_uid:os.chown(str(directory),user.pw_uid,user.pw_gid)
+        if created:os.chmod(str(directory),0o755)
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project-root',type=Path,default=Path(__file__).resolve().parents[1])
@@ -96,6 +106,7 @@ def main():
         finally:
             if os.path.exists(temporary):os.unlink(temporary)
     initialize_usb(adb)
+    initialize_qc_results()
     subprocess.run(['systemctl','daemon-reload'],check=True)
     subprocess.run(['udevadm','control','--reload-rules'],check=True)
     # Mandatory for every installation: initialize this Pi as a USB data host

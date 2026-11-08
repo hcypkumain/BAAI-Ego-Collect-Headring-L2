@@ -36,6 +36,8 @@ def main():
         assert hashlib.sha256((ROOT/relative).read_bytes()).hexdigest()==expected,'Fleet release drift: '+relative
     for relative,expected in release.get('installer_sources',{}).items():
         assert hashlib.sha256((ROOT/relative).read_bytes()).hexdigest()==expected,'Installer source drift: '+relative
+    for relative,expected in release.get('host_pipeline_sources',{}).items():
+        assert hashlib.sha256((ROOT/relative).read_bytes()).hexdigest()==expected,'Host pipeline source drift: '+relative
     syntax=0
     for folder in ('services','orangepi/src','deployment/systemd'):
         for path in (ROOT/folder).rglob('*'):

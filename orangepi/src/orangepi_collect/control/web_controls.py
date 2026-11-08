@@ -8,6 +8,7 @@ import tempfile
 import time
 import uuid
 from project_paths import BASE, SRC, devices
+from capture_session_state import active_session
 from dashboard import Dashboard, SAFE, actions_for, impedance_presentation
 import recording_review
 from eeg_settings import PRESETS
@@ -213,7 +214,7 @@ class WebControls:
             countdown=getattr(self,'countdown_status',None) if self.state=='countdown' else None,
             collector_id=getattr(self,'collector_id',''),preparation_cancelled_at=getattr(self,'preparation_cancelled_at',None),
             task_list=getattr(self,'reference_task_state',lambda:{})(),reference_image_state=getattr(self,'reference_image_state',lambda:{})(),
-            image=str(self.image) if self.image else None,image_name=getattr(self,'reference_image_title',lambda:self.image.stem if self.image else '')(),session=str(self.path) if self.path else None,
+            image=str(self.image) if self.image else None,image_name=getattr(self,'reference_image_title',lambda:self.image.stem if self.image else '')(),session=active_session(self),
             success_count=self.success_count,devices=getattr(self,'last_scan',[]),
             wrist_calibration=cfg.get('wrist_calibration_status',{}),
             wrist_assignment=assignment,preview_id=getattr(self,'preview_snapshot_id',None),

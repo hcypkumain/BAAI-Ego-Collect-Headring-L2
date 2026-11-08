@@ -1,6 +1,6 @@
 # BAAI Ego Collect · 头环统一版
 
-基于 Orange Pi / RK3588 的统一手机采集系统，当前版本为 **`headring-unified-20261107-v3`**，包含快速启动、模式切换恢复、原始 QC、USB 手机自动接入，以及安装/开机/插拔时的 USB 数据主机角色守卫。
+基于 Orange Pi / RK3588 的统一手机采集系统，当前版本为 **`headring-unified-20261108-v4`**，包含保存后的 active/review session 分离、QC 回写目录初始化与重试恢复、USB 数据主机守卫等修复。
 包含主采集框架、手机控制页、六路视频、肌电/IMU、任务 ZIP 导入、QC、云端上传及配套服务。
 统一入口是 **`feat/unified-headring`**。所有头环使用同一套程序，在手机总览切换肌电 / 脑电，不再需要切换 Git 分支。旧 `feat/emg-only`、`feat/eeg-include` 仅保留历史，不作为后续更新入口。
 新安装默认肌电；升级保留本机当前模式。编号、标定、存储 UUID、绑定、参考图库和进度仍属于各设备。两种模式的数据、图库、进度与队列隔离，切换不会改写旧录制。详见 [统一版说明](docs/UNIFIED_RELEASE_2026-11-07.md) 和 [版本切换与手动流程](docs/COLLECTION_PROFILES.md)。

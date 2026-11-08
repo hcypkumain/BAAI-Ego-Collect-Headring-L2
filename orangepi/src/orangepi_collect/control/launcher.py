@@ -28,6 +28,7 @@ import ledger
 import storage_paths
 
 from project_paths import BASE, PROJECT, SRC, devices, CODE_BASE, PROFILE, COLLECTION_MODE, COLLECTION_CONTEXT
+from capture_session_state import active_session
 from device_discovery import fingerprint
 import wrist_calibration
 import emg_calibration
@@ -108,7 +109,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.voice.realtime=self.state in ('recording','countdown')
         self.voice.silent=self.state=='recording' or self.quit
         atomic_json(BASE/'runtime'/'controller.json',dict(pid=os.getpid(),state=self.state,
-            session=str(self.path) if self.path else None,image=str(self.image) if self.image else None,
+            session=active_session(self),image=str(self.image) if self.image else None,
+            review_session=str(getattr(self,'last_review_path',None)) if getattr(self,'last_review_path',None) else None,
             collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,
             success_count=self.success_count,selected_image=self.selected_image,selected_devices=getattr(self,'selected_devices',None),
             wrist_calibration_phase=getattr(getattr(self,'wrist_wizard',None),'phase',None),

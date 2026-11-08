@@ -327,7 +327,9 @@ def install(stage):
     for path in [PROJECT, Path('/home/orangepi/.local/share/uv'),
                  Path('/home/orangepi/maintenance/usb-phone-adb')]:
         run(['chown', '-R', 'orangepi:orangepi', str(path)])
-    for p in [BASE / 'runtime', PROJECT / 'configs/environments', BASE / 'tests/results']:
+    for p in [BASE / 'runtime', PROJECT / 'configs/environments', BASE / 'tests/results',
+              Path('/home/orangepi/maintenance/server-qc'), Path('/home/orangepi/maintenance/server-qc/results')]:
+        if p.is_symlink():raise RuntimeError('Refusing a linked setup destination: '+str(p))
         p.mkdir(parents=True, exist_ok=True)
         user = pwd.getpwnam('orangepi')
         os.chown(str(p), user.pw_uid, user.pw_gid)

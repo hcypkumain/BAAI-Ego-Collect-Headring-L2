@@ -20,7 +20,7 @@ if (ROOT / 'lib').is_dir():
     sys.path.insert(0, str(ROOT / 'lib'))
 import paramiko
 
-VERSION = 'headring-unified-20261107-v3'
+VERSION = 'headring-unified-20261108-v4'
 REMOTE_STAGE = '/home/orangepi/maintenance/headring-setup-' + VERSION
 BASE = '/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi'
 

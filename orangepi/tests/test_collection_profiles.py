@@ -113,6 +113,8 @@ class ManualCompletionTests(unittest.TestCase):
             c.reap=lambda:setattr(c,'worker',None)
             with patch.object(launcher.ledger,'mark'):c.poll()
             self.assertEqual(c.state,'idle');self.assertEqual(c.last_completed['outcome'],'pending_qc')
+            from capture_session_state import active_session
+            self.assertIsNone(active_session(c));self.assertEqual(c.last_review_path,path);self.assertEqual(c.path,path)
             c.prepare.assert_not_called();c.error_voice.assert_not_called()
 
     def test_live_discard_never_deletes_before_stop_is_confirmed(self):
