@@ -24,7 +24,7 @@
       "current_path": "README.md",
       "action": "moved-or-modified",
       "baseline_sha256": "f982001f8b1dacbb845f5f1103e96f7fb7fb33533aa45a86e505ac047d828146",
-      "published_sha256": "75ae2bf85045051fcc331879a8b1fa6ca16ef588662680a59e983d132a28df4d",
+      "published_sha256": "308a1fc8689ffa8c31b3941c55e6cda30fd49dba19ecf274c6bd2d34abbccef6",
       "reason": "Manual host custody handoff and verified-cloud retention"
     },
     {
