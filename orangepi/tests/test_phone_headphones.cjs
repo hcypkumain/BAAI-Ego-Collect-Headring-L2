@@ -13,4 +13,7 @@ const combined=describe({scan_error:'scan_busy',error:'connect_failed',audio_rea
 assert(combined.includes('扫描未确认')&&combined.includes('断开手机连接'));
 const retryState={scan_error:'scan_busy',error:'',auto_reconnect:true,retry_seconds:5,audio_ready:false};
 assert(global.phoneHeadphoneNote(retryState,describe(retryState,false),'',true).includes('扫描未确认'));
+const warning={classic_warning:'classic_config_le_unknown',auto_reconnect:true,retry_seconds:3};
+assert(global.phoneHeadphoneNote(warning,describe(warning,false),'',true).includes('运行状态尚未核实'));
+assert(describe({scan_error:'classic_not_loaded'},false).detail.includes('尚未在当前蓝牙服务生效'));
 console.log('PASS headphone link/audio distinction, readiness, stale status and error guidance');

@@ -14,6 +14,8 @@ import tempfile
 import threading
 import time
 
+import classic_bluetooth_mode
+
 VERSION = 1
 MAC = re.compile(r'[0-9A-F]{2}(?::[0-9A-F]{2}){5}\Z')
 AUDIO_SINK = '0000110b-0000-1000-8000-00805f9b34fb'
@@ -192,6 +194,10 @@ class BluezTransport:
         except Exception as exc:
             raise self._error(exc, 'bluetooth_off')
 
+    def classic_preflight(self):
+        return classic_bluetooth_mode.assess(
+            classic_bluetooth_mode.disk_mode(), classic_bluetooth_mode.runtime_mode(self.adapter))
+
     def start_scan(self):
         try:
             adapter = self._interface(self.adapter, 'org.bluez.Adapter1')
@@ -300,7 +306,7 @@ class HeadphoneManager:
         self.devices = []
         self.sinks = set()
         self.state = {'version': 1, 'available': False, 'powered': False,
-                      'scanning': False, 'busy': False, 'status': 'unavailable', 'error': '', 'scan_error': '',
+                      'scanning': False, 'busy': False, 'status': 'unavailable', 'error': '', 'scan_error': '', 'classic_warning': '',
                       'pairing_progress': 'idle', 'selected_address': '', 'selected_name': '',
                       'selected_saved': False, 'connected_address': '', 'audio_ready': False,
                       'output': 'none', 'devices': [], 'retry_seconds': 0,
@@ -511,6 +517,11 @@ class HeadphoneManager:
                 self._check_generation(generation)
                 self.transport.power()
             self._check_generation(generation)
+            preflight=getattr(self.transport,'classic_preflight',None)
+            error,warning=preflight() if preflight else ('','')
+            self._update(classic_warning=warning)
+            if error:raise BluetoothError(error)
+            self._check_generation(generation)
             self.transport.start_scan()
             self.scan_until = self.clock() + SCAN_SECONDS
             self.scan_generation = generation
@@ -580,7 +591,7 @@ class HeadphoneManager:
                     self._refresh()
                 except Exception:
                     pass
-            scan_error='scan_busy' if command and command[0]=='scan' and exc.code=='scan_busy' else self.snapshot().get('scan_error','')
+            scan_error=exc.code if command and command[0]=='scan' and (exc.code=='scan_busy' or exc.code.startswith('classic_')) else self.snapshot().get('scan_error','')
             self._update(error=exc.code, scan_error=scan_error, status='error', busy=False, scanning=bool(self.scan_until),
                          test_result='failed' if command and command[0] == 'test' else self.snapshot()['test_result'])
             self._backoff()
