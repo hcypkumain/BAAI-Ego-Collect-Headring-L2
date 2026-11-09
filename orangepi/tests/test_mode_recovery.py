@@ -15,7 +15,7 @@ class BackendTests(unittest.TestCase):
   env={'snapshot_actions':lambda s:['collection_mode','start','prepare','delete_recording']}
   cls=compile_class('Dashboard',[method('dashboard.py','Dashboard','submit')],env)
   d=cls();d.lock=threading.RLock();d.snapshot={'collection_context':'emg:17','revision':5};d.busy=False;d.prompting=False;d.pending=None;d.result=None
-  d.privacy=types.SimpleNamespace(snapshot=lambda:{'required':False},cancel_request=lambda:False)
+  d.privacy=types.SimpleNamespace(snapshot=lambda:{'required':False},cancel_request=lambda *_:False,require_stop_protocol=lambda:None)
   d.camera_checks=types.SimpleNamespace(approved=lambda:True)
   return d
  def test_mode_request_allows_only_metadata_revision_drift(self):
@@ -28,7 +28,7 @@ class BackendTests(unittest.TestCase):
  def test_recording_and_deletion_still_reject_old_revision(self):
   for action in ['start','prepare','delete_recording']:
    d=self.dashboard()
-   with self.assertRaisesRegex(ValueError,'流程已变化'):d.submit({'action':action,'revision':4,'collection_context':'emg:17'})
+   with self.assertRaisesRegex(ValueError,'流程已变化'):d.submit({'action':action,'revision':4,'collection_context':'emg:17','stop_protocol':'session-stop-v1'})
    self.assertIsNone(d.pending)
  def test_mode_cannot_bypass_busy_transaction_or_invalid_value(self):
   d=self.dashboard();d.busy=True

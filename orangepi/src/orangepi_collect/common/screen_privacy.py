@@ -9,6 +9,7 @@ import threading
 import time
 
 POLICY = 'screen_black_before_capture_v1'
+STOP_PROTOCOL = 'session-stop-v1'
 CLIENT_ID = re.compile(r'^[A-Za-z0-9_.-]{1,96}$')
 
 
@@ -65,6 +66,7 @@ class ScreenPrivacy:
             if now-client.get('seen',now)>self.lease:
                 client['ack']='';client['ack_at']=0.0
             client['seen'] = now
+            client['stop_protocol'] = value.get('stop_protocol')
             if self.phase == 'arming' and not self.committed:
                 self.cohort.add(identity)
 
@@ -74,6 +76,8 @@ class ScreenPrivacy:
         with self.lock:
             identity = value.get('client_id')
             client = self.clients.get(identity) if isinstance(identity, str) else None
+            if value.get('stop_protocol') != STOP_PROTOCOL or not client or client.get('stop_protocol') != STOP_PROTOCOL:
+                raise ValueError('页面版本已更新，请刷新后再开始')
             if (self.phase != 'arming' or self.committed or self.cancelled or not client
                     or value.get('nonce') != self.nonce or not self.nonce
                     or self.clock() - client['seen'] > self.lease or identity not in self.cohort):
@@ -109,11 +113,26 @@ class ScreenPrivacy:
             return (self.phase == 'arming' and not self.cancelled and not self.committed
                     and bool(self.cohort) and all(
                         k in self.clients and now - self.clients[k]['seen'] <= self.lease
+                        and self.clients[k].get('stop_protocol') == STOP_PROTOCOL
                         and self.clients[k]['ack'] == self.nonce
                         and now - self.clients[k]['ack_at'] >= self.settle for k in self.cohort))
 
-    def cancel_request(self):
+    def require_stop_protocol(self):
         with self.lock:
+            now=self.clock()
+            if any(now-v['seen'] <= self.lease and v.get('stop_protocol') != STOP_PROTOCOL for v in self.clients.values()):
+                raise ValueError('页面版本已更新，请刷新所有连接的采集页面后再开始')
+
+    def target_matches(self, target):
+        with self.lock:
+            return (isinstance(target,dict) and set(target)=={'instance','session_id','nonce','generation'}
+                    and target['instance']==self.instance and target['session_id']==self.session
+                    and target['nonce']==self.nonce and type(target['generation']) is int
+                    and target['generation']==self.generation and bool(self.nonce))
+
+    def cancel_request(self, target):
+        with self.lock:
+            if not self.target_matches(target):raise ValueError('采集会话已变化，请刷新后重试')
             if self.phase == 'arming':
                 self.cancelled = True
                 self.generation += 1
@@ -158,11 +177,14 @@ class ScreenPrivacy:
                 if self.phase != 'recording':self.generation += 1
                 self.phase = 'recording'
 
-    def stopping(self):
+    def stopping(self, target=None):
         with self.lock:
+            if target is not None and not self.target_matches(target):
+                raise ValueError('采集会话已变化，请刷新后重试')
             if self.committed:
                 if self.phase != 'stopping':self.generation += 1
                 self.phase = 'stopping'
+            return {'instance':self.instance,'session_id':self.session,'nonce':self.nonce,'generation':self.generation}
 
     def fault(self, message):
         with self.lock:
@@ -176,6 +198,13 @@ class ScreenPrivacy:
             stamp = value.get('stop_monotonic_ns') if isinstance(value, dict) else None
             if (not self.committed or type(stamp) is not int or stamp < self.committed_ns
                     or stamp>time.monotonic_ns()
+                    or value.get('native_reaped') is not True
+                    or type(value.get('native_exit_code')) is not int or value['native_exit_code'] < 0
+                    or value.get('capture_finalized') is not True
+                    or value.get('shutdown_complete') is not True
+                    or (value.get('summary_status'),value['native_exit_code']==0) not in (('success',True),('error',False))
+                    or type(value.get('finalized_monotonic_ns')) is not int
+                    or not stamp <= value['finalized_monotonic_ns'] <= time.monotonic_ns()
                     or value.get('recording_active') is not False
                     or not self.start_proof or value.get('screen_privacy')!=self.start_proof
                     or value.get('worker_pid')!=self.start_proof.get('worker_pid')

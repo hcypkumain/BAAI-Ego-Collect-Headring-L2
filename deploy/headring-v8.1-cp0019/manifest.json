@@ -1,0 +1,72 @@
+{
+  "version": "headring-integrated-20261109-v8.1",
+  "device": "cp_0019",
+  "files": [
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/src/orangepi_collect/common/screen_privacy.py",
+      "payload": "payload/orangepi/src/orangepi_collect/common/screen_privacy.py",
+      "before": "1a97eca0b07ed044ea7f67e558db0739077d25e43953dfadab1853f7109fe084",
+      "after": "a9649d1c267d7e09c236c83ddab2c74f8b2b554d504518c4aaecda5f7e767a24"
+    },
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/src/orangepi_collect/control/dashboard.html",
+      "payload": "payload/orangepi/src/orangepi_collect/control/dashboard.html",
+      "before": "d9c5dc0676af74ff9309ed2e76761ab9ed16424fb01b74bfd5ece0b329bc342f",
+      "after": "e29de91ca888fbe5f3e0ae33b0ac2c4e1aca5e79f2c754c224d0c475b0b038bc"
+    },
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/src/orangepi_collect/control/dashboard.py",
+      "payload": "payload/orangepi/src/orangepi_collect/control/dashboard.py",
+      "before": "bde5dd937e438b916bb422f122e375fa17dbf47aa656a984a72e84133b483db6",
+      "after": "f1c5543dd781ebf76d85508255b02e2240edddd76a131c34803476e7a64dfb9f"
+    },
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/src/orangepi_collect/control/launcher.py",
+      "payload": "payload/orangepi/src/orangepi_collect/control/launcher.py",
+      "before": "660693b0e8116ccce147fe52ebee1523c39bde73b958ae6bb82a329585389c61",
+      "after": "79d16f546092876b674af9b9529ee1a4adae2cd50d33d11d24eb02a09becfc76"
+    },
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/src/orangepi_collect/control/phone_recording.js",
+      "payload": "payload/orangepi/src/orangepi_collect/control/phone_recording.js",
+      "before": "16e8ebdc8ef44c6226b13e713ad99418f7fc191706a257a5613070ae848b647a",
+      "after": "0af7d0e381c5a090d963cbe4afb89c39a87f73c24b829e90c843fbf14cc45335"
+    },
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/src/orangepi_collect/control/web_controls.py",
+      "payload": "payload/orangepi/src/orangepi_collect/control/web_controls.py",
+      "before": "fef6cd3e47479b5e7a0ffdb2267eceb9f3cddf288c35546402b6dd4822f7bf13",
+      "after": "d3b5b8a7b2308b44f62dfdfdd2972b780069686f678a9d18ca1fa3c998004a31"
+    },
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/src/orangepi_collect/framework/framework_recorder.py",
+      "payload": "payload/orangepi/src/orangepi_collect/framework/framework_recorder.py",
+      "before": "42c2b08e3e59728c09ca2be951d0807bf7615dfd7f6178d79792ef76f69739ec",
+      "after": "2dd4ac5c6f9d3da72f0d4c67b66c4e0b5c11a6d269e0f95e44bc24ad81eef927"
+    },
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/src/orangepi_collect/acquisition/capture.py",
+      "payload": "payload/orangepi/src/orangepi_collect/acquisition/capture.py",
+      "before": "8ba2ea735cd6b90c1dd652610f4b1b841ed93ebf7ddc1df3d893400f5c1226fd",
+      "after": "b6e795f21dc47397424b2c9bd9e7c012293ffed5430441b0f286b28180e1c4fc"
+    },
+    {
+      "target": "/home/orangepi/maintenance/usb-phone-adb/usb_phone_link.py",
+      "payload": "payload/system/usb_phone_link.py",
+      "before": "2289dac4638856288fa3cd1b5409822a8c54d7ee8594f6869f294fc2e46ab740",
+      "after": "82fb8d6f9ae362aa5a39b66cf98f88c515ed0af9c0811f6b5296f9844bd20800"
+    },
+    {
+      "target": "/usr/local/lib/collector-usb-task-import/mount-readonly",
+      "payload": "payload/system/mount-readonly",
+      "before": "b13fc5a0c63269060d4f0fdf3ad556d9417e8522676d4cbdec5b698944b111d0",
+      "after": "0e672274737b4cd09539e68f2ca376c8806769945aa63ad202f64d316c3f034d"
+    },
+    {
+      "target": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi/runtime/fleet-release.json",
+      "payload": "payload/runtime/fleet-release.json",
+      "before": "a3115c3f49cd06b97e00b245d00343f194392e426f30838dbb57ccfabc87445a",
+      "after": "f28723bc7f3e17e844c9d723d21139999a70156063726301ec9f68fe88206f37"
+    }
+  ]
+}

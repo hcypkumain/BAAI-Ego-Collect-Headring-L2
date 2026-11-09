@@ -70,14 +70,16 @@ class Tests(unittest.TestCase):
         manager,value,_,writes,_=self.setup_manager(data='host',mode='device')
         self.assertEqual(manager.ensure()['state'],'unsupported');self.assertEqual(writes,[])
 
-    def test_rejected_requests_have_backoff_and_stop_after_three(self):
+    def test_rejected_requests_continue_at_capped_backoff(self):
         manager,_,_,writes,clock=self.setup_manager()
         def reject(path,value):writes.append(str(path));raise OSError(95,'not supported')
         manager.writer=reject
         self.assertEqual(manager.ensure()['state'],'partner_refused')
         self.assertEqual(manager.ensure()['state'],'waiting_retry');self.assertEqual(len(writes),1)
         clock[0]+=11;manager.ensure();clock[0]+=31;manager.ensure();clock[0]+=100;manager.ensure()
-        self.assertEqual(len(writes),3)
+        self.assertEqual(len(writes),4)
+        manager.ensure();self.assertEqual(len(writes),4)
+        clock[0]+=61;manager.ensure();self.assertEqual(len(writes),5)
 
     def test_replug_resets_attempt_limit_and_retries_new_partner(self):
         manager,value,_,writes,clock=self.setup_manager()

@@ -105,7 +105,7 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
    if(!force&&registeredInstance===instance&&now()-registeredAt<700)return true;
    heartbeatPending=(async()=>{
     try{
-     await Promise.resolve().then(()=>options.post('privacy_display',{client_id:identity}));
+     await Promise.resolve().then(()=>options.post('privacy_display',{client_id:identity,stop_protocol:'session-stop-v1'}));
      if(seenInstance!==instance)return false;
      registeredInstance=instance;registeredAt=now();return true;
     }catch(error){if(!displayFresh()||now()-registeredAt>=REGISTRATION_DEADLINE)lock();return false}
@@ -122,7 +122,7 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
     const current=latest&&latest.privacy;
     if(!current||current.phase!=='arming'||key(current)!==nonceKey||!locked||!visible())return;
     if(!await heartbeat(true))return;
-    try{await options.post('privacy_ack',{client_id:identity,nonce:p.nonce});lastAck=nonceKey}
+    try{await options.post('privacy_ack',{client_id:identity,nonce:p.nonce,stop_protocol:'session-stop-v1'});lastAck=nonceKey}
     catch(error){lock()}
    })().finally(()=>{ackPending=null});
    return ackPending;
@@ -710,7 +710,7 @@ async function act(action,value){
  if(['retry','discard_recording'].includes(action)&&!confirm('放弃并删除本段录制文件？清理完成后返回总览，由您手动准备。本段文件将不再保留。'))return;
  const previousResultTime=status.result?.time,requestRevision=status.revision,requestInstance=status.privacy?.instance;let accepted=false;inFlight=true;$$('button[data-action],button[data-impedance-action]').forEach(b=>b.disabled=true);renderEmg(status);
  const actionController=new AbortController(),actionTimer=setTimeout(()=>actionController.abort(),6000);
- try{if(action==='start'){await privacyScreen.beforeStart();if(!online||!status?.actions?.includes('start')||status.revision!==requestRevision||status.privacy?.instance!==requestInstance){privacyScreen.startRejected();return}}const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value,revision:requestRevision,collection_context:collectionContext}),signal:actionController.signal});const data=await res.json();if(!res.ok){const error=Error(data.error||'操作失败');error.status=res.status;throw error}accepted=true;if(action==='wrist_camera_settings')wristPolicyPending={value,previousResultTime};}
+ try{if(action==='start'){await privacyScreen.beforeStart();if(!online||!status?.actions?.includes('start')||status.revision!==requestRevision||status.privacy?.instance!==requestInstance){privacyScreen.startRejected();return}}const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value,revision:requestRevision,collection_context:collectionContext,...(action==='start'?{stop_protocol:'session-stop-v1'}:{})}),signal:actionController.signal});const data=await res.json();if(!res.ok){const error=Error(data.error||'操作失败');error.status=res.status;throw error}accepted=true;if(action==='wrist_camera_settings')wristPolicyPending={value,previousResultTime};}
  catch(error){if(action==='start'&&error.status>=400&&error.status<500)privacyScreen.startRejected();if(action==='assign_emg_roles')clearEmgDraft();toast(error.name==='AbortError'?'操作结果尚未确认，请等待 Pi 状态更新后再继续。':error.message)}finally{clearTimeout(actionTimer);inFlight=false;await poll();renderEmg(status)}
  return accepted;
 }
@@ -729,7 +729,7 @@ async function readStatus(){
 }
 async function readDisplayState(){
  const started=performance.now();
- const {response:res,value}=await boundedJson('/api/display-state?'+new URLSearchParams({client_id:privacyScreen.clientId}),{headers:authHeaders()},2500);
+ const {response:res,value}=await boundedJson('/api/display-state?'+new URLSearchParams({client_id:privacyScreen.clientId,stop_protocol:'session-stop-v1'}),{headers:authHeaders()},2500);
  if(res.status===401){privacyScreen?.unauthorized();throw Error('访问码无效')}
  if(!res.ok)throw Error(value.error||'屏幕状态暂不可用');
  value._displayRequestedAt=started;latestDisplayTruth=value;return value;
@@ -749,9 +749,11 @@ async function poll(){
   online=true;lastStatusReceivedAt=performance.now();if(accessCodeRequired)sessionStorage.setItem('pi-access',token);$('#login').classList.add('hidden');
   $('#connection span').textContent='已连接 Pi';$('#connection').style.background='';
   try{
-   s={...s,state:typeof s.state==='string'&&s.state?s.state:'starting'};
-   status=s;reconcileModeIntent(s);recordingOverlay?.update(s);
-   if(!s.privacy?.required){render(s);privacyScreen.revealIfSafe(s);phoneCompanion?.update(s);recordingOverlay?.renderFault(null)}
+   // Keep the exact trusted snapshot for the privacy gate. The fallback is
+   // only for rendering and must never manufacture authoritative idle state.
+   const rendered=typeof s.state==='string'&&s.state?s:{...s,state:'starting'};
+   status=rendered;reconcileModeIntent(rendered);recordingOverlay?.update(rendered);
+   if(!s.privacy?.required){render(rendered);privacyScreen.revealIfSafe(s);phoneCompanion?.update(rendered);recordingOverlay?.renderFault(null)}
   }catch(error){
    recordingOverlay?.renderFault(error);privacyScreen.lock();
    // A rendering exception is not evidence that the Pi disconnected.
@@ -779,7 +781,9 @@ async function privacyPost(action,value){
 }
 async function privacyStop(snapshot){
  try{
-  const {response:res,value:data}=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'stop',revision:snapshot.revision,collection_context:snapshot.collection_context})},4000);
+  const p=snapshot.privacy||{};
+  const privacy_target={instance:p.instance,session_id:p.session_id,nonce:p.nonce,generation:p.generation};
+  const {response:res,value:data}=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'stop',revision:snapshot.revision,collection_context:snapshot.collection_context,privacy_target})},4000);
   if(!res.ok)throw Error(data.error||'停止请求未接受，请长按重试');
  }finally{poll()}
 }

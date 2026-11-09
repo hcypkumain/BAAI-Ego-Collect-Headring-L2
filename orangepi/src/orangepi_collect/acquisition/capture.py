@@ -529,17 +529,23 @@ class Capture:
             self.stop_gate()
             stop_ns, stop_wall = self.stop_ns, self.stop_wall_ns
             self.closing.set()
+            shutdown_complete=True
             if not self.error_list:
                 self.status('finalizing')
             if self.eeg:
                 try:
                     self.summary['eeg']=self.eeg.close()
                     if self.started and not self.summary['eeg']['samples']:self.error_list.append('eeg: no recorded data')
-                except Exception as exc:self.error_list.append('eeg: '+str(exc))
+                except Exception as exc:
+                    shutdown_complete=False;self.error_list.append('eeg: '+str(exc))
             for e in self.emgs:
                 e.thread.join(20)
                 if e.thread.is_alive():
+                    shutdown_complete=False
                     self.error_list.append(e.name+': writer failed to stop')
+                if e.saver.is_alive():
+                    shutdown_complete=False
+                    self.error_list.append(e.name+': saver process still running')
                 self.summary[e.name] = dict(port=e.port,baud=921600,emg_frames=e.emg_count,imu_frames=e.imu_count,
                     sequence_gaps=e.dropped,chunks=e.saved,timestamp_basis='serial read arrival; not hardware synchronization')
                 if self.started and e.emg_count == 0:
@@ -550,11 +556,13 @@ class Capture:
                     if self.started and not self.board.count:
                         self.error_list.append('board_imu: no recorded data')
                 except Exception as exc:
+                    shutdown_complete=False
                     self.error_list.append('board_imu: '+str(exc))
             for c in self.cameras:
                 try:
                     self.summary[c.name] = c.close()
                 except Exception as exc:
+                    shutdown_complete=False
                     if self.started:
                         self.error_list.append(c.name+': '+str(exc))
             while not self.errors.empty():
@@ -574,6 +582,7 @@ class Capture:
             self.summary.update(start_unix_ns=self.start_wall_ns,start_monotonic_ns=self.start_ns,
                 stop_unix_ns=stop_wall,stop_monotonic_ns=stop_ns,errors=self.error_list,warnings=self.warning_list,
                 headband_calibration=getattr(self,'headband_calibration_status',None),
+                shutdown_complete=shutdown_complete,
                 status='error' if self.error_list else ('success' if self.started else 'cancelled'))
             atomic_json(self.path/'capture_summary.json', self.summary)
             self.status(self.summary['status'],errors=self.error_list)

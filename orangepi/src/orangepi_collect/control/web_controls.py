@@ -158,14 +158,16 @@ class WebControls:
         privacy=getattr(dashboard,'privacy',None)
         if privacy is not None and privacy.committed and getattr(self,'path',None):
             try:
-                proof=json.loads((self.path/'stop_gate.json').read_text())
+                proof=json.loads((self.path/'capture_complete.json').read_text())
                 privacy.confirm_stopped(proof)
             except (OSError,ValueError,TypeError):pass
         now=time.monotonic()
         revision=getattr(self,'ui_revision',0)
         if not force and revision==getattr(self,'ui_last_revision',None) and now-getattr(self,'ui_last_publish',0)<.4:return
         self.ui_last_revision=revision;self.ui_last_publish=now
-        try:worker=self.worker_status()
+        # self.path can still refer to a previous failed/reviewed session after
+        # its worker was reaped. Do not present that old error as a live worker.
+        try:worker=self.worker_status() if getattr(self,'worker',None) is not None else {}
         except (OSError,ValueError):worker={}
         cfg=getattr(self,'web_config',{})
         keyboard=getattr(self,'keyboard',None)
@@ -349,6 +351,8 @@ class WebControls:
             try:
                 impedance = self.worker_status().get('eeg_impedance', {}) if 'eeg' in (getattr(self,'selected_devices',None) or ()) else dict(required=False)
                 allowed=list(actions_for(self.state,impedance))
+                if job['action']=='stop' and not dashboard.privacy.target_matches(job.get('privacy_target')):
+                    raise ValueError('采集会话已变化，请刷新后重试')
                 if getattr(self,'reference_can_switch_list',getattr(self,'reference_can_change',lambda:False))():allowed.append('reference_list')
                 mode_action=job['action']=='collection_mode'
                 if mode_action:

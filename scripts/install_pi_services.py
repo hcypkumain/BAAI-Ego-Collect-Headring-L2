@@ -12,7 +12,9 @@ def plan(root,include_vendor,include_lan_time=False):
             result.append((source,Path('/opt/pi-phone-media')/source.relative_to(root/'services/phone-media'),False))
     result.append((root/'services/usb-phone-link/usb_phone_link.py',USB_ROOT/'usb_phone_link.py',False))
     result.append((root/'services/usb-phone-link/usb_data_host.py',Path('/usr/local/sbin/headring-usb-data-host'),False))
-    units=['camd.service','embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service','usb-phone-link.service','headring-usb-data-host.service']
+    result.append((root/'orangepi/scripts/usb_tasks_mount_readonly.py',Path('/usr/local/lib/collector-usb-task-import/mount-readonly'),False))
+    result.append((root/'deployment/sudoers/collector-usb-task-import',Path('/etc/sudoers.d/collector-usb-task-import'),False))
+    units=['collector-usb-task-mount.service','collector-usb-task-mount.timer','camd.service','embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service','usb-phone-link.service','headring-usb-data-host.service']
     if include_lan_time:
         units+=['headring-lan-time.service','headring-lan-time-refresh.service','headring-lan-time-refresh.timer']
         result.append((root/'deployment/lan-time/headring_lan_time.py',Path('/usr/local/sbin/headring-lan-time'),False))
@@ -23,7 +25,7 @@ def plan(root,include_vendor,include_lan_time=False):
         result.append((unit,Path('/etc/systemd/system')/name,True))
         for source in sorted(unit.with_name(unit.name+'.d').glob('*.conf')):
             result.append((source,Path('/etc/systemd/system')/(name+'.d')/source.name,True))
-    for name in ('91-pi-wrist-camera-power.rules','99-icm20602.rules','71-pi-auto-android.rules'):
+    for name in ('91-pi-wrist-camera-power.rules','99-icm20602.rules','71-pi-auto-android.rules','72-collector-usb-task-import.rules'):
         result.append((root/'deployment/udev'/name,Path('/etc/udev/rules.d')/name,False))
     if include_vendor:
         vendor=root/'vendor/pi-runtime/egorecord'
@@ -83,6 +85,7 @@ def main():
     host_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(host_module)
     allowed,reason=host_module.CaptureGuard(root/'orangepi').allowed()
     if not allowed:parser.error('Finish capture/initialization and use the active station root before installing: '+reason)
+    subprocess.run(['/usr/sbin/visudo','-cf',str(root/'deployment/sudoers/collector-usb-task-import')],check=True,timeout=10)
     backup=Path('/var/backups/baai-ego-collect')/datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     for source,target,unit in operations:
         if target.is_symlink():raise RuntimeError('Refusing to overwrite a symlink: '+str(target))
@@ -99,7 +102,7 @@ def main():
         try:
             with os.fdopen(fd,'wb') as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
             executable=raw.startswith(b'#!') or source.name in ('camd','guarded-paplay','librkaiq_d')
-            os.chmod(temporary,0o755 if executable else 0o644);os.replace(temporary,target)
+            os.chmod(temporary,0o440 if target.parent==Path('/etc/sudoers.d') else (0o755 if executable else 0o644));os.replace(temporary,target)
             directory=os.open(str(target.parent),os.O_RDONLY)
             try:os.fsync(directory)
             finally:os.close(directory)
@@ -112,6 +115,7 @@ def main():
     # Mandatory for every installation: initialize this Pi as a USB data host
     # and keep the guarded policy active across boot and reconnect. Do not
     # start/restart any recorder, camera, or media service here.
+    subprocess.run(['systemctl','enable','--now','collector-usb-task-mount.timer'],check=True)
     subprocess.run(['systemctl','enable','headring-usb-data-host.service'],check=True)
     subprocess.run(['systemctl','start','headring-usb-data-host.service'],check=True)
     host=subprocess.run(['/usr/local/sbin/headring-usb-data-host','--once','--base',str(root/'orangepi')],capture_output=True,text=True,check=True,timeout=20)

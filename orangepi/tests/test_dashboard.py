@@ -83,7 +83,8 @@ class DashboardTests(unittest.TestCase):
             self.assertIn(b'<body data-access-code-required="false">',response.read())
         with urlopen(self.url+'/api/status') as response:self.assertEqual(json.load(response)['revision'],7)
         with urlopen(self.url+'/preview/cam_left_wrist.jpg') as response:self.assertEqual(response.read(),b'\xff\xd8preview\xff\xd9')
-        self.assertEqual(self.post({'action':'start','revision':7},token=False).status,202)
+        self.ui.camera_checks.approved=lambda:True
+        self.assertEqual(self.post({'action':'start','revision':7,'stop_protocol':'session-stop-v1'},token=False).status,202)
         self.assertEqual(self.ui.take()['action'],'start')
     def test_no_code_mode_still_checks_origin_and_state(self):
         self.without_access_code()
@@ -105,8 +106,10 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(e.exception.code,409)
         self.assertIsNone(self.ui.take())
     def test_duplicate_start_is_rejected_and_never_becomes_stop(self):
-        self.assertEqual(self.post({'action':'start','revision':7}).status,202)
-        with self.assertRaises(HTTPError):self.post({'action':'start','revision':7})
+        self.ui.camera_checks.approved=lambda:True
+        start={'action':'start','revision':7,'stop_protocol':'session-stop-v1'}
+        self.assertEqual(self.post(start).status,202)
+        with self.assertRaises(HTTPError):self.post(start)
         job=self.ui.take();self.assertEqual(job['action'],'start')
         self.ui.publish({'state':'recording','revision':8});self.ui.complete()
         with self.assertRaises(HTTPError):self.post({'action':'start','revision':8})
@@ -133,7 +136,8 @@ class DashboardTests(unittest.TestCase):
 
     def test_configuration_controls_locked_during_recording(self):
         self.ui.publish({'state':'recording','revision':8})
-        self.assertEqual(self.ui.status()['actions'],['stop'])
+        actions=self.ui.status()['actions'];self.assertIn('stop',actions)
+        self.assertNotIn('swap_emg',actions);self.assertNotIn('start',actions)
         with self.assertRaises(HTTPError):self.post({'action':'swap_emg','revision':8})
 
     def test_wrist_method_and_manual_confirmation_are_state_scoped(self):

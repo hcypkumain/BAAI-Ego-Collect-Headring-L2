@@ -12,7 +12,7 @@
   const stopped=p?.phase==='idle'&&p.required===false&&p.stop_confirmed===true
    &&!['recording','countdown'].includes(s?.state)&&s?.worker?.recording_active!==true;
   let title='正在同步采集状态',detail='尚未取得 Pi 确认的当前状态。';
-  if(options.stale){
+  if(options.stale&&s){
    title='连接刷新中 · 采集状态待确认';
    detail='尚未确认当前是否停止，请等待 Pi 返回状态。'+(p?.phase==='recording'?'上次确认：采集中。':p?.phase==='stopping'?'上次确认：正在停止。':'');
   }else if((s?.state==='finalizing'||s?.state==='confirm_stop')&&!stopped){

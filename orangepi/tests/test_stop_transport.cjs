@@ -12,10 +12,11 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
    setTimeout:(fn,delay)=>{assert.equal(delay,4000);expire=fn;return 1},clearTimeout(){},
    fetch:async(url,config)=>{request=JSON.parse(config.body);if(bodyHangs)return {ok:true,json:()=>new Promise(()=>{})};return new Promise(()=>{});}};
   vm.createContext(context);vm.runInContext(bounded+stop,context);
-  const promise=context.privacyStop({revision:7,collection_context:'eeg:9'});
+  const privacy={instance:'boot',session_id:'session',nonce:'nonce',generation:4};
+  const promise=context.privacyStop({revision:7,collection_context:'eeg:9',privacy});
   const check=assert.rejects(promise,e=>e.name==='TimeoutError');
   await flush();expire();await check;
-  assert.deepEqual(request,{action:'stop',revision:7,collection_context:'eeg:9'});assert.equal(refresh,1);passed++;
+  assert.deepEqual(request,{action:'stop',revision:7,collection_context:'eeg:9',privacy_target:privacy});assert.equal(refresh,1);passed++;
  }
  let refresh=0;
  const context={AbortController,DOMException,setTimeout,clearTimeout,authHeaders:()=>({}),poll:()=>{refresh++},

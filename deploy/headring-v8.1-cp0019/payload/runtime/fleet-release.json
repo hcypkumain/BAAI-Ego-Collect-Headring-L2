@@ -1,0 +1,9 @@
+{
+  "version": "headring-integrated-20261109-v8.1",
+  "device": "19",
+  "installed": true,
+  "operational": true,
+  "base_commit": "460c04cb719aca5d73bfe518748bd636c632e2cf",
+  "backup": "/home/orangepi/TEST-headring-audit-20261109",
+  "notes": "Per-device v8.1 source and USB update; test sessions isolated and retained; QC pending."
+}

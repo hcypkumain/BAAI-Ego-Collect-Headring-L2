@@ -1,0 +1,1 @@
+orangepi ALL=(root) NOPASSWD: /usr/local/lib/collector-usb-task-import/mount-readonly ""

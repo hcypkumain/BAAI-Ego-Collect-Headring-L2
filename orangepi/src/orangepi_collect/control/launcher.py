@@ -91,6 +91,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.state='idle'
         self.quit=False
         self.notified_error=False
+        self.stop_pending=False
+        self.stop_requested_path=None
         self.warned_data_gap=False
         if not smoke:ledger.migrate_legacy()
         self.init_references(selected_image,explicit_image=explicit_image)
@@ -314,6 +316,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 except (OSError,ValueError):pass
             self.reference_prepare_failed(error,new_path);return False
         self.notified_error=False
+        self.stop_pending=False
+        self.stop_requested_path=None
         self.warned_data_gap=False
         self.last_help=[]
         self.state='preparing'
@@ -522,25 +526,43 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             privacy.stopping()
         interrupt=getattr(self.voice,'interrupt',None)
         if callable(interrupt):interrupt()
-        try:self.command('STOP')
-        except self.OwnerExited as exc:
-            self.owner_command_failed(exc)
-            return False
-        deadline=time.monotonic()+3
-        while not (self.path/'stop_gate.json').exists():
-            if self.worker.poll() is not None:
-                self.owner_command_failed(self.OwnerExited('采集子进程在停止确认前退出'))
+        if getattr(self,'stop_pending',False):
+            self.stop_deadline=time.monotonic()+45
+            self.state_write()
+            return True
+        if getattr(self,'stop_requested_path',None)!=self.path:
+            try:self.command('STOP')
+            except self.OwnerExited as exc:
+                self.owner_command_failed(exc)
                 return False
-            if time.monotonic()>deadline:raise RuntimeError('停止采集确认超时')
-            time.sleep(.01)
-        if privacy is not None:
-            proof=json.loads((self.path/'stop_gate.json').read_text())
-            if not privacy.confirm_stopped(proof):
-                raise RuntimeError('停止状态未确认，保持隐私遮挡')
-        self.state='confirm_stop'
+            self.stop_requested_path=self.path
+        self.stop_pending=True
+        self.stop_deadline=time.monotonic()+45
         self.state_write()
-        self.voice.say('采集已停止。请点击确认保存，或选择重采本段。')
         return True
+
+    def poll_stop(self):
+        if not getattr(self,'stop_pending',False):return
+        privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
+        try:proof=json.loads((self.path/'capture_complete.json').read_text())
+        except (OSError,ValueError,TypeError):proof=None
+        # ui_publish may already have validated this same receipt.
+        confirmed=privacy is not None and not privacy.committed
+        if proof and privacy is not None and privacy.committed:
+            confirmed=privacy.confirm_stopped(proof)
+        if confirmed:
+            self.stop_pending=False
+            if proof and proof.get('summary_status')=='error':
+                self.state='error';self.last_help=['采集已停止，但设备或文件收尾发生错误；数据未标记为成功，请查看日志。']
+                self.state_write();self.voice.say(self.last_help[0])
+            else:
+                self.state='confirm_stop';self.state_write()
+                self.voice.say('采集已停止。请点击确认保存，或选择重采本段。')
+        elif time.monotonic()>self.stop_deadline:
+            # Keep polling for a late receipt; a retry must not send STOP twice.
+            self.stop_deadline=float('inf')
+            if privacy is not None:privacy.fault('停止收尾尚未确认，请检查设备和文件状态后重试')
+            self.state_write()
 
     def scan_devices(self,announce=True,quiet=False):
         self.stop_preview()
@@ -882,6 +904,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if callable(tick):tick()
         if not self.worker:
             return
+        self.poll_stop()
         if getattr(self,'discard_requested',False):
             self.poll_discard();return
         if self.state=='finalizing' and time.monotonic()>getattr(self,'finalize_deadline',float('inf')) and self.worker.poll() is None:

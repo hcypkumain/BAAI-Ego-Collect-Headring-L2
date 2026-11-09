@@ -229,10 +229,10 @@ class Dashboard:
                 if path=='/api/wrist-context':self.send(200,owner.wrist_context());return
                 if path=='/api/display-state':
                     query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
-                    if set(query)-{'client_id'} or any(len(v)!=1 for v in query.values()):self.send(400,{'error':'无效屏幕状态请求'});return
+                    if set(query)-{'client_id','stop_protocol'} or any(len(v)!=1 for v in query.values()):self.send(400,{'error':'无效屏幕状态请求'});return
                     identity=query.get('client_id',[None])[0]
                     if identity is not None:
-                        try:owner.privacy.display({'client_id':identity})
+                        try:owner.privacy.display({'client_id':identity,'stop_protocol':query.get('stop_protocol',[None])[0]})
                         except ValueError as error:self.send(400,{'error':str(error)});return
                     value=owner.display_state()
                     if identity is not None:value['display_registration']={'client_id':identity,'instance':value['privacy']['instance']}
@@ -346,14 +346,24 @@ class Dashboard:
                 current=self.snapshot.get('collection_context')
                 if current and data.get('collection_context')!=current:
                     raise ValueError('采集模式已变化，请刷新页面后操作')
-        if data.get('action')=='start' and not self.camera_checks.approved():
-            raise ValueError('请先完成全部相机同屏检查并确认画面方向')
+        if data.get('action')=='start':
+            if data.get('stop_protocol') != 'session-stop-v1':raise ValueError('页面版本已更新，请刷新后再开始')
+            self.privacy.require_stop_protocol()
+            if not self.camera_checks.approved():raise ValueError('请先完成全部相机同屏检查并确认画面方向')
         # Display ACKs must remain reachable while the main thread waits for them.
         if data.get('action')=='privacy_display':
             self.privacy.display(data.get('value'));return
         if data.get('action')=='privacy_ack':
             self.privacy.acknowledge(data.get('value'));return
-        if data.get('action')=='stop' and self.privacy.cancel_request():return
+        if data.get('action')=='stop':
+            # Cancellation may interrupt a busy START, but only for the
+            # current revision and the exact displayed privacy session.
+            with self.lock:
+                if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
+                    raise ValueError('采集模式已变化，请刷新页面后操作')
+                if data.get('revision')!=self.snapshot.get('revision'):
+                    raise ValueError('流程已变化，请刷新后操作')
+                if self.privacy.cancel_request(data.get('privacy_target')):return
         with self.lock:
             if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
                 raise ValueError('采集模式已变化，请刷新页面后操作')
@@ -405,8 +415,10 @@ class Dashboard:
                         or any(not isinstance(value.get(k),str) or not 0<len(value[k])<=64
                                for k in ('session_id','preview_id'))):
                     raise ValueError('请选择当前预览对应的左右设备')
+            if data['action']=='stop':
+                target=self.privacy.stopping(data.get('privacy_target'))
+                data=dict(data,privacy_target=target)
             self.pending=dict(data);self.result=None
-            if data['action']=='stop':self.privacy.stopping()
 
     def set_prompting(self,active):
         with self.lock:self.prompting=bool(active)

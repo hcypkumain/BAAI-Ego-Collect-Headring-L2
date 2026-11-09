@@ -22,7 +22,7 @@ SAFE = {'device_confirm', 'idle', 'failed_wait', 'exhausted'}
 OWNER_SUFFIXES = ('/control/launcher.py', '/control/service_entry.py',
                   '/framework/framework_recorder.py', '/acquisition/capture.py',
                   '/bin/egorecord')
-VERSION = 'usb-data-host-20261107-v1'
+VERSION = 'usb-data-host-20261109-v2'
 
 
 def read(path):
@@ -191,7 +191,8 @@ class DataHost:
         if self.host(before): return self.result(before, 'host', changed=False)
         if before['host_children']:
             return self.result(before, 'topology_busy', changed=False)
-        if self.attempts >= 3: return self.result(before, 'partner_refused', 'bounded_retry_limit', changed=False)
+        # Keep retrying at the capped interval after transient role failures.
+        # Every retry still requires the capture lease and an idle device.
         if self.clock() < self.next_attempt: return self.result(before, 'waiting_retry', changed=False)
         try:
             with self.guard.lease():

@@ -99,3 +99,5 @@ orangepi/.venvs/hardware/bin/python orangepi/tests/test_phone_media_service.py
 ## Head ring v8.0 on cp_0018
 
 See [the v8.0 deployment notes](docs/release-v8.0.md) for the installed package, validation, and rollback guidance.
+
+See [the v8.1 reliability update and device rollback notes](docs/release-v8.1.md).

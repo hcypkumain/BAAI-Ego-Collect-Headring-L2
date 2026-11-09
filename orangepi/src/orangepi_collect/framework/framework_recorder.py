@@ -31,6 +31,24 @@ def impedance_request(line):
             or not isinstance(value.get('request_id'),str) or not 0<len(value['request_id'])<=64):return None
     return json.dumps(value)
 
+def publish_capture_completion(path, process, summary):
+    """Publish only after this session's native recorder has fully exited."""
+    code=process.poll()
+    if (type(code) is not int or code < 0 or summary.get('shutdown_complete') is not True
+            or (code == 0 and summary.get('status') != 'success')
+            or (code != 0 and summary.get('status') != 'error')):return False
+    try:
+        receipt=json.loads((path/'stop_gate.json').read_text())
+        if receipt.get('worker_pid') != process.pid:return False
+        if receipt.get('stop_monotonic_ns') != summary.get('stop_monotonic_ns'):return False
+        receipt.update(native_reaped=True, native_exit_code=code, shutdown_complete=True,
+            capture_finalized=True, summary_status=summary['status'],
+            finalized_monotonic_ns=time.monotonic_ns())
+        atomic_json(path/'capture_complete.json',receipt)
+        return True
+    except (OSError,ValueError,TypeError):
+        return False  # Absence of a receipt keeps the display locked.
+
 @dataclass
 class PiBundleConfig(BaseRecorderConfig):
     hardware_python: str = str(BASE/'.venvs/hardware/bin/python')
@@ -126,6 +144,10 @@ class PiBundleRecorder(BaseRecorder):
         summary_path=path/'capture_summary.json'
         summary=json.loads(summary_path.read_text()) if summary_path.is_file() else dict(status='error',errors=['Native capture ended without a summary'])
         atomic_json(path/'native_capture_summary.json',summary)
+        # The stop gate only stops accepting new samples. Publish a separate
+        # receipt after the native process has exited and its writers have
+        # closed successfully; bind it to the original privacy proof.
+        if summary_path.is_file():publish_capture_completion(path,self.process,summary)
         # Native STOP closes all readers/encoders. Keep the adapter alive while
         # the operator decides, without starting standardization or QC.
         if self.config.wait_for_save and not code and summary.get('status')!='cancelled':
