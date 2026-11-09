@@ -1,6 +1,14 @@
 # cp_0018 camera investigation — 2026-11-10
 
-This is an investigation record, not a release approval. Production cp_0018 remains on `headring-integrated-20261109-v8.1` (code `de1efc542cc98f720fbe35ba78820d9cd43eb786`). The v8.2 code candidate is `1da4ab019281a426381357a989ad05a0d5da1ad6`; it has been exercised in an isolated test copy, not installed as production on the five requested devices.
+This is an investigation record, not a release approval. cp_0018 now runs the complete v8.2 candidate stack with code `b5f0c80776a29a2d8658ea401ce5d2d6cd59a349`; cp_0017/0020/0021/0022 have not been updated. Camera quality has not passed, so an active service is not an acceptance of this device.
+
+## Subsequent full-stack test and Bluetooth maintenance
+
+After installation of the complete candidate system stack, one preselected 121.441-second four-head-camera and IMU test completed START/ACK, refresh in the same session, web long-press STOP, native reap, shutdown, closed files and save. Four streams contained 3617–3627 frames and IMU contained 24205 rows. The existing QC marked five rear-left and one front-right 100 ms camd output-grid gaps as QC_ERROR. The session remains pending_qc; full long-video decode and host QC were not completed. These results do not establish a hardware root cause.
+
+A single controlled BlueZ restart changed its PID and restored the agent registration and original enabled/active states. Systemd automatically killed the old agent after its configured stop timeout. Bluetooth configuration/trust hashes, camd PID and USB service PID remained unchanged. The subsequent application scan submission returned HTTP 503 before discovery began; Bluetooth discovery, headset connection and audio are not established by this attempt. No pairing or adapter reset was performed.
+
+The device-specific consolidated candidate package and exact pre-candidate backup are at `/home/orangepi/TEST-headring-v81-20261109/headring-v8.2-final-cp0018`; 37 targets and two factory references verify. Rollback requires confirmed idle and matching device/state. The original v8.1 package is retained.
 
 ## Current evidence
 
@@ -21,7 +29,7 @@ The software candidate has passed targeted local tests and 91 core tests on cp_0
 
 ## Safety and next action
 
-After the investigation, cp_0018 was `device_confirm`, no session or active recording, and the collector, camd, USB phone service and task-mount timer were active. The 33-file v8.1 deployment/backup check passed. Forty-five project configuration entries, three runtime identity/calibration entries and 54 existing data-file summaries matched this investigation's starting snapshot; seven `/opt` calibration/identity file hashes also matched the investigation starting snapshot. The original pre-v8.1 `/opt` hashes were not captured and must not be inferred.
+After the investigation, cp_0018 was `device_confirm`, no session or active recording, and the collector, camd, USB phone service and task-mount timer were active. The consolidated candidate deployment and backup check passed for 37 targets and two factory references. Forty-five project configuration entries, three runtime identity/calibration entries and 54 existing data-file summaries matched this investigation's starting snapshot; seven `/opt` calibration/identity file hashes also matched the investigation starting snapshot. The original pre-v8.1 `/opt` hashes were not captured and must not be inferred.
 
 The five-device rollout remains incomplete: cp_0017/0020/0021/0022 have only been inspected read-only. Per-device candidate inventories are preparatory drafts, not installers or deployment authorization; every actual deployment still requires live identity, idle status, before hashes and its own backup.
 
