@@ -1,0 +1,2 @@
+# Intentionally empty local override: do not run automatic gadget updates.
+# The vendor rule remains installed and is restored by removing this override.

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Install reviewed Pi files and mandatory guarded USB-host policy; never starts capture."""
-import argparse,datetime,importlib.util,os,platform,re,shutil,subprocess,tempfile
+import argparse,datetime,importlib.util,os,platform,re,shutil,stat,subprocess,tempfile
 from pathlib import Path
 
 USB_ROOT=Path('/home/orangepi/maintenance/usb-phone-adb')
@@ -25,7 +25,7 @@ def plan(root,include_vendor,include_lan_time=False):
         result.append((unit,Path('/etc/systemd/system')/name,True))
         for source in sorted(unit.with_name(unit.name+'.d').glob('*.conf')):
             result.append((source,Path('/etc/systemd/system')/(name+'.d')/source.name,True))
-    for name in ('91-pi-wrist-camera-power.rules','99-icm20602.rules','71-pi-auto-android.rules','72-collector-usb-task-import.rules','83-typec.rules'):
+    for name in ('91-pi-wrist-camera-power.rules','99-icm20602.rules','71-pi-auto-android.rules','72-collector-usb-task-import.rules','61-usbdevice.rules','83-typec.rules'):
         result.append((root/'deployment/udev'/name,Path('/etc/udev/rules.d')/name,False))
     if include_vendor:
         vendor=root/'vendor/pi-runtime/egorecord'
@@ -35,27 +35,54 @@ def plan(root,include_vendor,include_lan_time=False):
         result.append((root/'vendor/pi-runtime/opi-headphone-audio/guarded-paplay',Path('/opt/opi-headphone-audio/guarded-paplay'),False))
     return result
 
-def unsafe_typec_rules(directories=None):
-    """Refuse installation if another rule can repeat the retired mutations."""
-    directories=directories or [Path('/etc/udev/rules.d'),Path('/run/udev/rules.d'),Path('/usr/local/lib/udev/rules.d'),Path('/usr/lib/udev/rules.d'),Path('/lib/udev/rules.d')]
-    seen=set();bad=[]
+def unsafe_typec_rules(directories=None, planned=None):
+    """Inspect the effective same-name udev rules in priority order.
+
+    `planned` represents the exact files this transaction will install in
+    /etc. Their content is inspected too; an override is never assumed safe.
+    """
+    if directories is None:
+        directories=[Path('/etc/udev/rules.d'),Path('/run/udev/rules.d'),Path('/usr/local/lib/udev/rules.d'),Path('/usr/lib/udev/rules.d'),Path('/lib/udev/rules.d')]
+    effective={}
     for directory in directories:
-        if not directory.is_dir():continue
-        for path in directory.glob('*.rules'):
-            try:
-                resolved=path.resolve()
-                if resolved in seen:continue
-                seen.add(resolved)
-                # The /etc replacement shadows same-named rules in lower-priority dirs.
-                if path.name=='83-typec.rules':continue
-                lines=[line for line in path.read_text().splitlines() if not line.lstrip().startswith('#')]
-                content='\n'.join(lines)
-                if (re.search(r'(typec_usb2\.sh|usbdevice\b|fc000000\.usb)',content)
-                        or (re.search(r'SUBSYSTEMS?\s*==\s*["\']typec["\']',content)
-                            and re.search(r'\bRUN\s*[+:]?=',content))):
-                    bad.append(str(path))
-            except OSError:raise RuntimeError('Cannot inspect udev rule: '+str(path))
+        try:
+            info=directory.stat()
+        except FileNotFoundError as exc:
+            if directory.is_symlink():raise RuntimeError('Cannot inspect udev directory: '+str(directory)) from exc
+            continue
+        except OSError as exc:
+            raise RuntimeError('Cannot inspect udev directory: '+str(directory)) from exc
+        try:
+            if not stat.S_ISDIR(info.st_mode):raise OSError('not a directory')
+            with os.scandir(directory) as entries:
+                paths=sorted(Path(entry.path) for entry in entries if entry.name.endswith('.rules'))
+        except OSError as exc:
+            raise RuntimeError('Cannot inspect udev directory: '+str(directory)) from exc
+        for path in paths:
+            effective.setdefault(path.name,path)
+    for name,path in (planned or {}).items():
+        if Path(name).name!=name or not name.endswith('.rules'):raise RuntimeError('Invalid planned udev rule name')
+        effective[name]=Path(path)
+    bad=[]
+    for path in effective.values():
+        try:
+            resolved=path.resolve(strict=True)
+            if path.is_symlink() and resolved==Path('/dev/null'):continue
+            if not resolved.is_file():raise OSError('not a regular rule file')
+            lines=[line for line in path.read_text().splitlines() if not line.lstrip().startswith('#')]
+            content='\n'.join(lines)
+            if (re.search(r'(typec_usb2\.sh|usbdevice\b|fc000000\.usb)',content)
+                    or (re.search(r'SUBSYSTEMS?\s*==\s*["\'](?:typec|android_usb)["\']',content)
+                        and re.search(r'\b(?:RUN(?:\{[^}]+\})?|PROGRAM|IMPORT(?:\{[^}]+\})?)\s*[+:]?=',content))):
+                bad.append(str(path))
+        except (OSError,UnicodeError,RuntimeError) as exc:
+            raise RuntimeError('Cannot inspect udev rule: '+str(path)) from exc
     return sorted(set(bad))
+
+def preflight_targets(operations):
+    """Reject existing or broken target symlinks before any backup or write."""
+    for _,target,_ in operations:
+        if target.is_symlink():raise RuntimeError('Refusing to overwrite a symlink: '+str(target))
 
 def usb_adb():
     bundled=USB_ROOT/'root/usr/bin/adb'
@@ -108,8 +135,9 @@ def main():
     allowed,reason=host_module.CaptureGuard(root/'orangepi').allowed()
     if not allowed:parser.error('Finish capture/initialization and use the active station root before installing: '+reason)
     subprocess.run(['/usr/sbin/visudo','-cf',str(root/'deployment/sudoers/collector-usb-task-import')],check=True,timeout=10)
-    conflicting=unsafe_typec_rules()
+    conflicting=unsafe_typec_rules(planned={name:root/'deployment/udev'/name for name in ('61-usbdevice.rules','83-typec.rules')})
     if conflicting:parser.error('Other USB role-changing udev rules require review: '+', '.join(conflicting))
+    preflight_targets(operations)
     backup=Path('/var/backups/baai-ego-collect')/datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
     legacy=Path('/usr/local/bin/typec_usb2.sh')
     if legacy.is_file():
