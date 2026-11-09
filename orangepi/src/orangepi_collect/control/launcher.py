@@ -564,6 +564,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             message='设备扫描未完成：'+reason+'。请检查设备后重新扫描。'
             self.last_help=[message]
             self.scan_ok=False;self.scan_available=[];self.selected_devices=None
+            self.scan_retry_pending=True
             # Retain identities for diagnosis, without presenting old readiness
             # as current evidence or permitting a stale device confirmation.
             self.last_scan=[dict(item,connected=False,status='scan_failed',error=message)
@@ -581,6 +582,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         print('DEVICE SCAN '+json.dumps({'announce':announce,'changed':changed,'previous_state':previous_state,
             'before':old_signature,'after':new_signature},ensure_ascii=False),flush=True)
         self.last_scan=scan
+        self.scan_retry_pending=False
         self.last_help=[]
         self.web_config=devices()
         self.last_device_scan=time.monotonic()
@@ -859,7 +861,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         current=fingerprint(settings)
         changed=current!=getattr(self,'usb_fingerprint',None)
         pending=any(x.get('present') and not x['connected'] for x in getattr(self,'last_scan',[]))
-        retry=pending and now-getattr(self,'last_device_scan',0)>=settings.get('retry_no_data_seconds',15)
+        retry=(pending or getattr(self,'scan_retry_pending',False)) and now-getattr(self,'last_device_scan',0)>=settings.get('retry_no_data_seconds',15)
         if changed or retry:
             self.scan_devices(announce=False)
             if self.keyboard:self.keyboard.discard()

@@ -57,7 +57,8 @@
   discard.onclick=event=>{event.stopPropagation();if(!discard.disabled)options.discard?.(view?.snapshot||latest);};
   function paint(){
    const s=view?.snapshot||latest,p=s?.privacy,canStop=view?.canStop===true;let value='正在同步采集状态';
-   if(p?.stop_confirmed)stopping=false;
+   if(p?.stop_confirmed||view?.stopError)stopping=false;
+   else if(view?.stopPending)stopping=true;
    const truth=global.describePiCaptureState(s,{stale:!s||view?.stale!==false,localStop:stopping});
    value=truth.title;
    qcCard.hidden=!(s?.state==='finalizing'&&truth.stopped);
@@ -74,6 +75,7 @@
    else if(!view?.stale&&p?.phase==='fault')value='采集异常 · 停止状态待确认';
    else if(view?.localStart)value='正在确认开始请求';
    if(modeTarget&&p?.required===false&&s?.worker?.recording_active!==true&&!['recording','countdown'].includes(s?.state))value='正在切换到'+(modeTarget==='eeg'?'脑电版':'肌电版')+'\n正在重新连接，请稍候。';
+   if(view?.stopError&&!truth.stopped)value='停止未确认 · 请长按重试\n'+view.stopError;
    if(renderFault)value='页面显示异常 · 请刷新网页\n'+truth.title;
    cover.dataset.captureState=truth.title;
    cover.dataset.renderFault=renderFault?'true':'false';

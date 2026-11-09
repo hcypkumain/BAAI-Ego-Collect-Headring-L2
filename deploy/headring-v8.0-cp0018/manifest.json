@@ -1,0 +1,121 @@
+{
+  "version": "headring-integrated-20261109-v8.0",
+  "allowed_devices": [
+    "cp_0018"
+  ],
+  "collector": [
+    {
+      "relative": "orangepi/src/orangepi_collect/control/dashboard.html",
+      "before": "562a8a9b86f0579aec16530d3fbd9951cb3f65a13aa1062ee31f8d58569509d0",
+      "after": "beacb92f138ebd2d8d9dc7c83995db9bb1d22131afb11bdfa2c51eadf7f2ab25"
+    },
+    {
+      "relative": "orangepi/src/orangepi_collect/control/dashboard.py",
+      "before": "ca0894eba7a29170c3ab9265dd8b94b9fde2567e4099b391ea92ef6512cf7ccd",
+      "after": "e97d25ef41455f5c67a3ab35c304ea321b2c2f9bd4792a099082deb899e89121"
+    },
+    {
+      "relative": "orangepi/src/orangepi_collect/control/phone_recording.js",
+      "before": "117606c338315ea373b52b3fc96ad7cbc3e900a89cb92a857bd25e148d3807ae",
+      "after": "16e8ebdc8ef44c6226b13e713ad99418f7fc191706a257a5613070ae848b647a"
+    },
+    {
+      "relative": "orangepi/src/orangepi_collect/recorders/camera/frame_queue.py",
+      "before": null,
+      "after": "c9e61ed15a76f90b24bb57d8009e751b3f5d21cb1be6bd0a8a8081b190648f49"
+    },
+    {
+      "relative": "orangepi/src/orangepi_collect/recorders/camera/mpp_camera_recorder.py",
+      "before": "6cf1df606e23db03159b5f55cd961f825a0f3636f0ef5f910b0c05c6aa69d495",
+      "after": "b3c1d8b00d6639a72c6c06edb184542a4815e78add42d5059abfb9237185c508"
+    },
+    {
+      "relative": "orangepi/src/orangepi_collect/control/launcher.py",
+      "before": "660693b0e8116ccce147fe52ebee1523c39bde73b958ae6bb82a329585389c61",
+      "after": "904adc28c68947697a3a127d216d1edfb683803e84a616647e54a044fd06336b"
+    },
+    {
+      "relative": "orangepi/src/orangepi_collect/control/daily_collection.py",
+      "before": "fcf102dc606f1735e00fe53056c9f5dd80dfdd238fd52017b1faafd50d232890",
+      "after": "fcf102dc606f1735e00fe53056c9f5dd80dfdd238fd52017b1faafd50d232890"
+    },
+    {
+      "relative": "orangepi/src/orangepi_collect/control/phone_shell.js",
+      "before": "918ddb8c72bc5abbb42200f730aba16a8df35e85a6700bc096a8654c5d58ca9f",
+      "after": "918ddb8c72bc5abbb42200f730aba16a8df35e85a6700bc096a8654c5d58ca9f"
+    },
+    {
+      "relative": "orangepi/runtime/fleet-release.json",
+      "before": "0b1a4092e64da0ee580dcd60dbe3dbe2452513c23eb73144d22f4798afac6935",
+      "after": "647dbed36d46fd19ce5bafd468c3ba57418c4eea78a71cbdcd4d67fe7defb5ab"
+    }
+  ],
+  "system": [
+    {
+      "name": "usb_phone_link.py",
+      "target": "/home/orangepi/maintenance/usb-phone-adb/usb_phone_link.py",
+      "before": "90d9f0211f01e279caaa6ab3d6b217eb3d8d1792a6303f81cc29a7f53f05930c",
+      "after": "2289dac4638856288fa3cd1b5409822a8c54d7ee8594f6869f294fc2e46ab740",
+      "mode": 420
+    },
+    {
+      "name": "mount-readonly",
+      "target": "/usr/local/lib/collector-usb-task-import/mount-readonly",
+      "before": "794bd238d1971dd40d76828535a0918efd7efccc1b750c991773a84263dd41cc",
+      "after": "b13fc5a0c63269060d4f0fdf3ad556d9417e8522676d4cbdec5b698944b111d0",
+      "mode": 493
+    },
+    {
+      "name": "headring-usb-data-host",
+      "target": "/usr/local/sbin/headring-usb-data-host",
+      "before": "7d9ab79291ca2649320a763f4f6509bc821f03753b71ff6c4917882a7a329d7a",
+      "after": "67330a70974159a4c1a229f3ed15d60dc734ab583ddbc874a699009df8842ed2",
+      "mode": 493
+    },
+    {
+      "name": "usb-phone-link.service",
+      "target": "/etc/systemd/system/usb-phone-link.service",
+      "before": "52b75f55deffacb29b21e48884ff37dba7d2b413983d6d7ab95e2179098a6002",
+      "after": "bbbea27b539ddac29c02af9c72406d9a4a8ce420dadce69a5bccc8152c8e906d",
+      "mode": 420
+    },
+    {
+      "name": "collector-usb-task-mount.service",
+      "target": "/etc/systemd/system/collector-usb-task-mount.service",
+      "before": "8af99807e47dd2d7bb10e0005c70536566d46a5ae858960b49bcf96cf258cdbe",
+      "after": "8af99807e47dd2d7bb10e0005c70536566d46a5ae858960b49bcf96cf258cdbe",
+      "mode": 420
+    },
+    {
+      "name": "collector-usb-task-mount.timer",
+      "target": "/etc/systemd/system/collector-usb-task-mount.timer",
+      "before": null,
+      "after": "ea3def3890efab1d3c114af09778ad70012be8f7b0e6f719cf8386a0c9a13283",
+      "mode": 420
+    },
+    {
+      "name": "70-headring-adb-access.rules",
+      "target": "/etc/udev/rules.d/70-headring-adb-access.rules",
+      "before": null,
+      "after": "2eccb749b864d7db667f8439ea3da7510fa45c5ce177044cfaf81ae7e99578ce",
+      "mode": 420
+    },
+    {
+      "name": "72-collector-usb-task-import.rules",
+      "target": "/etc/udev/rules.d/72-collector-usb-task-import.rules",
+      "before": "f664e35fa0e87fe3a85351573269b17ba167a05dc6084a6fd4730a33f78c7f31",
+      "after": "2745b19f2c1b9d1aad58e56124034981e64a77b5a89d0461664cfd9a7ecb4356",
+      "mode": 420
+    }
+  ],
+  "remove": [
+    {
+      "target": "/etc/udev/rules.d/70-pi-bound-phone.rules",
+      "before": null
+    },
+    {
+      "target": "/etc/systemd/system/usb-phone-link.service.d/10-own-phone-binding.conf",
+      "before": "9d10bd180dc5f1e277e859e54c6188fc9679347060497742da907003d907f491"
+    }
+  ]
+}

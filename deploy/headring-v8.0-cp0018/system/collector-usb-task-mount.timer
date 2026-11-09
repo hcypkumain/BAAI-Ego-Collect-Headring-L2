@@ -1,0 +1,11 @@
+[Unit]
+Description=Retry delayed USB filesystem discovery and hotplug mounts
+
+[Timer]
+OnBootSec=8s
+OnUnitInactiveSec=5s
+AccuracySec=1s
+Unit=collector-usb-task-mount.service
+
+[Install]
+WantedBy=timers.target

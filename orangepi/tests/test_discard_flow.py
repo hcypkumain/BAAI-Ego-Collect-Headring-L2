@@ -24,14 +24,14 @@ class Native:
     def poll(self):return self.returncode
     def write(self,line):
         if line.strip()=='STOP':
-            (self.root/'capture_summary.json').write_text(json.dumps({'status':'success','errors':[],'eeg':{'samples':500}}))
+            (self.root/'capture_summary.json').write_text(json.dumps({'status':'success','errors':[],'emg_right':{'samples':500}}))
             self.returncode=0
 
 
 class RecorderDecisionTests(unittest.TestCase):
     def run_protocol(self,decision,assert_wait=True):
         with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp);(root/'meta.yaml').write_text('{}');(root/'meta.json').write_text('{"qc_mode":"immediate"}')
+            root=Path(temp);(root/'meta.yaml').write_text('{}')
             rec=fr.PiBundleRecorder.__new__(fr.PiBundleRecorder)
             rec.config=SimpleNamespace(session_dir=str(root),stdin_control=True,wait_for_save=True,duration=0)
             rec.stop_event=threading.Event();rec._commit_evt=threading.Event();rec.process=Native(root)
@@ -39,7 +39,7 @@ class RecorderDecisionTests(unittest.TestCase):
             def record():
                 try:rec._record()
                 except BaseException as exc:errors.append(exc)
-            summary={'status':'success','errors':[],'eeg':{'samples':475}}
+            summary={'status':'success','errors':[],'emg_right':{'samples':475}}
             report=SimpleNamespace(level='INFO')
             with patch.object(fr.sys,'stdin',incoming),patch.object(fr,'standardize',return_value=summary) as standardize, \
                  patch.object(fr,'check_session',return_value=report) as qc, \
@@ -65,7 +65,7 @@ class RecorderDecisionTests(unittest.TestCase):
                     self.assertFalse(thread.is_alive());self.assertEqual(errors,[])
                     actual=json.loads((root/'capture_summary.json').read_text())
                     if decision=='KEEP':
-                        standardize.assert_called_once();qc.assert_called_once();self.assertEqual(actual['eeg']['samples'],475)
+                        standardize.assert_called_once();qc.assert_called_once();self.assertEqual(actual['emg_right']['samples'],475)
                         self.assertEqual(actual['status'],'success')
                     else:
                         standardize.assert_not_called();qc.assert_not_called();self.assertTrue(actual['qc_skipped'])
@@ -132,7 +132,7 @@ class DiscardStoreTests(unittest.TestCase):
 
 
 class ControllerDiscardTests(unittest.TestCase):
-    def test_retry_reaps_deletes_and_waits_for_manual_preparation(self):
+    def test_retry_reaps_and_deletes_before_preparing_same_reference(self):
         with tempfile.TemporaryDirectory() as temp:
             c=launcher.Controller.__new__(launcher.Controller);c.path=Path(temp);old=c.path
             c.state='confirm_stop';c.dashboard=SimpleNamespace(privacy=SimpleNamespace(snapshot=lambda:{'required':False}))
@@ -143,7 +143,7 @@ class ControllerDiscardTests(unittest.TestCase):
             c.recording_store.discard_current.side_effect=lambda path:events.append('delete')
             c.prepare.side_effect=lambda:events.append('prepare')
             c.discard_and_retry()
-            self.assertEqual(events,['reap','delete']);c.prepare.assert_not_called();c.recording_store.discard_current.assert_called_once_with(old)
+            self.assertEqual(events,['reap','delete','prepare']);c.recording_store.discard_current.assert_called_once_with(old)
             self.assertIsNone(c.path);self.assertEqual(c._reference_reap_outcome,'discarded')
             self.assertEqual(json.loads((old/'discard_request.json').read_text())['session_id'],old.name)
 

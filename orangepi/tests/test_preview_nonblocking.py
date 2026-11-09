@@ -36,7 +36,6 @@ class PreviewTests(unittest.TestCase):
             try:
                 self.pub.camera('cam_left_wrist', b'\xff\xd8test')
                 self.pub.emg('emg_left', frame())
-                self.pub.eeg([[0.] * 8], [True], [str(i) for i in range(8)], 'none', 100.)
             except BaseException as exc:
                 errors.append(exc)
             finally:
@@ -49,7 +48,7 @@ class PreviewTests(unittest.TestCase):
         worker.join(2.)
         self.assertTrue(completed_under_contention, 'Producer waited for preview lock')
         self.assertFalse(errors)
-        self.assertEqual(dict(self.pub.skipped_updates), {'cam_left_wrist': 1, 'emg_left': 1, 'eeg': 1})
+        self.assertEqual(dict(self.pub.skipped_updates), {'cam_left_wrist': 1, 'emg_left': 1})
 
     def test_slow_json_writer_does_not_block_new_preview_updates(self):
         self.pub.emg('emg_left', frame())
@@ -95,23 +94,12 @@ class PreviewTests(unittest.TestCase):
         self.pub._publish_once()
         self.assertEqual((Path(self.temp.name) / 'cam_left_wrist.jpg').read_bytes(), b'\xff\xd8new')
 
-    def test_eeg_metadata_and_finite_channel_bounds_are_preserved(self):
-        self.pub.eeg([[0., float('nan'), 2., 3., 4., 5., 6., 7.], [0., -1., 4., 3., 4., 5., 6., 7.]],
-                     [True, True], ['time'] + ['channel' + str(i) for i in range(1, 8)], 'none', 100.)
-        self.pub._publish_once()
-        value = json.loads((Path(self.temp.name) / 'eeg.json').read_text())
-        self.assertEqual(value['rows'][0][1][0], [0., 0.])
-        self.assertEqual(value['rows'][0][1][1], [-1., -1.])
-        self.assertEqual(value['rows'][0][1][2], [2., 4.])
-        self.assertEqual(value['physical_channels'], list(range(1, 9)))
-        self.assertEqual(value['count'], 2)
 
     def test_no_preview_directory_has_no_file_or_signal_side_effect(self):
         with patch.dict('os.environ', {}, clear=True):
             pub = live_preview.Publisher()
         pub.camera('cam_left_wrist', b'\xff\xd8')
         pub.emg('emg_left', frame())
-        pub.eeg([[0.] * 8], [True], ['x'] * 8, 'none', 100.)
         self.assertFalse(pub.pending)
         self.assertFalse(pub.signals)
         pub.close()

@@ -1,0 +1,17 @@
+{
+  "version": "headring-integrated-20261109-v8.0",
+  "device": "18",
+  "previous_version": "headring-unified-20261109-v5",
+  "base_git_commit": "460c04cb719aca5d73bfe518748bd636c632e2cf",
+  "installed": true,
+  "features": [
+    "usb-readonly-task-import",
+    "authorized-multi-device-adb",
+    "port-recovery",
+    "startup-page-state",
+    "failed-scan-retry",
+    "stop-feedback",
+    "bounded-camera-buffer",
+    "saved-daily-duration"
+  ]
+}

@@ -11,6 +11,7 @@ from recording_store import atomic_json, bounded, CST
 from qc_details import summarize_qc
 
 SAFE = frozenset(('device_confirm', 'idle', 'failed_wait', 'exhausted', 'confirm_stop'))
+REFRESH_SAFE = SAFE | frozenset(('ready',))
 
 
 def load(path):
@@ -64,9 +65,16 @@ def take_snapshot(store, path, ledger_cache=None):
                 findings=findings, uploaded=False, local_cleaned=False)
 
 
-def portions(row):
+def saved_recording(row):
+    """Saved acquisition time is independent of a later host QC verdict."""
+    return bool(row.get('retained') and row.get('has_data') and
+                row.get('status') not in ('deleted', 'discarded', 'cancelled', 'unconfirmed') and
+                not row.get('read_error') and not row.get('source_missing'))
+
+
+def portions(row, include_saved=False):
     """Split elapsed recording time at Beijing midnight, independent of host TZ."""
-    if not row.get('qualified'):
+    if not (saved_recording(row) if include_saved else row.get('qualified')):
         return {}
     start, seconds = row.get('start'), row.get('duration')
     if not number(start) or not number(seconds) or seconds <= 0:
@@ -101,15 +109,15 @@ class DailyCollection:
             self.thread = threading.Thread(target=self._run, name='daily-collection', daemon=True)
             self.thread.start()
 
-    def busy(self):
+    def busy(self, refresh=False):
         state = self.display_state()
-        return (state.get('state') not in SAFE or (state.get('privacy') or {}).get('required') or
+        return (state.get('state') not in (REFRESH_SAFE if refresh else SAFE) or (state.get('privacy') or {}).get('required') or
                 (state.get('worker') or {}).get('recording_active') is True)
 
     def _run(self):
         while not self.stop.is_set():
             try:
-                if not self.busy():
+                if not self.busy(refresh=True):
                     self.refresh()
             except Exception as error:
                 with self.lock:
@@ -117,6 +125,8 @@ class DailyCollection:
             self.stop.wait(5)
 
     def refresh(self):
+        if self.busy(refresh=True):
+            return False
         if not self.refresh_lock.acquire(False):
             return False
         try:
@@ -130,7 +140,7 @@ class DailyCollection:
             # All shifts, including previous days; no raw signal/video contents read.
             paths = list((volume / 'data').glob('*/*')) + list((volume / 'deleted-recordings').glob('*'))
             for path in paths:
-                if self.busy():
+                if self.busy(refresh=True):
                     return False
                 if path.is_symlink() or not path.is_dir():
                     continue
@@ -191,6 +201,8 @@ class DailyCollection:
                 if identifier not in live and not row.get('local_cleaned'):
                     row['qualified'] = False
                     row['source_missing'] = True
+            if self.busy(refresh=True):
+                return False
             updated = self.clock()
             with self.lock:
                 changed = records != self.records or not self.path.is_file()
@@ -208,9 +220,16 @@ class DailyCollection:
         with self.lock:
             rows = copy.deepcopy(list(self.records.values()))
             updated, error = self.updated, self.error
-        rows = [r for r in rows if r.get('day') == day or day in portions(r)]
+        rows = [r for r in rows if r.get('day') == day or day in portions(r) or day in portions(r, include_saved=True)]
         qualified = [r for r in rows if r.get('qualified') and portions(r).get(day, 0) > 0]
+        saved = [r for r in rows if portions(r, include_saved=True).get(day, 0) > 0]
+        pending = [r for r in saved if r.get('status') == 'pending_qc' and not r.get('qualified')]
+        other = [r for r in saved if not r.get('qualified') and r.get('status') != 'pending_qc']
+        saved_seconds = lambda values: sum(portions(r, include_saved=True).get(day, 0) for r in values)
         return dict(day=day, timezone='Asia/Shanghai', total_seconds=sum(portions(r).get(day, 0) for r in qualified),
+                    saved_seconds=saved_seconds(saved), saved_count=len(saved),
+                    pending_qc_seconds=saved_seconds(pending), pending_qc_count=len(pending),
+                    saved_unqualified_seconds=saved_seconds(other), saved_unqualified_count=len(other),
                     qualified_count=len(qualified), pass_count=sum(r.get('qc_level') == 'INFO' for r in qualified),
                     warn_count=sum(r.get('qc_level') == 'WARN' for r in qualified),
                     updated_at=updated, error=error, ready=updated is not None, rows=sorted(rows, key=lambda r:(r['start'], r['id'])))
@@ -227,8 +246,11 @@ class DailyCollection:
                  '  有数据但缺 QC 报告 %d 条（?，不计入无误比例）' % sum(r.get('has_data') and not r.get('qc_done') for r in rows),
                  ('  无误数据：%d/%d (%.1f%%) · 分母 = 有数据且跑过 QC 的录制' % (len(clean), len(measured), 100 * len(clean) / len(measured))) if measured else '  无误数据：0/0（暂无可计算比例的数据）',
                  '  合格可推送录制：%d 条（通过 %d · WARN %d）' % (data['qualified_count'], data['pass_count'], data['warn_count']),
+                 '  已保存采集时长：%.1f 分钟（%.1f 秒） · %d 段' % (data['saved_seconds'] / 60, data['saved_seconds'], data['saved_count']),
+                 '  其中待主机质检：%.1f 秒 · %d 段；已保存未合格/未确认质检：%.1f 秒 · %d 段' % (data['pending_qc_seconds'], data['pending_qc_count'], data['saved_unqualified_seconds'], data['saved_unqualified_count']),
                  '  有效录制时长合计：%.1f 分钟（%.1f 秒）' % (data['total_seconds'] / 60, data['total_seconds']),
-                 '  口径：确认保留且通过/WARN；不含待确认、ERROR、放弃或删除；跨午夜按实际秒数分日。',
+                 '  已保存时长：确认保留且有数据，包括待主机质检；不含未保存、放弃或删除；跨午夜按实际秒数分日。',
+                 '  合格时长：确认保留且通过/WARN；待主机质检、ERROR不计入合格。',
                  '  已上传并清理本地副本的数据仍计入；✓表示QC无ERROR，不等于已确认保存。', '']
         for severity, heading, limit in [('ERROR', '错误（按检查项 → 流）', None), ('WARN', '警告（按检查项 → 流，前 10）', 10)]:
             groups = defaultdict(lambda:dict(count=0, sessions=set(), streams=Counter()))
@@ -249,7 +271,7 @@ class DailyCollection:
         lines.append('  明细（全部尝试，按时间；结局 = 保留/未成功保留/重采或放弃/删除/待确认）：')
         for row in rows:
             symbol = '∅' if not row.get('has_data') else '?' if not row.get('qc_done') else '✗' if row.get('qc_level') == 'ERROR' else '✓'
-            outcome = '重采/放弃' if row.get('status') == 'discarded' else '删除' if row.get('status') == 'deleted' else '保留' if row.get('qualified') else '未成功保留' if row.get('retained') else '待确认/失败'
+            outcome = '重采/放弃' if row.get('status') == 'discarded' else '删除' if row.get('status') == 'deleted' else '保留' if row.get('qualified') else '已保存/待主机质检' if saved_recording(row) and row.get('status') == 'pending_qc' else '未成功保留' if row.get('retained') else '待确认/失败'
             time_label = dt.datetime.fromtimestamp(row['start'], CST).strftime('%Y-%m-%d-%H-%M-%S')
             lines.append('    %s %s  任务[%s]  %.1fs  %s  %s  %d ERROR · %d WARN%s  [%s]' %
                          (symbol, time_label, row['reference'], row['duration'], row.get('qc_level') or '未QC', outcome,

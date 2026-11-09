@@ -20,8 +20,6 @@ class ActionTests(unittest.TestCase):
     def ui(self, state='idle', can_change=True):
         ui=dashboard.Dashboard.__new__(dashboard.Dashboard)
         ui.lock=threading.Lock();ui.busy=False;ui.prompting=False
-        ui.privacy=Mock()
-        ui.privacy.snapshot.return_value={'required':False,'stop_confirmed':True,'phase':'idle'}
         ui.pending=None;ui.result=None
         ui.snapshot={'state':state,'revision':4,
                      'wrist_camera_settings':{'can_change':can_change}}
@@ -57,8 +55,6 @@ class ActionTests(unittest.TestCase):
 class ControllerTests(unittest.TestCase):
     def controller(self, state='idle'):
         c=web_controls.WebControls()
-        c.voice=Mock()
-        c.OwnerExited=type('OwnerExited',(RuntimeError,),{})
         c.state=state;c.ui_revision=4;c.worker=None;c.keyboard=None
         c.dashboard=Mock();c.dashboard.take.return_value={'action':'wrist_camera_settings','revision':4,'value':False}
         c.ui_publish=Mock();c.ensure_preview=Mock();c.state_write=Mock()

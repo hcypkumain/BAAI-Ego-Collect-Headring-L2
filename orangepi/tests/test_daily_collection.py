@@ -86,6 +86,56 @@ class DailyTests(unittest.TestCase):
     def test_day_rollover_and_invalid_dates(self):
         self.make('one');self.daily.refresh();self.now+=86400;self.assertEqual(self.daily.snapshot()['total_seconds'],0)
         with self.assertRaises(ValueError):self.daily.snapshot('../../bad')
+    def pending(self,name='pending',duration=60,start=None):
+        p=self.make(name,duration=duration,start=start)
+        for filename in ['meta.json','capture_summary.json']:
+            data=json.loads((p/filename).read_text())
+            data.update(status='pending_qc',qc_level=None,qc_state='pending',reference_attempt_succeeded=False)
+            (p/filename).write_text(json.dumps(data))
+        (p/'qc_report.json').unlink()
+        return p
+    def test_saved_pending_counts_without_qualifying(self):
+        self.pending();self.daily.refresh();s=self.daily.snapshot()
+        self.assertEqual((s['saved_seconds'],s['saved_count'],s['pending_qc_seconds'],s['pending_qc_count']),(60,1,60,1))
+        self.assertEqual((s['total_seconds'],s['qualified_count']),(0,0))
+        self.assertIn('已保存/待主机质检',self.daily.text())
+    def test_pending_midnight_and_restart(self):
+        start=dt.datetime(2026,11,3,23,59,30,tzinfo=CST).timestamp()
+        self.pending(duration=90,start=start);self.daily.refresh()
+        self.assertEqual(self.daily.snapshot('2026-11-03')['saved_seconds'],30)
+        restarted=DailyCollection(self.store.base,self.store,lambda:self.state,clock=lambda:self.now,autostart=False)
+        self.assertEqual(restarted.snapshot()['pending_qc_seconds'],60)
+    def test_qc_completion_does_not_double_count_saved(self):
+        p=self.pending();self.daily.refresh()
+        meta=json.loads((p/'meta.json').read_text());meta.update(status='success',reference_attempt_succeeded=True,qc_level='WARN')
+        summary=json.loads((p/'capture_summary.json').read_text());summary.update(status='success',qc_level='WARN')
+        for name,value in [('meta.json',meta),('capture_summary.json',summary),('qc_report.json',dict(level='WARN'))]:
+            (p/name).write_text(json.dumps(value))
+        self.daily.refresh();s=self.daily.snapshot()
+        self.assertEqual((s['saved_seconds'],s['total_seconds'],s['pending_qc_seconds']),(60,60,0))
+    def test_failed_kept_is_saved_but_never_qualified(self):
+        self.make('kept-error',level='ERROR');self.daily.refresh();s=self.daily.snapshot()
+        self.assertEqual((s['saved_seconds'],s['saved_unqualified_seconds'],s['total_seconds']),(60,60,0))
+    def test_unconfirmed_empty_deleted_and_missing_excluded_from_saved(self):
+        self.make('unconfirmed',kept=False);p=self.pending();self.make('empty',duration=0)
+        self.daily.refresh();self.assertEqual(self.daily.snapshot()['saved_seconds'],60)
+        import shutil;shutil.rmtree(p)
+        self.daily.refresh();self.assertEqual(self.daily.snapshot()['saved_seconds'],0)
+    def test_legacy_cache_immediately_counts_pending(self):
+        p=self.pending();self.daily.records={'pending':take_snapshot(self.store,p)};self.daily.updated=self.now
+        self.assertEqual(self.daily.snapshot()['saved_seconds'],60)
+    def test_ready_refreshes_but_active_recording_does_not(self):
+        self.pending();self.state['state']='ready';self.assertTrue(self.daily.refresh())
+        self.assertEqual(self.daily.snapshot()['saved_seconds'],60)
+        self.pending('new');self.state['worker']['recording_active']=True
+        self.assertFalse(self.daily.refresh());self.assertEqual(self.daily.snapshot()['saved_seconds'],60)
+        self.state['worker']={};self.state['privacy']['required']=True
+        self.assertFalse(self.daily.refresh())
+        self.state['privacy']['required']=False;self.state['state']='recording'
+        self.assertFalse(self.daily.refresh())
+    def test_unreadable_metadata_never_keeps_old_saved_time(self):
+        p=self.pending();self.daily.refresh();(p/'meta.json').write_text('broken')
+        self.daily.refresh();self.assertEqual(self.daily.snapshot()['saved_seconds'],0)
     def test_enqueue_saves_report_before_queueing_without_upload(self):
         from cloud_uploads import UploadManager
         self.make('one');self.store.path=lambda identifier:self.store.root/identifier

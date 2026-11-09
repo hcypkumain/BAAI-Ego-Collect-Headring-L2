@@ -77,7 +77,7 @@
   const profileCard=document.createElement('section');profileCard.className='card';profileCard.innerHTML='<h3>采集版本</h3><div class="actions"><button id="phone-mode-emg" data-action="collection_mode">肌电</button><button id="phone-mode-eeg" data-action="collection_mode">脑电</button></div><p id="phone-mode-note" class="phone-hint"></p>';pages.overview.prepend(profileCard);
   for(const mode of ['emg','eeg'])$('phone-mode-'+mode).onclick=()=>options.action('collection_mode',mode);
   pages.overview.insertBefore(taskCard,$('phone-native-metrics'));
-  const dailyCard=document.createElement('section');dailyCard.className='card phone-task-card';dailyCard.id='phone-daily-collection';dailyCard.innerHTML='<small>今日合格采集时长（北京时间）</small><b id="phone-daily-duration">正在读取…</b><p id="phone-daily-detail" class="phone-hint">确认保存且通过/WARN 后累计</p>';
+  const dailyCard=document.createElement('section');dailyCard.className='card phone-task-card';dailyCard.id='phone-daily-collection';dailyCard.innerHTML='<small id="phone-daily-label">今日已保存采集时长（北京时间）</small><b id="phone-daily-duration">正在读取…</b><p id="phone-daily-detail" class="phone-hint">确认保存后累计，待主机质检单独显示</p>';
   const dailyExport=button('导出今日汇总（TXT）',()=>downloadDaily().catch(error=>{text($('phone-daily-detail'),error.message);}));dailyExport.id='phone-daily-export';dailyCard.append(dailyExport);pages.overview.insertBefore(dailyCard,$('phone-native-metrics'));
   const problems=document.createElement('details');problems.id='phone-device-problems';problems.hidden=true;problems.innerHTML='<summary id="phone-device-problem-summary"></summary><ul id="phone-device-problem-list"></ul><button id="phone-open-diagnostics">查看设备与 USB 诊断</button>';
   pages.overview.insertBefore(problems,$('phone-overview-actions'));
@@ -264,8 +264,11 @@
    const muscleOnly=value.collection_mode==='emg';
    for(const tab of signalTabs.children)if(tab.dataset.signal==='eeg')tab.hidden=muscleOnly;
    if(muscleOnly&&signalId==='eeg'){signalId='emg_left';if(pageId==='signals')selectSignal(signalId);}
-   const daily=value.daily_collection||{};text($('phone-daily-duration'),daily.ready?clock(daily.total_seconds):'正在读取…');
-   text($('phone-daily-detail'),daily.error?'统计更新异常，显示上次结果：'+daily.error:daily.ready?(daily.day+' · '+daily.qualified_count+' 段（通过 '+daily.pass_count+' / WARN '+daily.warn_count+'） · 确认保存后计入'):'正在核对已保存数据');
+   const daily=value.daily_collection||{},savedDaily=Number.isFinite(daily.saved_seconds);
+   text($('phone-daily-label'),savedDaily?'今日已保存采集时长（北京时间）':'今日合格采集时长（北京时间）');
+   text($('phone-daily-duration'),daily.ready?clock(savedDaily?daily.saved_seconds:daily.total_seconds):'正在读取…');
+   const dailyDetail=daily.ready?(savedDaily?(daily.day+' · 已保存 '+daily.saved_count+' 段 · 待主机质检 '+clock(daily.pending_qc_seconds)+'（'+daily.pending_qc_count+' 段） · 已合格 '+clock(daily.total_seconds)+'（'+daily.qualified_count+' 段）'+(daily.saved_unqualified_count?' · 已保存未合格/未确认质检 '+clock(daily.saved_unqualified_seconds)+'（'+daily.saved_unqualified_count+' 段）':'')):(daily.day+' · '+daily.qualified_count+' 段（通过 '+daily.pass_count+' / WARN '+daily.warn_count+'） · 待质检时长将在统计服务更新后显示')):'正在核对已保存数据';
+   text($('phone-daily-detail'),dailyDetail+(daily.error?' · 统计更新异常，显示上次结果：'+daily.error:''));
    dailyExport.disabled=!safe()||!['device_confirm','idle','failed_wait','exhausted','confirm_stop'].includes(value.state);
    const label=$('title').textContent;text($('phone-home-title'),label);text(stateLabel,label);
    const deviceHint=value.state==='device_confirm'?'确认将使用当前扫描到的已连接设备，请先核对下方清单':value.state==='discarding'?'正在停止设备并清理本段文件，完成后等待手动准备':value.busy?'Pi 正在执行流程，请等待':value.state==='finalizing'?'文件收尾与 QC：'+(value.worker?.progress?.completed||0)+' / '+(value.worker?.progress?.total||'—'):'采集流程由 Orange Pi 统一管理';

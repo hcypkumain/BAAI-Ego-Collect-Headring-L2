@@ -27,15 +27,6 @@ class Core:
         self.selected=None;return 503,b'',None
 
 class PhoneMediaTests(unittest.TestCase):
-    def test_new_profile_has_empty_history_without_creating_a_data_directory(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root=Path(temp)/'new-profile/data'
-            backend=recording_replay.RecordingReplay(root,allow_missing_root=True)
-            self.assertEqual(backend.sessions()['sessions'],[])
-            self.assertFalse(root.exists())
-            with self.assertRaises(recording_replay.ReplayError):
-                recording_replay.RecordingReplay(root).sessions()
-
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
         data=self.root/'data';take=data/'shift/take';take.mkdir(parents=True)

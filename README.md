@@ -95,3 +95,7 @@ orangepi/.venvs/hardware/bin/python orangepi/tests/test_phone_media_service.py
 - [第三方运行文件说明](THIRD_PARTY_NOTICES.md)
 
 当前仓库不是原始录制数据或任务完成进度的备份；这些数据需要另外保存。
+
+## Head ring v8.0 on cp_0018
+
+See [the v8.0 deployment notes](docs/release-v8.0.md) for the installed package, validation, and rollback guidance.

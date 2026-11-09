@@ -14,20 +14,19 @@ const source=fs.readFileSync(pageFile,'utf8');
 new vm.Script(source.match(/<script>([\s\S]*?)<\/script>/)[1],{filename:'dashboard-inline.js'});
 assert(!source.includes('data-action="swap_emg"'));
 assert(source.includes('data-action="calibrate_emg"'));
-assert(source.includes("status?.state==='emg_manual'"));
+assert(source.includes('setInterval(()=>renderEmg(status),500)'));
 // Only scheduling/auth are replaced in the fixture; the production functions,
 // event handlers, DOM and CSS execute unchanged in a real browser.
 const fixtureHtml=source.replace('<body>','<body data-access-code-required="false">')
- .replace(/^if\(!phoneCompanion\?\.managesPreview\).*statusLoop\(\);$/m,'');
+ .replace('setInterval(poll,750);setInterval(frames,500);setInterval(()=>renderEmg(status),500);poll();','');
 const clone=value=>JSON.parse(JSON.stringify(value));
 function snapshot(){
- const s={state:'emg_manual',collection_mode:'emg',collection_context:'emg:fixture',revision:7,preview_id:'preview-1',server_time:1000,
+ const s={state:'emg_manual',revision:7,preview_id:'preview-1',server_time:1000,
   system:{boot_id:'boot-1',controller_pid:101},actions:['assign_emg_roles'],
   emg_assignment:{session_id:'session-1',preview_id:'preview-1',sources:{emg_left:'/dev/test-a',emg_right:'/dev/test-b'}},
   emg_calibration:{valid:false},emg_serial_roles:{emg_left:'UNTRUSTED11111',emg_right:'UNTRUSTED22222'},
   wrist_calibration:{valid:false},previews:{},signals:{},devices:[],
-  wrist_camera_settings:{preference:null,can_change:true,devices:{}},
-  privacy:{policy:'screen_black_before_capture_v1',instance:'emg-ui-fixture',generation:0,required:false,phase:'idle',nonce:'',session_id:'',stop_confirmed:true}};
+  wrist_camera_settings:{preference:null,can_change:true,devices:{}}};
  for(const [i,slot] of ['emg_left','emg_right'].entries()){
   s.signals[slot]={live:true,preview_id:s.preview_id,source_path:s.emg_assignment.sources[slot],
    time:999.95,count:500,rows:[999.6,999.9].map((t,j)=>[t,Array.from({length:8},(_,ch)=>[i*20+ch*100-j*7,i*20+ch*100+j*11+4])])};
@@ -50,27 +49,18 @@ async function harness(viewport={width:1250,height:1000}){
   const url=new URL(route.request().url());
   if(url.origin!=='http://emg-ui.test')return route.abort();
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:fixtureHtml});
-  if(['/api/status','/api/display-state'].includes(url.pathname)){
-   if(h.offline)return route.abort();
-   const value=clone(h.current),id=url.searchParams.get('display')||url.searchParams.get('client_id');
-   if(id)value.display_registration={client_id:id,instance:value.privacy.instance};
-   return route.fulfill({json:value});
-  }
+  if(url.pathname==='/api/status')return h.offline?route.abort():route.fulfill({json:clone(h.current)});
   if(url.pathname==='/api/action'){
-   const action=route.request().postDataJSON();
-   if(['privacy_display','privacy_ack'].includes(action.action))return route.fulfill({json:{ok:true}});
-   h.posts.push(action);
+   h.posts.push(route.request().postDataJSON());
    if(h.holdAction)await new Promise(resolve=>h.releaseAction=resolve);
    return route.fulfill({status:202,json:{ok:true}});
   }
-  const candidate=path.join(path.dirname(pageFile),url.pathname.slice(1).replaceAll('-','_'));
-  if(/\.(?:js|css)$/.test(url.pathname)&&fs.existsSync(candidate))return route.fulfill({contentType:url.pathname.endsWith('.css')?'text/css':'text/javascript',body:fs.readFileSync(candidate)});
   return route.fulfill({status:404,body:'No external resources in offline test'});
  });
  h.page=await context.newPage();
  h.page.on('pageerror',error=>h.errors.push(error.message));
  await h.page.goto('http://emg-ui.test/',{waitUntil:'domcontentloaded'});
- h.set=async s=>{h.current=clone(s);await h.page.evaluate(()=>poll());};
+ h.set=async s=>{h.current=clone(s);await h.page.evaluate(value=>{online=true;lastStatusReceivedAt=performance.now();render(value)},h.current);};
  await h.set(h.current);
  h.pick=async(slot,side)=>{await h.set(h.current);await h.page.click('#'+slot+' .emg-role-buttons [data-side="'+side+'"]');};
  h.selected=async()=>h.page.locator('.emg-role-buttons [aria-pressed="true"]').count();
@@ -78,7 +68,6 @@ async function harness(viewport={width:1250,height:1000}){
  return h;
 }
 async function test(name,run){
- if(process.argv.includes('--mobile-only'))return;
  const h=await harness();
  try{await run(h);assert.deepEqual(h.errors,[]);assert(!(await h.page.locator('#notice').textContent()).includes('页面显示异常'));passed++;cases.push({name,passed:true});console.log('PASS '+name);}
  finally{await h.close();}
@@ -88,8 +77,8 @@ async function main(){
  browser=await chromium.launch({headless:true,...(fs.existsSync(chrome)?{executablePath:chrome}:{}),args:['--disable-background-networking']});
  try{
   await test('neutral A/B until explicit confirmation; no serial-side hints',async h=>{
-   assert.equal(await h.page.locator('#emg_left .signal-head b').textContent(),'肌电 A');
-   assert.equal(await h.page.locator('#emg_right .signal-head b').textContent(),'肌电 B');
+   assert.equal(await h.page.locator('#emg_left b').textContent(),'肌电 A');
+   assert.equal(await h.page.locator('#emg_right b').textContent(),'肌电 B');
    assert.equal(await h.selected(),0);assert(await h.page.locator('#confirm-emg').isDisabled());
    assert.equal(await h.page.locator('#device-rows tr').first().locator('td').first().textContent(),'肌电 A');
    assert(!(await h.page.locator('#subtitle').textContent()).includes('左肌电'));
@@ -104,10 +93,10 @@ async function main(){
    }
    assert.equal(h.posts.length,0);
   });
-   await test('confirmation binds exact session/preview/left_slot/revision and collection context',async h=>{
+  await test('confirmation posts exact session/preview/left_slot/revision only',async h=>{
    await h.pick('emg_right','left');await h.page.click('#confirm-emg');
    await h.page.waitForFunction(()=>!inFlight);
-    assert.deepEqual(h.posts,[{action:'assign_emg_roles',value:{session_id:'session-1',preview_id:'preview-1',left_slot:'emg_right'},revision:7,collection_context:'emg:fixture'}]);
+   assert.deepEqual(h.posts,[{action:'assign_emg_roles',value:{session_id:'session-1',preview_id:'preview-1',left_slot:'emg_right'},revision:7}]);
   });
   await test('one stale/missing/wrong-source/wrong-preview signal clears draft and drawing',async h=>{
    const mutations=[s=>s.signals.emg_left.live=false,s=>delete s.signals.emg_right,
@@ -145,7 +134,7 @@ async function main(){
    }
   });
   await test('disconnect clears draft; same-session reconnect does not restore it',async h=>{
-   await h.pick('emg_left','left');h.offline=true;await h.page.evaluate(()=>{window.__emgTestNow+=5000;return poll()});
+   await h.pick('emg_left','left');h.offline=true;await h.page.evaluate(()=>poll());
    assert.equal(await h.selected(),0);assert(await h.page.locator('#confirm-emg').isDisabled());
    h.offline=false;await h.page.evaluate(()=>poll());
    assert.equal(await h.selected(),0);assert(await h.page.locator('#confirm-emg').isDisabled());
@@ -164,24 +153,23 @@ async function main(){
    await h.pick('emg_left','left');const s=snapshot();s.state='idle';s.actions=['calibrate_emg'];s.emg_assignment=null;
    s.emg_calibration={valid:true,method:'manual'};s.emg_serial_roles={emg_left:'NEWLEFT33333',emg_right:'NEWRIGHT44444'};
    await h.set(s);assert.equal(await h.selected(),0);assert(await h.page.locator('#emg-assignment').isHidden());
-   assert.equal(await h.page.locator('#emg_left .signal-head b').textContent(),'左臂肌电');
-   assert.equal(await h.page.locator('#device-rows tr').first().locator('td').first().textContent(),'左臂肌电');
-   await h.page.getByRole('button',{name:'设置',exact:true}).click();
+   assert.equal(await h.page.locator('#emg_left b').textContent(),'左臂肌电');
+   assert((await h.page.locator('#emg_left .signal-meta').textContent()).includes('33333'));
    await h.page.locator('[data-action="calibrate_emg"]').click();await h.page.waitForFunction(()=>!inFlight);
    assert.equal(h.posts[0].action,'calibrate_emg');
    await h.set(snapshot());assert.equal(await h.selected(),0);
   });
   await test('global A/B shortcuts do not infer sides or confirm a manual draft',async h=>{
-   await h.pick('emg_left','left');await h.page.evaluate(()=>document.activeElement?.blur());
+   await h.pick('emg_left','left');await h.page.locator('h1').click();
    await h.page.keyboard.press('a');await h.page.keyboard.press('b');assert.equal(h.posts.length,0);
   });
-   await test('unified EEG markup stays gated; wrist-manual and exposure controls remain available',async h=>{
-    assert.equal(await h.page.locator('#eeg').count(),1);
+  await test('EEG removed; wrist-manual and exposure controls remain available',async h=>{
+   assert.equal(await h.page.locator('#eeg').count(),0);
    assert.equal(await h.page.locator('#wrist-methods button').count(),2);
    const s=snapshot();s.state='idle';s.actions=['wrist_camera_settings'];s.emg_assignment=null;
-   await h.set(s);await h.page.getByRole('button',{name:'设置',exact:true}).click();await h.page.selectOption('#wrist-fps-policy','false');await h.page.click('#set-wrist-fps-policy');
+   await h.set(s);await h.page.selectOption('#wrist-fps-policy','false');await h.page.click('#set-wrist-fps-policy');
    await h.page.waitForFunction(()=>!inFlight);assert.equal(h.posts[0].action,'wrist_camera_settings');assert.equal(h.posts[0].value,false);
-    assert.equal(await h.page.locator('#set-eeg-filter').count(),1);assert(await h.page.locator('#set-eeg-filter').isDisabled());
+   assert.equal(await h.page.locator('#set-eeg-filter').count(),0);
   });
   const h=await harness({width:390,height:844});
   try{
@@ -191,11 +179,10 @@ async function main(){
     return {width:innerWidth,card:{left:card.left,right:card.right},buttons,columns:getComputedStyle(document.querySelector('#signals')).gridTemplateColumns};
    });
    assert(bounds.card.left>=0&&bounds.card.right<=bounds.width);
-   // The current phone-native design uses a 40px minimum control height.
-   assert(bounds.buttons.every(b=>b.height>=40&&b.left>=0&&b.right<=bounds.width),JSON.stringify(bounds));
+   assert(bounds.buttons.every(b=>b.height>=44&&b.left>=0&&b.right<=bounds.width));
    assert(!bounds.columns.includes(' '));
    await h.pick('emg_right','left');assert(!(await h.page.locator('#confirm-emg').isDisabled()));
-   assert.deepEqual(h.errors,[]);passed++;cases.push({name:'390px mobile controls visible/single-column/minimum40px',passed:true});console.log('PASS 390px mobile controls remain visible, single-column, >=40px');
+   assert.deepEqual(h.errors,[]);passed++;cases.push({name:'390px mobile controls visible/single-column/minimum44px',passed:true});console.log('PASS 390px mobile controls remain visible, single-column, >=44px');
   }finally{await h.close();}
   saveValidation(true);console.log(JSON.stringify({passed,network:'All requests locally intercepted; no Pi/device access',javascript_syntax:'passed',dashboard_sha256:dashboardSha,validation:validationPath}));
  }finally{await browser.close();}

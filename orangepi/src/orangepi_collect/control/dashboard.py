@@ -159,7 +159,7 @@ class Dashboard:
         self.phone_slots=threading.BoundedSemaphore(1)
         self.phone_preview_slots=threading.BoundedSemaphore(1)
         self.phone_stream_slots=threading.BoundedSemaphore(3)
-        self.lock=threading.Lock();self.snapshot={};self.pending=None;self.busy=False;self.result=None;self.prompting=False
+        self.lock=threading.Lock();self.snapshot={'state':'starting','revision':0,'devices':[],'selected_devices':[],'worker':{},'session':None,'image':None};self.pending=None;self.busy=False;self.result=None;self.prompting=False
         from cloud_uploads import UploadManager
         try:self.cloud_uploads=UploadManager(self.base,self.recording_store,self.display_state) if self.recording_store is not None else None
         except Exception:self.cloud_uploads=None
@@ -193,6 +193,12 @@ class Dashboard:
             protocol_version='HTTP/1.1'
             disable_nagle_algorithm=True
             def log_message(self,*args):pass
+            def handle(self):
+                try:super().handle()
+                except (BrokenPipeError,ConnectionResetError,TimeoutError):
+                    # Phone disconnects and aborted polls are expected. Leave
+                    # capture ownership untouched and close only this socket.
+                    self.close_connection=True
             def setup(self):
                 super().setup();self.connection.settimeout(5)
             def send(self,status,data,content='application/json; charset=utf-8',extra_headers=None):
@@ -411,17 +417,18 @@ class Dashboard:
     def take(self):
         with self.lock:
             job=self.pending;self.pending=None
-            if job:self.busy=True
+            if job:self.busy=True;self.active_action=job.get('action')
             return job
 
     def complete(self,error=None):
-        with self.lock:self.busy=False;self.result={'ok':not error,'error':error,'time':time.time()}
+        with self.lock:self.busy=False;self.result={'ok':not error,'error':error,'time':time.time(),'action':getattr(self,'active_action',None)}
 
     def display_state(self):
         """Authoritative display gate without disk, QC, media or impedance parsing."""
         with self.lock:
             value={key:self.snapshot.get(key) for key in ('state','session','preview_id','image','selected_devices','revision','collection_mode','collection_context')}
             value['busy']=self.busy or self.pending is not None
+            value['result']=copy.deepcopy(self.result)
             value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state')}
         value['privacy']=self.privacy.snapshot()
         return value

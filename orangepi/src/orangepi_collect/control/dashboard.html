@@ -58,15 +58,15 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
   let registeredInstance='',registeredAt=-Infinity,lastStatusAt=-Infinity,heartbeatPending=null;
   let displayPending=null,lastDisplayAt=-Infinity,lastDisplayTry=-Infinity;
   let lockEpoch=0,paintPromise=null,lastAck='',ackPending=null,localStart=null;
-  let stopPending=false,stopAccepted=false,stopKey='',stopGeneration=-1;
+  let stopPending=false,stopAccepted=false,stopKey='',stopGeneration=-1,stopError='',stopResultTime=-Infinity;
   const visible=()=>!options.visible||options.visible();
   const displayFresh=()=>!!options.readDisplayState&&trustedStatus&&now()-lastDisplayAt<TRUTH_DEADLINE;
   const key=p=>p.instance+'|'+p.session_id+'|'+p.nonce;
   function presentation(){
    const p=latest?.privacy;
-   const canStop=authenticated&&!!latest&&(!!localStart||valid(p)&&
+   const canStop=authenticated&&!!latest&&!stopPending&&!stopAccepted&&(!!localStart||valid(p)&&
     (p.required||['recording','countdown'].includes(latest.state)||latest.worker?.recording_active===true));
-   return {snapshot:latest,canStop,localStart:!!localStart,
+   return {snapshot:latest,canStop,localStart:!!localStart,stopPending:stopPending||stopAccepted,stopError,
     stale:!trustedStatus||now()-lastStatusAt>TRUTH_DEADLINE||now()-registeredAt>=REGISTRATION_DEADLINE};
   }
   function notify(){if(options.onState)options.onState(presentation())}
@@ -145,8 +145,14 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
       &&typeof snapshot._displayRequestedAt==='number'){
     registeredInstance=p.instance;registeredAt=Math.min(now(),snapshot._displayRequestedAt);
    }
-   if(stopKey&&stopKey!==key(p)){stopPending=false;stopAccepted=false;stopKey=''}
-   if(stopAccepted&&p.phase==='fault'&&p.generation>stopGeneration){stopAccepted=false;stopPending=false}
+   if(stopKey&&stopKey!==key(p)){stopPending=false;stopAccepted=false;stopKey='';stopError=''}
+   if(stopKey&&safeIdle(snapshot)){stopAccepted=false;stopError=''}
+   const stopResult=snapshot.result;
+   if(stopKey&&(stopPending||stopAccepted)&&!safeIdle(snapshot)&&stopResult?.action==='stop'
+      &&stopResult.ok===false&&stopResult.time>stopResultTime){
+    stopAccepted=false;stopError=stopResult.error||'停止操作未完成，请长按重试';
+   }
+   if(stopAccepted&&p.phase==='fault'&&p.generation>stopGeneration){stopAccepted=false;stopError=p.error||'停止状态未确认，请长按重试'}
    if(localStart&&safeIdle(snapshot)){
     const result=snapshot.result;
     const failedNewRequest=result&&result.ok===false&&typeof result.time==='number'
@@ -173,7 +179,7 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
   function revealIfSafe(snapshot){
    if(options.holdReveal?.()||snapshot!==latest||!authenticated||!trustedStatus||now()-lastStatusAt>TRUTH_DEADLINE||!safeIdle(snapshot)||localStart
       ||registeredInstance!==seenInstance||now()-registeredAt>=REGISTRATION_DEADLINE||!visible())return false;
-   stopAccepted=false;stopPending=false;stopKey='';lastAck='';showLogin(false);
+   stopAccepted=false;stopPending=false;stopKey='';stopError='';lastAck='';showLogin(false);
    if(locked){locked=false;paintPromise=null;options.setLocked(false)}
    notify();
    return true;
@@ -190,16 +196,19 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
    if(!authenticated||!latest||stopPending||stopAccepted)return false;
    const p=latest.privacy;
    if(!p||(!p.required&&!localStart&&!['recording','countdown'].includes(latest.state)))return false;
-   lock();stopPending=true;stopKey=key(p);stopGeneration=p.generation;const attemptKey=stopKey;
+   lock();stopPending=true;stopError='';stopKey=key(p);stopGeneration=p.generation;stopResultTime=latest.result?.time??-Infinity;const attemptKey=stopKey;notify();
    try{
     await options.stop(latest);
-    if(stopKey===attemptKey)stopAccepted=true;
+    if(stopKey===attemptKey&&!stopError&&!safeIdle(latest))stopAccepted=true;
     return true;
    }catch(error){
     // Failure never wakes the screen. A new deliberate gesture can retry.
-    if(stopKey===attemptKey)stopAccepted=false;
+    if(stopKey===attemptKey){
+     stopAccepted=false;
+     if(!safeIdle(latest))stopError=['AbortError','TimeoutError'].includes(error.name)?'连接超时，停止状态未确认；请检查连接后长按重试':String(error.message||'停止请求失败，请长按重试');
+    }
     return false;
-   }finally{if(stopKey===attemptKey)stopPending=false}
+   }finally{if(stopKey===attemptKey)stopPending=false;notify()}
   }
   function tick(){
    // The full status includes waveform/QC/impedance payloads. Its latency is
@@ -740,6 +749,7 @@ async function poll(){
   online=true;lastStatusReceivedAt=performance.now();if(accessCodeRequired)sessionStorage.setItem('pi-access',token);$('#login').classList.add('hidden');
   $('#connection span').textContent='已连接 Pi';$('#connection').style.background='';
   try{
+   s={...s,state:typeof s.state==='string'&&s.state?s.state:'starting'};
    status=s;reconcileModeIntent(s);recordingOverlay?.update(s);
    if(!s.privacy?.required){render(s);privacyScreen.revealIfSafe(s);phoneCompanion?.update(s);recordingOverlay?.renderFault(null)}
   }catch(error){
@@ -768,11 +778,10 @@ async function privacyPost(action,value){
  if(!res.ok){const error=Error(data.error||'屏幕同步失败');error.status=res.status;throw error}return data;
 }
 async function privacyStop(snapshot){
- const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4000);
  try{
-  const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'stop',revision:snapshot.revision,collection_context:snapshot.collection_context}),signal:controller.signal});
-  const data=await res.json();if(!res.ok)throw Error(data.error||'停止尚未确认');
- }finally{clearTimeout(timer);poll()}
+  const {response:res,value:data}=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'stop',revision:snapshot.revision,collection_context:snapshot.collection_context})},4000);
+  if(!res.ok)throw Error(data.error||'停止请求未接受，请长按重试');
+ }finally{poll()}
 }
 async function privacyDiscard(snapshot){
  if(snapshot?.state!=='recording'||!confirm('停止并放弃本段？本段文件将删除，随后返回总览。'))return;

@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 import gi
+from orangepi_collect.recorders.camera.frame_queue import FrameQueue
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst
 from live_preview import publisher
@@ -90,7 +91,10 @@ class Camera:
         self._preview_frames = 0
         self._preview_errors = 0
         self.last_accepted = time.monotonic()
-        self.queue = queue.Queue(maxsize=24)
+        # H.264 frames are already compressed. Absorb short storage stalls without
+        # discarding frames; persistent stalls remain fatal and bounded.
+        self.queue = queue.Queue(maxsize=24) if usb else FrameQueue(maxsize=120, max_bytes=16 * 1024 * 1024)
+        self.max_timestamp_flush_seconds = 0.0
         self.file = (self.path / 'timestamps.csv').open('w', newline='')
         self.csv = csv.writer(self.file)
         # The stamp column is nanoseconds for both sources: camd reports
@@ -230,7 +234,7 @@ class Camera:
             try:
                 self.queue.put_nowait((payload, stamp, 1 if keyframe else 0, mono, wall))
             except queue.Full:
-                self.owner.fail(self.name + ': camera queue overflow')
+                self.owner.fail(self.name + ': camera queue overflow ' + json.dumps(self.queue.stats(), sort_keys=True))
 
     def _verify_source(self,payload):
         actual=verify_resolution(jpeg_size(payload),self.capture_size,self.name)
@@ -337,7 +341,10 @@ class Camera:
                 if self.usb:
                     self.previous_source_pts = int(sequence)
                 if self.accepted % 20 == 0:
+                    flush_started = time.monotonic()
                     self.file.flush()
+                    self.max_timestamp_flush_seconds = max(
+                        self.max_timestamp_flush_seconds, time.monotonic() - flush_started)
         except Exception as exc:
             self.owner.fail(self.name + ': ' + str(exc))
 
@@ -402,6 +409,8 @@ class Camera:
         # Both camera kinds now carry delivery-gap evidence.
         (self.path/'frame_gap_qc.json').write_text(json.dumps(self.frame_gap_qc,ensure_ascii=False,indent=2),encoding='utf-8')
         return dict(frames=self.accepted, encoded=self.encoded, probe=stream,
+                    writer_queue=self.queue.stats() if not self.usb else None,
+                    max_timestamp_flush_seconds=self.max_timestamp_flush_seconds,
                     decoder='mppjpegdec' if self.usb else None,
                     encoder='mpph265enc' if self.usb else 'camd (hardware H.264)',
                     topic=self.topic,

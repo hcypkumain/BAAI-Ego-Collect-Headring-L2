@@ -1,0 +1,13 @@
+[Unit]
+Description=Read-only automount of removable USB task-import volumes
+After=local-fs.target systemd-udevd.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/lib/collector-usb-task-import/mount-readonly
+TimeoutStartSec=45
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

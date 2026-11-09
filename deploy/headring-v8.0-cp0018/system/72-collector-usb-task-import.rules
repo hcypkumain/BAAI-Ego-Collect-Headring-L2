@@ -1,0 +1,2 @@
+# The timer retries late filesystem discovery and missed/change-only hotplug events.
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="sd*", ENV{ID_BUS}=="usb", ENV{ID_FS_TYPE}=="vfat|exfat|ntfs|ntfs3|ext4", TAG+="systemd", ENV{SYSTEMD_WANTS}+="collector-usb-task-mount.service"

@@ -1,0 +1,19 @@
+[Unit]
+Description=Authorized Android USB web access and per-device port recovery
+After=systemd-udevd.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+SupplementaryGroups=plugdev
+WorkingDirectory=/home/orangepi/maintenance/usb-phone-adb
+ExecStart=/usr/bin/python3 /home/orangepi/maintenance/usb-phone-adb/usb_phone_link.py monitor
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
