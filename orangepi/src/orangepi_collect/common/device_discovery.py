@@ -61,7 +61,7 @@ def inventory(settings=None, dev_root=Path('/dev'), sys_root=Path('/sys')):
 
 
 def fingerprint(settings=None):
-    return tuple(sorted((x['kind'], x['path'], x['serial'], x.get('generation'))
+    return tuple(sorted((x['kind'], x['path'], x.get('node'), x['serial'], x.get('generation'))
                         for x in inventory(settings)))
 
 
@@ -237,12 +237,13 @@ def discover(config, base):
     settings = config.get('auto_discovery', {})
     if not settings.get('enabled', False):
         return config
-    candidates = inventory(settings)
     runtime = Path(base) / 'runtime'
     runtime.mkdir(parents=True, exist_ok=True)
     path = runtime / 'device_bindings.json'
     with (runtime / 'device_bindings.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        # Enumerate inside the same critical section as reconciliation/write.
+        candidates = inventory(settings)
         # Corrupt bindings must not silently turn a known right device into left.
         state = json.loads(path.read_text()) if path.exists() else {}
         if not isinstance(state, dict) or not isinstance(state.get('slots', {}), dict):

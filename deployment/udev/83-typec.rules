@@ -1,4 +1,3 @@
-ACTION=="remove", SUBSYSTEM=="typec", RUN+="/usr/local/bin/typec_usb2.sh"
-ACTION=="change", SUBSYSTEM=="typec", RUN+="/usr/bin/usbdevice restart"
-
-
+# Type-C events are exposed for diagnostics only. Hardware role decisions
+# belong to the separately guarded headring-usb-data-host service.
+ACTION=="remove|change", SUBSYSTEM=="typec", ENV{HEADRING_TYPEC_EVENT}="observed"

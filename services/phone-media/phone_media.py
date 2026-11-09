@@ -18,6 +18,7 @@ import uuid
 from frame_stream import packet,begin
 from reference_preview import ReferenceSource, ReferenceError
 from headphone_manager import HeadphoneManager
+from capture_gate import CaptureGate
 from headphone_http import handle_headphones
 from replay_runtime import ReplayRuntime
 try:
@@ -674,7 +675,7 @@ def main():
         decoder=lambda raw:encode_phone_preview(raw,getattr(phone_core,'phone_quality','fast')),
         max_output=MAX_INPUT,max_fps=60.,idle_seconds=3.)
     phone_core.phone_quality='fast'
-    headphones = HeadphoneManager(Path.cwd())
+    headphones = HeadphoneManager(Path.cwd(),capture_gate=CaptureGate(token))
     replay_runtime = ReplayRuntime(Path.cwd(), token)
     server = PreviewHTTPServer((args.bind, args.port), phone_core, token, headphones=headphones,
                                replay_runtime=replay_runtime)

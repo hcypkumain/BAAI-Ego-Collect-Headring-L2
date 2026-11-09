@@ -10,7 +10,7 @@ from project_paths import BASE, devices
 from orangepi_collect.recorders.camera.uvc_source import probe
 from orangepi_collect.recorders.camera import camd_source
 import imu_source
-import concurrent.futures,json,os,select,termios,time,fcntl,copy,struct
+import concurrent.futures,json,os,select,termios,time,fcntl,copy,struct,subprocess,tempfile,signal
 
 
 def camd_camera_status(name):
@@ -86,13 +86,16 @@ def serial_ready(port):
     return serial_probe(port)['ready']
 
 def check(kind,name,item):
+    started=time.monotonic();started_unix_ms=round(time.time()*1000)
+    def observed(value):
+        return dict(value,probe_started_unix_ms=started_unix_ms,probe_elapsed_ms=max(0,round((time.monotonic()-started)*1000)))
     path=item.get('port',item.get('device'))
     discovery=item.get('discovery',{})
     result=dict(name=name,label=item['label'],connected=False,present=False,
                 device=path,role_confirmed=discovery.get('role_confirmed',True),config=item)
     try:
         if path and (discovery.get('present') is False or not Path(path).exists()):
-            return dict(result,status='missing',error='未发现匹配设备，请检查连接')
+            return observed(dict(result,status='missing',error='未发现匹配设备，请检查连接'))
         result['present']=bool(path)
         if kind=='eeg':
             from eeg_bridge import probe as eeg_probe
@@ -111,9 +114,17 @@ def check(kind,name,item):
             ok=bool(entry.get('snapshot_ready'))
             result['present']=True
             result['fps']=entry.get('fps')
+            result['service_ready']=bool(entry.get('snapshot_ready'))
+            result['fresh_frame']=False
             if entry.get('h264_stream'):
                 result['error']='该路相机已被其他程序占用'
                 ok=False
+            elif ok:
+                _,_,first,_=camd_source.snapshot(name,timeout=1.5)
+                time.sleep(.08)
+                width,height,stamp,_=camd_source.snapshot(name,timeout=1.5)
+                if not first or stamp<=first:raise RuntimeError('相机未返回新的快照帧')
+                result.update(fresh_frame=True,probe_scope='camd_snapshot',frame_width=width,frame_height=height)
         else:
             details=imu_probe()
             ok=details['ready']
@@ -125,8 +136,8 @@ def check(kind,name,item):
                              else '已收到串口数据，但未识别到当前肌电协议' if kind=='emg'
                              else '相机已被系统识别，但 %.1f 秒探测仅收到 %d 帧有效 JPEG（需要至少 10 帧），可重新扫描' % (result['probe']['window_seconds'],result['probe']['received_frames']) if kind=='wrist'
                              else '设备已识别，但没有收到有效图像')
-        return result
-    except Exception as exc:return dict(result,status='error',error=type(exc).__name__+': '+str(exc))
+        return observed(result)
+    except Exception as exc:return observed(dict(result,status='error',error=type(exc).__name__+': '+str(exc)))
 
 def record_wrist_probe_diagnostics(results):
     """Keep bounded failed-start evidence across later successful rescans."""
@@ -169,15 +180,73 @@ def record_eeg_probe_diagnostics(results):
     except (OSError,ValueError) as error:print('EEG probe diagnostics unavailable: '+str(error),file=sys.stderr,flush=True)
 
 
+def probe_rows(jobs, timeout=10.0, per_device=8.0):
+    """Bound each probe and preserve completed rows if a peer hangs.
+
+    Subprocesses inherit the single scan process group; its controller performs
+    final group cleanup, including any descendants that outlive their probe.
+    """
+    deadline=time.monotonic()+timeout
+    children=[]
+    for kind,name,item in jobs:
+        output=tempfile.TemporaryFile(mode='w+t',encoding='utf-8')
+        with tempfile.TemporaryFile(mode='w+t',encoding='utf-8') as source:
+            json.dump([kind,name,item],source);source.seek(0)
+            process=subprocess.Popen([sys.executable,__file__,'--one'],stdin=source,
+                stdout=output,stderr=subprocess.DEVNULL,text=True)
+        started=time.monotonic()
+        children.append((process,kind,name,item,output,started,min(deadline,started+per_device)))
+    rows={}
+    while len(rows)<len(children):
+        now=time.monotonic()
+        for index,(process,kind,name,item,output,started,expires) in enumerate(children):
+            if index in rows:continue
+            if process.poll() is None:
+                if now<expires:continue
+                try:process.terminate()
+                except ProcessLookupError:pass
+                rows[index]=dict(name=name,label=item['label'],connected=False,present=None,status='timeout',probe_elapsed_ms=max(0,round((now-started)*1000)),error='本设备探测超时，状态待确认')
+                continue
+            try:
+                output.seek(0);row=json.loads(output.read())
+                if not isinstance(row,dict) or row.get('name')!=name or type(row.get('connected')) is not bool:raise ValueError('invalid probe response')
+                rows[index]=row
+            except (OSError,ValueError):
+                rows[index]=dict(name=name,label=item['label'],connected=False,present=None,status='error',probe_elapsed_ms=max(0,round((time.monotonic()-started)*1000)),error='探测进程异常')
+        if len(rows)<len(children):time.sleep(.025)
+    for process,kind,name,item,output,started,expires in children:
+        if process.poll() is None:
+            try:process.wait(timeout=.05)
+            except subprocess.TimeoutExpired:pass
+        output.close()
+    return [rows[i] for i in range(len(children))]
+
+
 if __name__=='__main__':
+    from scan_registry import require_member
+    owner=require_member()
+    if sys.argv[1:]==['--one']:
+        kind,name,item=json.load(sys.stdin)
+        print(json.dumps(check(kind,name,item),ensure_ascii=False),flush=True)
+        sys.exit(0)
+    # Keep the registered leader alive while the controller escalates a
+    # timeout; children still receive TERM, then KILL targets this same group.
+    signal.signal(signal.SIGTERM,lambda *_:None)
     config=devices()
     jobs=[('emg',name,item) for name,item in config['emg'].items()]
     jobs += [('camera','cam_ros_'+name,item) for name,item in config['cameras'].items()]
     jobs += [('imu','board_imu',config['board_imu'])]
     jobs += [('wrist',name,item) for name,item in config.get('wrist_cameras',{}).items()]
     if config.get('eeg',{}).get('enabled',False):jobs += [('eeg','eeg',config['eeg'])]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs)) as pool:
-        results=list(pool.map(lambda job:check(*job),jobs))
+    results=probe_rows(jobs)
+    request=json.loads(os.environ.get('ORANGEPI_SCAN_REQUEST','null'))
+    if not isinstance(request,dict) or set(request)!={'id','fingerprint'}:raise ValueError('缺少扫描请求身份')
+    from scan_result import encode
+    envelope=encode(owner['run'],owner['nonce'],request['id'],request['fingerprint'],results)
     record_wrist_probe_diagnostics(results)
     record_eeg_probe_diagnostics(results)
-    print(json.dumps(results,ensure_ascii=False))
+    print(envelope,flush=True)
+    if any(row.get('status')=='timeout' for row in results):
+        # Preserve the process-group leader until its controller performs
+        # bounded cleanup of all slow descendants.
+        while True:time.sleep(1)

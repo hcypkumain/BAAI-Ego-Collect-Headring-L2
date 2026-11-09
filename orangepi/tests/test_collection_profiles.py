@@ -110,7 +110,9 @@ class ManualCompletionTests(unittest.TestCase):
             c.worker_status=lambda:{};c.voice=Mock();c.notified_error=False;c.warned_data_gap=False
             c.quit=False;c.smoke=False;c.image=path/'scene_1.png';c.retry_requested=False
             c.reference_session_metadata=lambda:{};c.state_write=Mock();c.prepare=Mock();c.error_voice=Mock()
-            c.reap=lambda:setattr(c,'worker',None)
+            c.owner_finished=Mock(return_value=True)
+            def reap():c.worker=None;return True
+            c.reap=reap
             with patch.object(launcher.ledger,'mark'):c.poll()
             self.assertEqual(c.state,'idle');self.assertEqual(c.last_completed['outcome'],'pending_qc')
             from capture_session_state import active_session

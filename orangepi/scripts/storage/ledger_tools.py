@@ -2,7 +2,7 @@
 import sys,json,time,shutil,argparse
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'src/orangepi_collect/common'))
-from project_paths import BASE,PROJECT
+from project_paths import BASE,PROJECT,CODE_BASE
 import ledger
 
 def rebase_value(value,old,new):
@@ -27,7 +27,7 @@ if __name__=='__main__':
     if a.apply:
         # Refuse changes while any current launcher holds its lock, including manual instances.
         import fcntl
-        (BASE/'runtime').mkdir(exist_ok=True);lock=(BASE/'runtime/launcher.lock').open('a')
+        (CODE_BASE/'runtime').mkdir(exist_ok=True);lock=(CODE_BASE/'runtime/launcher.lock').open('a')
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:p.error('先停止采集程序，再修改台账')
     if a.action=='reset-scene':

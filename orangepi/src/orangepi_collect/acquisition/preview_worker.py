@@ -260,4 +260,7 @@ def run_preview(config):
         print('PREVIEW unavailable: '+str(exc),flush=True)
 
 
-if __name__=='__main__':run_preview(json.load(sys.stdin))
+if __name__=='__main__':
+    from scan_registry import require_member
+    require_member()
+    run_preview(json.load(sys.stdin))

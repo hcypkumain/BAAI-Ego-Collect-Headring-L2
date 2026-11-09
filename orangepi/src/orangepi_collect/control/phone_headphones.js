@@ -2,8 +2,8 @@
 (function(global){
  'use strict';
  const allowed=new Set(['device_confirm','idle','failed_wait','exhausted','ready']);
- const controls=new Set(['device_confirm','idle','failed_wait','exhausted','ready']);
- const errors={bluetooth_unavailable:'Pi 蓝牙服务不可用',adapter_missing:'未发现 Pi 蓝牙适配器',bluetooth_off:'Pi 蓝牙尚未开启',permission_denied:'Pi 蓝牙操作权限不足',timeout:'连接超时，请确认耳机开机并在 Pi 附近',device_unavailable:'耳机暂不可用，请开启配对模式后重新搜索',pair_failed:'配对未完成，请将耳机置于配对模式并断开手机连接',trust_failed:'保存蓝牙信任失败，请重试',connect_failed:'连接失败，请确认耳机开机并断开手机连接',audio_unavailable:'蓝牙音频通道尚未就绪，请重新连接',selection_invalid:'已保存的耳机设置无效，请重新选择',selection_save_failed:'耳机选择未能保存',selection_sync_failed:'耳机选择尚未确认落盘，请重试',scan_failed:'搜索失败，请检查 Pi 蓝牙',disconnect_failed:'断开未完成，请刷新确认',test_failed:'试听未完成，请确认音频通道就绪',worker_unavailable:'耳机管理后台未就绪',operation_failed:'蓝牙操作未完成，请重试',no_saved_headphone:'尚未选择耳机',cancelled:'操作已取消'};
+ const controls=new Set(['device_confirm','idle','failed_wait','exhausted']);
+ const errors={capture_busy:'采集状态已变化，请结束当前步骤后再操作耳机',bluetooth_unavailable:'Pi 蓝牙服务不可用',adapter_missing:'未发现 Pi 蓝牙适配器',bluetooth_off:'Pi 蓝牙尚未开启',permission_denied:'Pi 蓝牙操作权限不足',timeout:'连接超时，请确认耳机开机并在 Pi 附近',device_unavailable:'耳机暂不可用，请开启配对模式后重新搜索',pair_failed:'配对未完成，请将耳机置于配对模式并断开手机连接',trust_failed:'保存蓝牙信任失败，请重试',connect_failed:'连接失败，请确认耳机开机并断开手机连接',audio_unavailable:'蓝牙音频通道尚未就绪，请重新连接',selection_invalid:'已保存的耳机设置无效，请重新选择',selection_save_failed:'耳机选择未能保存',selection_sync_failed:'耳机选择尚未确认落盘，请重试',scan_failed:'搜索失败，请检查 Pi 蓝牙',disconnect_failed:'断开未完成，请刷新确认',test_failed:'试听未完成，请确认音频通道就绪',worker_unavailable:'耳机管理后台未就绪',operation_failed:'蓝牙操作未完成，请重试',no_saved_headphone:'尚未选择耳机',cancelled:'操作已取消'};
  global.describePhoneHeadphones=function(data,stale){
   if(!data||stale)return {title:'耳机状态待更新',detail:'连接到 Pi 后自动读取',ready:false};
   const name=data.selected_name||data.selected_address||'未选择耳机';

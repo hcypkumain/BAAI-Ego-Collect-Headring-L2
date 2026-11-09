@@ -119,6 +119,15 @@ def usb_devices():
 
 
 def camera_queries():
+    # This sampler may run during capture. Do not open V4L from an
+    # unregistered observer; retain system evidence and report the omission.
+    import sys
+    sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'src/orangepi_collect/common'))
+    try:
+        from scan_registry import require_member
+        require_member()
+    except (ImportError,RuntimeError,OSError) as error:
+        return [{'query_status':'not_run','reason':'设备所有权未登记，未打开相机：'+str(error)}]
     nodes = {}
     for path in sorted(Path('/dev/v4l/by-path').glob('*video-index0')):
         try:

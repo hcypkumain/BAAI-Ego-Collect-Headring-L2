@@ -289,7 +289,8 @@
    text($('phone-metric-time'),clock(value.state==='recording'&&value.recording_since?value.server_time-value.recording_since:value.duration));text($('phone-metric-saved'),value.success_count||0);
    const list=$('phone-device-list'),names=new Set(devices.slice(0,10).map(d=>d.name));for(const row of [...list.children])if(!names.has(row.dataset.device))row.remove();
    devices.slice(0,10).forEach(device=>{let row=[...list.children].find(node=>node.dataset.device===device.name);if(!row){row=document.createElement('div');row.dataset.device=device.name;list.append(row);}row.classList.toggle('phone-device-offline',!device.connected);
-    text(row,(device.connected?(device.role_confirmed===false?'已连接·左右待确认':'已连接'):'未连接')+(value.selected_devices?'·'+(chosen.includes(device.name)?'已选':'未选'):'')+'  '+device.label);
+    const deviceState=device.connected?(device.role_confirmed===false?'已连接·左右待确认':'已连接'):device.present===true?(device.status==='no_data'?'已识别·无有效数据':'已识别·检测异常'):device.present===false&&device.status==='missing'?'未发现':'检测状态待确认';
+    text(row,deviceState+(value.selected_devices?'·'+(chosen.includes(device.name)?'已选':'未选'):'')+'  '+device.label);
    });
    const issues=devices.filter(device=>!device.connected||device.role_confirmed===false),signature=JSON.stringify(issues.map(device=>[device.name,device.label,device.error,device.connected,device.role_confirmed,chosen.includes(device.name)]));
    problems.hidden=!issues.length;text($('phone-device-problem-summary'),'设备提示（'+issues.length+' 项）');

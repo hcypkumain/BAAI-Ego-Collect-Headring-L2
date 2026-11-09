@@ -13,7 +13,7 @@ class Transport:
     def pair(self,mac):self.calls.append('pair');self.paired=True
     def trust(self,mac):self.calls.append('trust');self.trusted=True
     def connect(self,mac):self.calls.append('connect');self.connected=True
-    def disconnect(self,mac):self.calls.append('disconnect');self.connected=False
+    def disconnect(self,mac,audio_only=False):self.calls.append('disconnect');self.connected=False
     def start_scan(self):self.calls.append('scan')
     def stop_scan(self):pass
     def close(self):pass
@@ -22,7 +22,7 @@ class Transport:
 class HeadphoneTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);self.base=Path(self.temp.name);(self.base/'configs').mkdir()
-        self.transport=Transport();self.manager=module.HeadphoneManager(self.base,self.transport,start=False);self.manager._load()
+        self.transport=Transport();self.manager=module.HeadphoneManager(self.base,self.transport,start=False,capture_gate=lambda:('test',1));self.manager._load()
     def select(self):self.manager._execute('connect',MAC)
     def test_first_explicit_connection_pairs_trusts_and_saves(self):
         self.select();self.assertEqual(self.transport.calls,['pair','trust','connect'])
@@ -30,7 +30,7 @@ class HeadphoneTests(unittest.TestCase):
         self.assertTrue(self.manager.snapshot()['audio_ready']);self.assertTrue(self.manager.snapshot()['auto_reconnect'])
     def test_saved_headphone_reconnects_after_manager_restart(self):
         self.select();self.transport.connected=False;self.transport.calls=[]
-        next_manager=module.HeadphoneManager(self.base,self.transport,start=False);next_manager._load();next_manager._step()
+        next_manager=module.HeadphoneManager(self.base,self.transport,start=False,capture_gate=lambda:('test',1));next_manager._load();next_manager._step()
         self.assertEqual(self.transport.calls,['connect']);self.assertTrue(next_manager.snapshot()['audio_ready'])
     def test_temporary_disconnect_keeps_preference_and_pauses_retry(self):
         self.select();self.manager._execute('disconnect',None);self.transport.calls=[];self.manager._step()

@@ -256,6 +256,8 @@ class PiBundleRecorder(BaseRecorder):
         return result
 
 if __name__=='__main__':
+    from scan_registry import require_member
+    require_member()
     ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--wait-for-save',action='store_true');args=ap.parse_args()
     rec=PiBundleRecorder(PiBundleConfig(session_dir=str(Path(args.output).resolve()),stdin_control=True,wait_for_save=args.wait_for_save))
     sys.exit(rec.run())

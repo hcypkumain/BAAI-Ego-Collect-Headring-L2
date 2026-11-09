@@ -318,6 +318,8 @@ def main():
 
 
 if __name__ == '__main__':
+    from scan_registry import require_member
+    require_member()
     try: sys.exit(main())
     except Exception as exc:
         emit('error', error=type(exc).__name__+': '+str(exc)); sys.exit(1)

@@ -92,6 +92,8 @@ def measure(config, seconds=3.0):
 
 
 if __name__ == '__main__':
+    from scan_registry import require_member
+    require_member()
     try:
         print(json.dumps(measure(json.load(sys.stdin)), ensure_ascii=False))
     except Exception as exc:

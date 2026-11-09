@@ -23,6 +23,8 @@ import subprocess
 import sys
 import time
 import traceback
+import threading
+import uuid
 import yaml
 import ledger
 import storage_paths
@@ -30,6 +32,9 @@ import storage_paths
 from project_paths import BASE, PROJECT, SRC, devices, CODE_BASE, PROFILE, COLLECTION_MODE, COLLECTION_CONTEXT
 from capture_session_state import active_session
 from device_discovery import fingerprint
+from scan_process import run_scan, ScanProcessError
+from scan_registry import Registry, RegistryError, spawn_reserved
+from scan_result import decode as decode_scan_result
 import wrist_calibration
 import emg_calibration
 
@@ -103,6 +108,11 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.last_usb_poll=0
         self.last_device_scan=0
         self.last_scan=[]
+        self.scan_lock=threading.Lock()
+        self.camera_registry=Registry(CODE_BASE/'runtime')
+        self.capture_owner_run=None
+        self.capture_owner_released=False
+        self.preview_owner_run=None
         self.wrist_wizard=None
         self.emg_wizard=None
 
@@ -141,7 +151,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         try:provision(CODE_BASE,PROFILE,mode)
         except Exception:
             self.state=previous;self.state_write();raise
-        self.stop_preview();self.switch_requested=mode
+        if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
+        self.switch_requested=mode
         self.quit=True
 
     def worker_status(self):
@@ -239,12 +250,15 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.voice.say('本段任务参考图像，'+self.reference_image_title()+'。目前尚未录制，请按图像准备场景。设备就绪后，点击开始采集。')
 
     def prepare(self):
+        if not self.retry_pending_owner(force=True):
+            self.last_help=['上次设备清理尚未确认'];self.state_write();return False
         if (BASE/'runtime/recording_reset_in_progress.json').exists():
             self.last_help=['旧采集数据正在归档，请等待维护完成后再准备。'];self.state_write();return False
         if self.worker is not None:
             self.last_help=['当前本段仍由采集进程持有，请结束或取消准备后再重试。']
             return False
-        self.stop_preview()
+        if self.stop_preview() is False:
+            self.last_help=['预览设备尚未全部退出'];self.state_write();return False
         try:
             self.reference_refresh()
             if self.reference_error:raise ValueError(self.reference_error)
@@ -281,6 +295,11 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 and resolved.get('wrist_calibration',{}).get('enabled',False)
                 and not resolved.get('wrist_calibration_status',{}).get('valid',False)):
             self.start_wrist_calibration();return
+        self.capture_owner_released=False
+        try:self.capture_owner_run=self.camera_registry.reserve('capture')
+        except (RegistryError,OSError) as exc:
+            self.last_help=[str(exc)];self.state_write();return False
+        spawn_attempted=False
         self.keep_requested=False;self.owner_command_error=None;self.discard_requested=False
         new_path=None
         try:
@@ -303,9 +322,13 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             atomic_json(self.path/'meta.json',metadata)
             atomic_json(self.path/'reference_queue.json',self._reference_active['entry']['snapshot'])
             self.log=(self.path/'worker.log').open('w')
-            self.worker=subprocess.Popen([str(BASE/'.venvs/framework/bin/python'),'-u',str(SRC/'framework/framework_recorder.py'),'--output',str(self.path),'--wait-for-save'],
-                stdin=subprocess.PIPE,stdout=self.log,stderr=subprocess.STDOUT,text=True,start_new_session=True)
+            spawn_attempted=True
+            self.worker=spawn_reserved(self.camera_registry,self.capture_owner_run,'capture',[str(BASE/'.venvs/framework/bin/python'),'-u',str(SRC/'framework/framework_recorder.py'),'--output',str(self.path),'--wait-for-save'],
+                stdin=subprocess.PIPE,stdout=self.log,stderr=subprocess.STDOUT,text=True)
         except Exception as error:
+            if not spawn_attempted and self.capture_owner_run:
+                try:self.camera_registry.cancel_unspawned(self.capture_owner_run);self.capture_owner_run=None
+                except (RegistryError,OSError):pass
             if new_path is None:new_path=getattr(error,'path',None)
             if self.log is not None:
                 try:self.log.close()
@@ -389,6 +412,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.ui_publish(force=True)
 
     def _begin_after_privacy(self):
+        try:self.camera_registry.verify_owner(self.capture_owner_run,'capture')
+        except RegistryError:
+            self.last_help=['设备所有权未确认，未开始采集'];self.state_write();return False
         if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
             self.voice.say('请先完成脑电阻抗检查，并确认检测已结束、设备配置已恢复。')
             return
@@ -440,6 +466,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.poll()
             return
         privacy=self.dashboard.privacy
+        try:self.camera_registry.verify_owner(self.capture_owner_run,'capture')
+        except RegistryError:
+            self.last_help=['设备所有权未确认，未开始采集'];self.state_write();return False
         atomic_json(self.path/'screen_privacy_gate.json',privacy.commit())
         self.command('START')
         deadline=time.monotonic()+3
@@ -498,8 +527,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             # A wedged owner must release every device before any file removal.
             os.killpg(self.worker.pid,signal.SIGKILL);self.worker.wait(timeout=5)
         path=self.path
+        if not self.owner_finished():return
         self._reference_reap_outcome='discarded'
-        self.reap()
+        if not self.reap():return
         try:
             self.recording_store.discard_current(path)
         except (OSError,ValueError) as error:
@@ -565,21 +595,40 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.state_write()
 
     def scan_devices(self,announce=True,quiet=False):
-        self.stop_preview()
+        if not self.scan_lock.acquire(False):return False
+        try:
+            if not self.retry_pending_owner(force=True):return False
+            if self.worker or self.state in ('preparing','recording','countdown','finalizing','confirm_stop'):
+                self.last_help=['设备正在准备、采集或收尾，不能扫描'];return False
+            return self._scan_devices(announce,quiet)
+        finally:self.scan_lock.release()
+
+    def _scan_devices(self,announce=True,quiet=False):
+        if self.stop_preview() is False:
+            self.last_help=['预览设备尚未全部退出'];self.scan_retry_pending=True;self.state_write();return False
         previous_state=self.state
         scanned_fingerprint=fingerprint(devices().get('auto_discovery',{}))
+        fingerprint_wire=json.loads(json.dumps(scanned_fingerprint));request_id=uuid.uuid4().hex
+        scan_env=dict(os.environ,ORANGEPI_SCAN_REQUEST=json.dumps(dict(id=request_id,fingerprint=fingerprint_wire)))
+        scan_run=None;scan_nonce=None
         self.state='scanning';self.state_write()
         try:
-            result=subprocess.run([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/scan_devices.py')],
-                capture_output=True,text=True,timeout=15)
-            if result.returncode:raise ValueError('设备扫描失败，请查看驱动服务')
-            scan=json.loads(result.stdout)
+            output,scan_run,scan_nonce=run_scan([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/scan_devices.py')],self.camera_registry,timeout=15,allow_partial=True,env=scan_env,return_identity=True)
+            if getattr(self,'quit',False) or self.state!='scanning' or getattr(self,'switch_requested',None):return False
+            scan=decode_scan_result(output,scan_run,scan_nonce,request_id,fingerprint_wire)
+            if fingerprint(devices().get('auto_discovery',{}))!=scanned_fingerprint:
+                raise ValueError('扫描期间设备发生变化，旧结果已丢弃')
             if not isinstance(scan,list) or any(not isinstance(item,dict)
                     or not isinstance(item.get('name'),str) or not item['name']
                     or not isinstance(item.get('label'),str)
                     or type(item.get('connected')) is not bool for item in scan):
                 raise ValueError('设备扫描结果格式无效')
-        except (OSError,ValueError,subprocess.TimeoutExpired) as exc:
+            self.web_config=devices()
+            if fingerprint(self.web_config.get('auto_discovery',{}))!=scanned_fingerprint:
+                raise ValueError('扫描结果发布前设备发生变化')
+        except (OSError,ValueError,subprocess.TimeoutExpired,ScanProcessError) as exc:
+            if isinstance(exc,ScanProcessError) and exc.cleanup_pending:
+                self.remember_pending_owner(exc)
             reason=('设备扫描超时' if isinstance(exc,subprocess.TimeoutExpired)
                 else '设备扫描结果不是有效 JSON' if isinstance(exc,json.JSONDecodeError) else str(exc))
             print('DEVICE SCAN failed '+repr(exc),flush=True)
@@ -589,8 +638,17 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.scan_retry_pending=True
             # Retain identities for diagnosis, without presenting old readiness
             # as current evidence or permitting a stale device confirmation.
-            self.last_scan=[dict(item,connected=False,status='scan_failed',error=message)
-                for item in getattr(self,'last_scan',[])]
+            partial=None
+            if isinstance(exc,ScanProcessError) and exc.partial_output:
+                try:
+                    partial=decode_scan_result(exc.partial_output,exc.run,getattr(exc,'nonce',None),request_id,fingerprint_wire)
+                except (ValueError,TypeError):pass
+            if partial is not None:
+                self.last_scan=[dict(item,last_probe_connected=item['connected'],connected=False,status='cleanup_pending',
+                    error='本轮探测'+('已取到数据' if item['connected'] else '未确认')+'；设备仍在清理，暂不可使用') for item in partial]
+            else:
+                self.last_scan=[dict(item,connected=False,status='scan_failed',error=message)
+                    for item in getattr(self,'last_scan',[])]
             self.last_device_scan=time.monotonic()
             self.usb_fingerprint=scanned_fingerprint
             atomic_json(BASE/'runtime/devices.json',self.last_scan)
@@ -606,7 +664,6 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.last_scan=scan
         self.scan_retry_pending=False
         self.last_help=[]
-        self.web_config=devices()
         self.last_device_scan=time.monotonic()
         # A plug/unplug during the scan must trigger another scan, not be lost.
         self.usb_fingerprint=scanned_fingerprint
@@ -636,7 +693,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
     def start_wrist_calibration(self):
         if getattr(self,'worker',None):
             return  # The capture worker has exclusive ownership until released.
-        self.stop_preview()
+        if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
         config=devices()
         if not config.get('wrist_calibration',{}).get('enabled',False):return
         if not set(wrist_calibration.SLOTS).issubset(getattr(self,'scan_available',[])):
@@ -687,7 +744,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             if not 0<=age<3:raise ValueError('腕部画面已过期，请等待实时画面后重新确认')
         try:proof=wrist_calibration.manual_proof(wizard.boot,wizard.stamp,sources,value.get('left_slot'))
         except wrist_calibration.CalibrationError:raise ValueError('左右分配无效，请重新选择')
-        self.stop_preview()
+        if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
         # Recheck after readers close: a replug during confirmation must not save.
         if not wizard.unchanged(wrist_calibration.boot_id(),wrist_calibration.current_stamp(wizard.config)):
             self.calibration_connection_changed();raise ValueError('相机连接已变化，请重新确认设备')
@@ -701,23 +758,26 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.scan_devices()
 
     def advance_wrist_calibration(self):
-        self.stop_preview(clear=False)
+        if self.stop_preview(clear=False) is False:
+            self.last_help=['预览设备尚未全部退出'];self.state_write();return
         wizard=getattr(self,'wrist_wizard',None)
         if wizard is None or getattr(self,'worker',None):return
         if not wizard.unchanged(wrist_calibration.boot_id(),wrist_calibration.current_stamp(wizard.config)):
             self.calibration_connection_changed();return
         try:
-            result=subprocess.run([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/calibration_probe.py')],
-                input=json.dumps(wizard.config),capture_output=True,text=True,timeout=12)
-            data=json.loads(result.stdout)
+            output,exit_code=run_scan([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/calibration_probe.py')],
+                self.camera_registry,kind='calibration',input_text=json.dumps(wizard.config),timeout=12,allow_nonzero=True,return_code=True)
+            data=json.loads(output)
             if data.get('error')=='devices_changed':
                 self.calibration_connection_changed();return
-            if result.returncode or not data.get('ok'):
+            if exit_code!=0 or not data.get('ok'):
                 raise wrist_calibration.CalibrationError(data.get('error','probe_failed'))
             if not wizard.unchanged(data['boot_id'],data['stamp']) or not wizard.unchanged(wrist_calibration.boot_id(),wrist_calibration.current_stamp(wizard.config)):
                 self.calibration_connection_changed();return
             wizard.accept(data['statistics'])
-        except (wrist_calibration.CalibrationError,ValueError,KeyError,subprocess.TimeoutExpired) as exc:
+        except (wrist_calibration.CalibrationError,ValueError,KeyError,subprocess.TimeoutExpired,ScanProcessError) as exc:
+            if isinstance(exc,ScanProcessError) and exc.cleanup_pending:
+                self.remember_pending_owner(exc);self.state_write()
             print('WRIST CALIBRATION retry '+type(exc).__name__,flush=True)
             self.voice.say(wrist_calibration.PROMPTS['retry'])
             self.voice.say(wrist_calibration.PROMPTS[wizard.phase]);return
@@ -766,7 +826,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
 
     def start_emg_manual_calibration(self):
         if getattr(self,'worker',None):return
-        self.stop_preview()
+        if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
         config=devices()
         if not config.get('emg_calibration',{}).get('enabled',False):return
         if not set(emg_calibration.SLOTS).issubset(getattr(self,'scan_available',[])):
@@ -816,7 +876,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         try:proof=emg_calibration.manual_proof(wizard.boot,wizard.stamp,sources,value.get('left_slot'))
         except emg_calibration.CalibrationError:raise ValueError('肌电左右分配无效，请重新选择')
         proof['preview']=dict(session_id=wizard.session_id,preview_id=value['preview_id'],signals=evidence)
-        self.stop_preview()
+        if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
         # Closing readers releases the capture lease; replugging must invalidate the draft.
         if not wizard.unchanged(emg_calibration.boot_id(),emg_calibration.current_stamp(wizard.config)):
             self.emg_connection_changed();raise ValueError('肌电连接已变化，请重新确认设备')
@@ -888,16 +948,32 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.scan_devices(announce=False)
             if self.keyboard:self.keyboard.discard()
 
+    def owner_finished(self):
+        if getattr(self,'capture_owner_released',False):return True
+        run=getattr(self,'capture_owner_run',None)
+        try:
+            if not run:raise RegistryError('缺少本段设备所有权记录')
+            self.camera_registry.finish(run)
+        except (RegistryError,OSError) as exc:
+            message='设备进程尚未全部退出，停止和文件清理未确认：'+str(exc)
+            if getattr(self,'last_help',None)!=[message]:
+                self.last_help=[message];self.state_write()
+            return False
+        self.capture_owner_run=None;self.capture_owner_released=True
+        return True
+
     def reap(self):
         self.worker.wait(timeout=2)
+        if not self.owner_finished():return False
         try:
             try:self.worker.stdin.close()
-            except BrokenPipeError:pass  # A failed command can leave a buffered flush.
+            except BrokenPipeError:pass
             self.log.close()
         finally:
             self.worker=None
             self.log=None
             self.reference_reaped()
+        return True
 
     def poll(self):
         tick=getattr(self.voice,'tick',None)
@@ -928,6 +1004,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.voice.say('设备已经就绪，目前尚未录制。请充分查看参考图，再手动检查相机。确认画面后返回准备页，点击开始正式采集才会倒计时。')
             print('READY: reference viewing, manual camera check, then explicit formal start',flush=True)
         if self.worker.poll() is not None:
+            # A reaped adapter alone is not proof its hardware descendants left.
+            if not self.owner_finished():return
             summary_path=self.path/'capture_summary.json'
             if not summary_path.exists():
                 atomic_json(summary_path,dict(status='error',errors=['worker exited without final summary: exit='+str(self.worker.returncode)],time=time.time()))
@@ -968,7 +1046,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.error_voice(summary.get('errors',['采集进程异常退出，请检查日志']))
             self.exit_code=0 if (ok or summary.get('status')=='cancelled') and not owner_error else 1
             self._reference_reap_outcome=outcome
-            self.reap();self.retry_requested=False
+            if not self.reap():return
+            self.retry_requested=False
             self.last_review_path=self.path
             self.last_completed={'session':self.path.name,'outcome':outcome,'qc_level':summary.get('qc_level')}
             if self.quit:return

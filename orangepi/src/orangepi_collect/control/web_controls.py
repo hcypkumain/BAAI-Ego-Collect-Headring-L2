@@ -8,6 +8,8 @@ import tempfile
 import time
 import uuid
 from project_paths import BASE, SRC, devices
+from scan_registry import spawn_owned, RegistryError
+from scan_process import run_scan, ScanProcessError
 from capture_session_state import active_session
 from dashboard import Dashboard, SAFE, actions_for, impedance_presentation
 import recording_review
@@ -18,6 +20,26 @@ import wrist_camera_settings as wrist_settings
 
 
 class WebControls:
+    def remember_pending_owner(self,error):
+        self.scan_cleanup_pending=True
+        self.pending_camera_owner=(getattr(error,'run',None),getattr(error,'child',None))
+        self.last_help=['设备清理尚未确认：'+str(error)]
+
+    def retry_pending_owner(self,force=False):
+        if not getattr(self,'scan_cleanup_pending',False):return True
+        now=time.monotonic()
+        if not force and now-getattr(self,'last_owner_retry',0)<1:return False
+        self.last_owner_retry=now
+        run,child=getattr(self,'pending_camera_owner',(None,None))
+        if not run:return False  # Incomplete reserved ownership needs maintenance.
+        try:
+            if child is not None:child.poll()
+            self.camera_registry.finish(run)
+        except (RegistryError,OSError):return False
+        self.pending_camera_owner=None;self.scan_cleanup_pending=False
+        self.last_help=[]
+        return True
+
     def audio_status(self):
         # Speaker.snapshot is an in-memory bounded copy, never a pactl/BlueZ
         # query. Audio diagnostics cannot change collection state or actions.
@@ -242,15 +264,31 @@ class WebControls:
             if worker.poll() is None:
                 worker.terminate()
                 try:worker.wait(timeout=6)
-                except subprocess.TimeoutExpired:worker.kill();worker.wait(timeout=3)
-            worker.stdin.close();self.preview_worker=None
+                except subprocess.TimeoutExpired:
+                    worker.kill()
+                    try:worker.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        self.last_help=['预览进程仍在退出，设备尚未释放'];return False
+            worker.stdin.close()
+            run=getattr(self,'preview_owner_run',None)
+            if run:
+                try:self.camera_registry.finish(run)
+                except (RegistryError,OSError) as exc:
+                    # Keep both handles so the next bounded idle pass can retry
+                    # after a late descendant actually exits.
+                    self.last_help=['预览设备尚未完全退出：'+str(exc)]
+                    return False
+                self.preview_owner_run=None
+            self.preview_worker=None
         self.preview_snapshot_id=None;self.preview_sources={};self.emg_preview_sources={}
         if clear:
             for p in getattr(self,'preview_dir',Path('/nonexistent')).glob('*'):
                 try:p.unlink()
                 except OSError:pass
+        return True
 
     def ensure_preview(self):
+        if not self.retry_pending_owner():return
         if not getattr(self,'dashboard',None) or self.worker:return
         if self.state == 'emg_pairing' and not getattr(self,'emg_pairing_preview_allowed',lambda:False)():return
         if self.state not in ('device_confirm','idle','failed_wait','exhausted') and not self.state.startswith(('wrist_','emg_')):return
@@ -263,7 +301,7 @@ class WebControls:
         now=time.monotonic()
         if now-getattr(self,'last_preview_start',0)<5:return
         self.last_preview_start=now
-        self.stop_preview()
+        if self.stop_preview() is False:return
         cfg=devices();self.web_config=cfg
         self.preview_sources={slot:cfg['wrist_cameras'][slot]['device']
             for slot in SLOTS if slot in cfg.get('wrist_cameras',{})}
@@ -272,8 +310,11 @@ class WebControls:
         self.preview_snapshot_id=uuid.uuid4().hex
         cfg['_preview_id']=self.preview_snapshot_id
         cfg['_exclusive_preview']=self.state in ('emg_manual','emg_pairing')
-        self.preview_worker=subprocess.Popen([str(BASE/'.venvs/hardware/bin/python'),'-u',str(SRC/'acquisition/preview_worker.py')],
-            stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,text=True)
+        try:
+            self.preview_worker,self.preview_owner_run=spawn_owned(self.camera_registry,'preview',[str(BASE/'.venvs/hardware/bin/python'),'-u',str(SRC/'acquisition/preview_worker.py')],
+                stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,text=True)
+        except (RegistryError,OSError) as exc:
+            self.last_help=[str(exc)];return
         try:self.preview_worker.stdin.write(json.dumps(cfg));self.preview_worker.stdin.flush();self.preview_worker.stdin.close()
         except BrokenPipeError:pass
 
@@ -282,10 +323,11 @@ class WebControls:
         if self.state!='ready':raise ValueError('当前不可更改设备')
         if self.worker_status().get('recording_active'):raise ValueError('正在录制，不可更改设备')
         self.command('STOP');self.worker.wait(timeout=50)
-        # No recording was started, so this reference is still available.
+        # No cancellation is recorded until the entire owner group is gone.
+        if not self.reap():raise ValueError('设备进程尚未全部退出，准备未解除')
         if self.path:
             (self.path/'ui_preparation_cancelled.json').write_text(json.dumps({'reason':'operator changed setup before recording','time':time.time()}))
-        self.reap();self.state='idle';self.state_write()
+        self.state='idle';self.state_write()
 
     def abandon_preparation(self):
         from dashboard import preparation_state
@@ -297,13 +339,13 @@ class WebControls:
         if status.get('recording_active') or (path and (path/'start_gate.json').exists()):raise ValueError('本段已正式开录，不能按准备放弃')
         if getattr(self,'worker',None):
             self.command('STOP');self.worker.wait(timeout=50)
+            if not self.reap():raise ValueError('设备进程尚未全部退出，文件未清理')
             if path:
                 from recording_store import atomic_json
                 atomic_json(path/'ui_preparation_cancelled.json',dict(reason='operator_abandoned_before_start',time=time.time()))
-            self.reap()
             store=getattr(self,'recording_store',None)
             if store is not None and path and path.is_dir():store.abandon_preparation(path)
-        self.stop_preview()
+        if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
         close=getattr(self,'close_emg_pairing',None)
         if callable(close):close()
         self.wrist_wizard=self.emg_wizard=None;self._emg_pairing_spoken_phase=None
@@ -370,7 +412,8 @@ class WebControls:
                         raise ValueError('无效的腕部相机帧率选项')
                     if not self.wrist_settings_available():raise ValueError('设备正在采集或交接，暂不可更改腕部相机设置')
                 if action in ('rescan','calibrate_wrist','calibrate_emg','eeg_filter','wrist_camera_settings'):
-                    self.release_prepared();self.stop_preview()
+                    self.release_prepared()
+                    if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
                 if action=='abandon':
                     self.abandon_preparation()
                 elif action=='discard_recording':
@@ -397,11 +440,14 @@ class WebControls:
                     self.command(json.dumps(dict(command=command,request_id=uuid.uuid4().hex)))
                     self.state_write()
                 elif action=='wrist_camera_settings':
-                    with wrist_settings.preference_lock(BASE),wrist_settings.capture_guard(BASE):
-                        self.wrist_camera_last_reports=wrist_settings.configure_devices(devices(),value)
-                        self.save_wrist_settings(value,self.wrist_camera_last_reports)
-                        self.web_config=devices()
-                    self.wrist_camera_last_change=dict(ok=True,error=None,time=time.time(),devices=self.wrist_camera_last_reports)
+                    output=run_scan([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'control/wrist_settings_worker.py')],
+                        self.camera_registry,kind='settings',input_text=json.dumps(value),timeout=50)
+                    result=json.loads(output);reports=result.get('reports') or {}
+                    if not result.get('ok'):
+                        error=ValueError(result.get('error') or '腕部相机设置未确认');error.reports=reports;raise error
+                    self.wrist_camera_last_reports=reports
+                    self.web_config=devices()
+                    self.wrist_camera_last_change=dict(ok=True,error=None,time=time.time(),devices=reports)
                     self.state_write()
                 elif action=='eeg_filter':
                     if job.get('value') not in PRESETS:raise ValueError('无效的脑电滤波选项')
@@ -435,8 +481,10 @@ class WebControls:
             except self.OwnerExited as exc:
                 error=str(exc)
                 self.owner_command_failed(exc)
-            except (ValueError,OSError,subprocess.TimeoutExpired) as exc:
+            except (ValueError,OSError,subprocess.TimeoutExpired,ScanProcessError) as exc:
                 error=str(exc)
+                if isinstance(exc,ScanProcessError) and exc.cleanup_pending:
+                    self.remember_pending_owner(exc)
                 if job['action']=='wrist_camera_settings':
                     reports=getattr(exc,'reports',None) or {}
                     if reports:self.wrist_camera_last_reports=reports
@@ -456,8 +504,8 @@ class WebControls:
 
     def close_dashboard(self):
         if hasattr(self,'close_emg_pairing'):self.close_emg_pairing()
-        self.stop_preview()
+        preview_stopped=self.stop_preview()
         if getattr(self,'dashboard',None):self.dashboard.close();self.dashboard=None
-        if getattr(self,'preview_dir',None):shutil.rmtree(self.preview_dir,ignore_errors=True)
+        if preview_stopped is not False and getattr(self,'preview_dir',None):shutil.rmtree(self.preview_dir,ignore_errors=True)
         close_references=getattr(self,'reference_close',None)
         if callable(close_references):close_references()

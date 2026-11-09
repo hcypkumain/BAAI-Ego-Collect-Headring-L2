@@ -110,6 +110,7 @@ class BluezTransport:
         self.dbus = None
         self.adapter = None
         self.paths = {}
+        self.preferred_address = None
         self.pulse_server = pulse_server
         self.tone = str(tone or Path(__file__).with_name('headphone-test.wav'))
 
@@ -151,8 +152,9 @@ class BluezTransport:
             self.adapter = None
             raise BluetoothError('adapter_missing')
         # Prefer the adapter containing the already known headset if present.
+        preferred = self.preferred_address or LEGACY_ADDRESS
         known = next((str(p).rsplit('/dev_', 1)[0] for p, i in objects.items()
-                      if str(i.get('org.bluez.Device1', {}).get('Address', '')) == LEGACY_ADDRESS), None)
+                      if str(i.get('org.bluez.Device1', {}).get('Address', '')) == preferred), None)
         self.adapter, adapter = next((x for x in adapters if x[0] == known), adapters[0])
         devices = []
         self.paths = {}
@@ -230,11 +232,13 @@ class BluezTransport:
                 return
             raise self._error(exc, 'connect_failed')
 
-    def disconnect(self, mac):
+    def disconnect(self, mac, audio_only=False):
         if mac not in self.paths:
             return
         try:
-            self._interface(self.paths[mac], 'org.bluez.Device1').Disconnect(timeout=5)
+            device=self._interface(self.paths[mac], 'org.bluez.Device1')
+            if audio_only:device.DisconnectProfile(AUDIO_SINK,timeout=5)
+            else:device.Disconnect(timeout=5)
         except Exception as exc:
             raise self._error(exc, 'disconnect_failed')
 
@@ -273,9 +277,10 @@ class BluezTransport:
 
 
 class HeadphoneManager:
-    def __init__(self, base, transport=None, start=True, clock=time.monotonic):
+    def __init__(self, base, transport=None, start=True, clock=time.monotonic, capture_gate=None):
         self.selection_path = Path(base) / 'configs/headphone_selection.json'
         self.transport = transport or BluezTransport()
+        self.capture_gate = capture_gate or (lambda: None)
         self.clock = clock
         self.lock = threading.Lock()
         self.wake = threading.Event()
@@ -286,6 +291,7 @@ class HeadphoneManager:
         self.explicit = False
         self.legacy = False
         self.scan_until = 0.0
+        self.scan_generation = None
         self.next_retry = 0.0
         self.retry_delay = 5.0
         self.auto_paused = False
@@ -333,6 +339,8 @@ class HeadphoneManager:
                 return 400, 'invalid_address'
         elif mac is not None:
             return 400, 'unexpected_address'
+        try:generation=self._check_generation()
+        except BluetoothError:return 423, 'capture_busy'
         with self.lock:
             if self.state['busy'] or self.pending is not None:
                 return 409, 'busy'
@@ -344,7 +352,7 @@ class HeadphoneManager:
                 return 409, 'no_saved_headphone'
             if action == 'test' and not self.state['audio_ready']:
                 return 409, 'audio_unavailable'
-            self.pending = (action, mac)
+            self.pending = (action, mac, generation)
             self.state.update(busy=True, error='', status='scanning' if action == 'scan' else
                               'connecting' if action in ('connect', 'reconnect') else self.state['status'])
         self.wake.set()
@@ -390,6 +398,7 @@ class HeadphoneManager:
             raise BluetoothError(error)
 
     def _refresh(self):
+        if hasattr(self.transport,'preferred_address'):self.transport.preferred_address=self.selected
         view = self.transport.inspect()
         self.devices = view['devices']
         self.sinks = self.transport.sinks()
@@ -428,9 +437,11 @@ class HeadphoneManager:
         if self.scan_until:
             self.transport.stop_scan()
             self.scan_until = 0.0
+            self.scan_generation = None
             self._update(scanning=False)
 
-    def _connect(self, mac, manual):
+    def _connect(self, mac, manual, generation=None):
+        generation=self._check_generation(generation)
         self.auto_paused = False
         self._stop_scan()
         self._update(busy=True, status='connecting' if manual else 'reconnecting', error='', pairing_progress='connecting')
@@ -440,20 +451,27 @@ class HeadphoneManager:
             raise BluetoothError('device_unavailable')
         self._ensure_running()
         if not self.snapshot()['powered']:
+            self._check_generation(generation)
             self.transport.power()
         if not row['paired']:
             if not manual:
                 raise BluetoothError('not_paired')
             self._ensure_running()
             self._update(pairing_progress='pairing')
+            self._check_generation(generation)
             self.transport.pair(mac)
+            self._check_generation(generation)
         self._ensure_running()
         if manual and not row['trusted']:
             self._update(pairing_progress='trusting')
+            self._check_generation(generation)
             self.transport.trust(mac)
+            self._check_generation(generation)
         self._ensure_running()
         self._update(pairing_progress='connecting')
+        self._check_generation(generation)
         self.transport.connect(mac)
+        self._check_generation(generation)
         self._update(pairing_progress='waiting_audio')
         deadline = self.clock() + 5.0
         while not self.stopped.is_set():
@@ -461,6 +479,7 @@ class HeadphoneManager:
             row = next((x for x in self.devices if x['address'] == mac), None)
             if row and row['connected'] and sink_name(mac) in self.sinks:
                 self._ensure_running()
+                self._check_generation(generation)
                 if manual:
                     self._save(mac)
                 self._update(pairing_progress='ready', error='', status='connected')
@@ -471,23 +490,37 @@ class HeadphoneManager:
             self.stopped.wait(.25)
         raise BluetoothError('audio_unavailable')
 
+    def _check_generation(self, expected=None):
+        try:current=self.capture_gate()
+        except Exception:current=None
+        if current is None or (expected is not None and current!=expected):
+            raise BluetoothError('capture_busy')
+        return current
+
     def _ensure_running(self):
         if self.stopped.is_set():
             raise BluetoothError('cancelled')
 
-    def _execute(self, action, mac):
+    def _execute(self, action, mac, generation=None):
+        generation=self._check_generation(generation)
         if action == 'scan':
             self._refresh()
             if not self.snapshot()['powered']:
+                self._check_generation(generation)
                 self.transport.power()
+            self._check_generation(generation)
             self.transport.start_scan()
             self.scan_until = self.clock() + SCAN_SECONDS
+            self.scan_generation = generation
+            try:self._check_generation(generation)
+            except BluetoothError:
+                self._stop_scan();raise
             self._update(scanning=True, status='scanning', error='')
         elif action in ('connect', 'reconnect'):
             chosen = mac if action == 'connect' else self.selected
             if not chosen:
                 raise BluetoothError('no_saved_headphone')
-            self._connect(chosen, manual=action == 'connect')
+            self._connect(chosen, manual=action == 'connect', generation=generation)
         elif action in ('disconnect','forget'):
             self._stop_scan()
             chosen = self.selected
@@ -495,7 +528,8 @@ class HeadphoneManager:
             self.auto_paused=action=='disconnect'
             row=next((x for x in self.devices if x['address']==chosen),None)
             if chosen and row and row['connected']:
-                self.transport.disconnect(chosen)
+                self._check_generation(generation)
+                self.transport.disconnect(chosen,audio_only=action=='disconnect')
             self._update(pairing_progress='idle', error='')
         elif action == 'test':
             self._refresh()
@@ -503,6 +537,7 @@ class HeadphoneManager:
                 raise BluetoothError('audio_unavailable')
             self._ensure_running()
             self._update(test_result='running')
+            self._check_generation(generation)
             self.transport.test(self.selected)
             self._update(test_result='played')
 
@@ -515,6 +550,11 @@ class HeadphoneManager:
             command = self.pending
             self.pending = None
         try:
+            # A scan belongs to this D-Bus client. Stop only that discovery
+            # session when capture starts or status cannot be authenticated.
+            if self.scan_until:
+                try:self._check_generation(self.scan_generation)
+                except BluetoothError:self._stop_scan()
             if command:
                 try:
                     self._execute(*command)
@@ -525,7 +565,8 @@ class HeadphoneManager:
                 self._stop_scan()
                 self._refresh()
             elif (not self.scan_until and self.selected and not ready and not self.auto_paused and self.clock() >= self.next_retry):
-                self._connect(self.selected, manual=False)
+                generation=self._check_generation()
+                self._connect(self.selected, manual=False, generation=generation)
         except BluetoothError as exc:
             if exc.code in ('bluetooth_unavailable', 'adapter_missing'):
                 self.sinks = self.transport.sinks()

@@ -387,7 +387,7 @@ def handle_phone_request(handler, owner, method):
         if len(raw) > MAX_REPLY: raise ValueError()
         content = 'image/jpeg' if route.endswith('.jpg') and reply.status == 200 else 'application/json; charset=utf-8'
         # A privacy transition during decode must discard the late image.
-        if not release and not optional_read_allowed(owner.display_state(), replay=route.startswith('/replay/')):
+        if not release and not (route=='/headphones' and method=='POST') and not optional_read_allowed(owner.display_state(), replay=route.startswith('/replay/')):
             handler.send(423, {'error': '显示已暂停'})
         else: handler.send(reply.status, raw, content)
     except (OSError, ValueError, HTTPException):

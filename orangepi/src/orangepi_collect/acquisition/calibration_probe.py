@@ -58,6 +58,11 @@ def measure(config, seconds=1.8):
 
 
 if __name__ == '__main__':
+    from scan_registry import require_member
+    require_member()
+    # Remain a group anchor during bounded cleanup escalation.
+    import signal
+    signal.signal(signal.SIGTERM,lambda *_:None)
     try:
         print(json.dumps(measure(json.load(sys.stdin)), ensure_ascii=False))
     except Exception as exc:

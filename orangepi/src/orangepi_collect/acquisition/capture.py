@@ -589,6 +589,8 @@ class Capture:
         return 1 if self.error_list else 0
 
 if __name__ == '__main__':
+    from scan_registry import require_member
+    require_member()
     p=argparse.ArgumentParser()
     p.add_argument('--output',required=True)
     p.add_argument('--selection',type=Path)

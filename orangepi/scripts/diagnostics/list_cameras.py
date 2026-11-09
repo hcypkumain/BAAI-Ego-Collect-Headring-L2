@@ -30,6 +30,10 @@ if __name__=='__main__':
     cameras=discover()
     print(json.dumps(cameras,ensure_ascii=False,indent=2))
     if args.formats:
+        import sys
+        sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'src/orangepi_collect/common'))
+        from scan_registry import require_member
+        require_member()  # Ordinary inventory is read-only; format probing opens V4L.
         for camera in cameras:
             print('\n'+camera['device'],flush=True)
             subprocess.run(['v4l2-ctl','-d',camera['device'],'--list-formats-ext'],check=True)

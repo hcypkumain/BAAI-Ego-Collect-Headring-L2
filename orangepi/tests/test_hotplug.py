@@ -4,12 +4,14 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import threading
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src/orangepi_collect/common'))
 import project_paths
 import launcher
 import scan_devices
+from scan_result import encode
 
 
 class HotplugTests(unittest.TestCase):
@@ -64,16 +66,21 @@ class HotplugTests(unittest.TestCase):
 
     def test_event_during_scan_is_seen_again_on_next_poll(self):
         c = self.controller()
-        c.state_write = Mock(); c.voice = Mock()
+        c.state_write = Mock(); c.voice = Mock(); c.stop_preview=Mock()
+        c.scan_lock=threading.Lock();c.camera_registry=object()
         rows = [{'name': 'cam_left_wrist', 'label': '相机 A', 'connected': True,
-                 'present': True, 'device': '/dev/current'}]
+                 'present': True, 'device': '/dev/current','status':'ready'}]
         result = Mock(returncode=0, stdout=json.dumps(rows))
+        def fake_scan(*a,**kw):
+            req=json.loads(kw['env']['ORANGEPI_SCAN_REQUEST'])
+            return encode('run','nonce',req['id'],req['fingerprint'],rows),'run','nonce'
         with patch.object(launcher, 'devices', return_value={'auto_discovery': {'enabled': True}}), \
-             patch.object(launcher, 'fingerprint', side_effect=[('scan-start',), ('new-device',)]), \
-             patch.object(launcher.subprocess, 'run', return_value=result), \
+             patch.object(launcher, 'fingerprint', side_effect=[(('wrist','/dev/current','/dev/video1','x',1),), (('wrist','/dev/current','/dev/video2','x',2),), (('wrist','/dev/current','/dev/video2','x',2),)]), \
+             patch.object(launcher, 'run_scan', side_effect=fake_scan), \
              patch.object(launcher, 'atomic_json'):
-            launcher.Controller.scan_devices(c, announce=False)
-            c.poll_hotplug()
+            self.assertFalse(launcher.Controller.scan_devices(c, announce=False,quiet=True))
+            self.assertFalse(c.scan_ok)
+            c.last_usb_poll=0;c.poll_hotplug()
         c.scan_devices.assert_called_once_with(announce=False)
 
     def test_missing_and_no_data_are_distinct(self):

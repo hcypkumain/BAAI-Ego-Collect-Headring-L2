@@ -25,7 +25,7 @@ def plan(root,include_vendor,include_lan_time=False):
         result.append((unit,Path('/etc/systemd/system')/name,True))
         for source in sorted(unit.with_name(unit.name+'.d').glob('*.conf')):
             result.append((source,Path('/etc/systemd/system')/(name+'.d')/source.name,True))
-    for name in ('91-pi-wrist-camera-power.rules','99-icm20602.rules','71-pi-auto-android.rules','72-collector-usb-task-import.rules'):
+    for name in ('91-pi-wrist-camera-power.rules','99-icm20602.rules','71-pi-auto-android.rules','72-collector-usb-task-import.rules','83-typec.rules'):
         result.append((root/'deployment/udev'/name,Path('/etc/udev/rules.d')/name,False))
     if include_vendor:
         vendor=root/'vendor/pi-runtime/egorecord'
@@ -34,6 +34,28 @@ def plan(root,include_vendor,include_lan_time=False):
             result.append((vendor/name,Path('/opt/egorecord')/name,False))
         result.append((root/'vendor/pi-runtime/opi-headphone-audio/guarded-paplay',Path('/opt/opi-headphone-audio/guarded-paplay'),False))
     return result
+
+def unsafe_typec_rules(directories=None):
+    """Refuse installation if another rule can repeat the retired mutations."""
+    directories=directories or [Path('/etc/udev/rules.d'),Path('/run/udev/rules.d'),Path('/usr/local/lib/udev/rules.d'),Path('/usr/lib/udev/rules.d'),Path('/lib/udev/rules.d')]
+    seen=set();bad=[]
+    for directory in directories:
+        if not directory.is_dir():continue
+        for path in directory.glob('*.rules'):
+            try:
+                resolved=path.resolve()
+                if resolved in seen:continue
+                seen.add(resolved)
+                # The /etc replacement shadows same-named rules in lower-priority dirs.
+                if path.name=='83-typec.rules':continue
+                lines=[line for line in path.read_text().splitlines() if not line.lstrip().startswith('#')]
+                content='\n'.join(lines)
+                if (re.search(r'(typec_usb2\.sh|usbdevice\b|fc000000\.usb)',content)
+                        or (re.search(r'SUBSYSTEMS?\s*==\s*["\']typec["\']',content)
+                            and re.search(r'\bRUN\s*[+:]?=',content))):
+                    bad.append(str(path))
+            except OSError:raise RuntimeError('Cannot inspect udev rule: '+str(path))
+    return sorted(set(bad))
 
 def usb_adb():
     bundled=USB_ROOT/'root/usr/bin/adb'
@@ -86,7 +108,12 @@ def main():
     allowed,reason=host_module.CaptureGuard(root/'orangepi').allowed()
     if not allowed:parser.error('Finish capture/initialization and use the active station root before installing: '+reason)
     subprocess.run(['/usr/sbin/visudo','-cf',str(root/'deployment/sudoers/collector-usb-task-import')],check=True,timeout=10)
+    conflicting=unsafe_typec_rules()
+    if conflicting:parser.error('Other USB role-changing udev rules require review: '+', '.join(conflicting))
     backup=Path('/var/backups/baai-ego-collect')/datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f')
+    legacy=Path('/usr/local/bin/typec_usb2.sh')
+    if legacy.is_file():
+        saved=backup/legacy.relative_to('/');saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(legacy,saved)
     for source,target,unit in operations:
         if target.is_symlink():raise RuntimeError('Refusing to overwrite a symlink: '+str(target))
         target.parent.mkdir(parents=True,exist_ok=True)
