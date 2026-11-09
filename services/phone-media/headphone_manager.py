@@ -128,6 +128,8 @@ class BluezTransport:
     @staticmethod
     def _error(exc, fallback):
         name = getattr(exc, 'get_dbus_name', lambda: '')()
+        if fallback == 'scan_failed' and name.endswith('InProgress'):
+            return BluetoothError('scan_busy')
         if name.endswith(('NotAuthorized', 'AccessDenied', 'AuthenticationRejected')):
             return BluetoothError('permission_denied')
         if name.endswith(('NoReply', 'Timeout', 'TimedOut')):
@@ -298,7 +300,7 @@ class HeadphoneManager:
         self.devices = []
         self.sinks = set()
         self.state = {'version': 1, 'available': False, 'powered': False,
-                      'scanning': False, 'busy': False, 'status': 'unavailable', 'error': '',
+                      'scanning': False, 'busy': False, 'status': 'unavailable', 'error': '', 'scan_error': '',
                       'pairing_progress': 'idle', 'selected_address': '', 'selected_name': '',
                       'selected_saved': False, 'connected_address': '', 'audio_ready': False,
                       'output': 'none', 'devices': [], 'retry_seconds': 0,
@@ -353,7 +355,7 @@ class HeadphoneManager:
             if action == 'test' and not self.state['audio_ready']:
                 return 409, 'audio_unavailable'
             self.pending = (action, mac, generation)
-            self.state.update(busy=True, error='', status='scanning' if action == 'scan' else
+            self.state.update(busy=True, error='', scan_error='', status='scanning' if action == 'scan' else
                               'connecting' if action in ('connect', 'reconnect') else self.state['status'])
         self.wake.set()
         return 202, ''
@@ -416,7 +418,7 @@ class HeadphoneManager:
         status = current['status'] if current['busy'] or self.scan_until else (
             'connected' if ready else 'disconnected' if view['powered'] else 'unavailable')
         error = current['error']
-        if ((ready and error not in ('selection_invalid', 'selection_save_failed', 'selection_sync_failed')) or
+        if ((ready and error not in ('selection_invalid', 'selection_save_failed', 'selection_sync_failed', 'scan_busy')) or
                 (view['powered'] and error in ('bluetooth_unavailable', 'adapter_missing', 'bluetooth_off'))):
             error = ''
         self._update(available=True, powered=view['powered'], devices=rows,
@@ -578,7 +580,8 @@ class HeadphoneManager:
                     self._refresh()
                 except Exception:
                     pass
-            self._update(error=exc.code, status='error', busy=False, scanning=bool(self.scan_until),
+            scan_error='scan_busy' if command and command[0]=='scan' and exc.code=='scan_busy' else self.snapshot().get('scan_error','')
+            self._update(error=exc.code, scan_error=scan_error, status='error', busy=False, scanning=bool(self.scan_until),
                          test_result='failed' if command and command[0] == 'test' else self.snapshot()['test_result'])
             self._backoff()
         except Exception:

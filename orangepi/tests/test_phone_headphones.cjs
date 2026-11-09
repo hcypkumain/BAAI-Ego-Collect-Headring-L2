@@ -8,4 +8,9 @@ assert(describe({selected_name:'Headset',bluetooth_connected:true,audio_ready:fa
 assert.equal(describe({selected_name:'Headset',bluetooth_connected:true,audio_ready:true},false).ready,true);
 assert.equal(describe({selected_name:'Headset',audio_ready:true},true).ready,false);
 assert(describe({error:'connect_failed'},false).detail.includes('断开手机连接'));
+assert(describe({error:'scan_busy'},false).detail.includes('扫描未确认'));
+const combined=describe({scan_error:'scan_busy',error:'connect_failed',audio_ready:true},false).detail;
+assert(combined.includes('扫描未确认')&&combined.includes('断开手机连接'));
+const retryState={scan_error:'scan_busy',error:'',auto_reconnect:true,retry_seconds:5,audio_ready:false};
+assert(global.phoneHeadphoneNote(retryState,describe(retryState,false),'',true).includes('扫描未确认'));
 console.log('PASS headphone link/audio distinction, readiness, stale status and error guidance');

@@ -19,6 +19,32 @@ class Checks(unittest.TestCase):
   self.generation=('emg:3',4,'test-instance',7);self.current=self.generation;self.t=Transport();self.t.stop_scan=Mock()
   self.m=module.HeadphoneManager(self.base,self.t,start=False,capture_gate=lambda:self.current)
   self.m._load();self.m._refresh()
+ def test_bluez_in_progress_is_reported_as_scan_busy_only(self):
+  error=SimpleNamespace(get_dbus_name=lambda:'org.bluez.Error.InProgress')
+  self.assertEqual(module.BluezTransport._error(error,'scan_failed').code,'scan_busy')
+  self.assertEqual(module.BluezTransport._error(error,'connect_failed').code,'connect_failed')
+ def test_scan_busy_survives_connected_headphone_refresh_until_next_action(self):
+  self.m.selected=MAC;self.t.paired=True;self.t.trusted=True;self.t.connected=True;self.m._refresh()
+  self.t.start_scan=Mock(side_effect=module.BluetoothError('scan_busy'))
+  self.assertEqual(self.m.submit('scan')[0],202);self.m._step();self.assertEqual(self.m.snapshot()['error'],'scan_busy')
+  self.m._step();self.assertEqual(self.m.snapshot()['error'],'scan_busy')
+  self.t.start_scan=Mock();self.assertEqual(self.m.submit('scan')[0],202);self.assertEqual(self.m.snapshot()['error'],'')
+ def test_scan_busy_survives_automatic_reconnect_success_and_failure(self):
+  for succeeds in (True,False):
+   with self.subTest(succeeds=succeeds):
+    now=[100.0];self.m.clock=lambda:now[0];self.m.selected=MAC
+    self.t.connected=False;self.t.paired=True;self.t.trusted=True;self.m._refresh()
+    self.t.start_scan=Mock(side_effect=module.BluetoothError('scan_busy'))
+    self.assertEqual(self.m.submit('scan')[0],202);self.m._step()
+    self.assertEqual(self.m.snapshot()['scan_error'],'scan_busy')
+    self.t.connect=Mock() if succeeds else Mock(side_effect=module.BluetoothError('connect_failed'))
+    if succeeds:self.t.connect.side_effect=lambda _:setattr(self.t,'connected',True)
+    now[0]+=6;self.m._step()
+    self.assertEqual(self.m.snapshot()['scan_error'],'scan_busy')
+    if not succeeds:self.assertEqual(self.m.snapshot()['error'],'connect_failed')
+    self.t.start_scan=Mock();self.assertEqual(self.m.submit('scan')[0],202)
+    self.assertEqual(self.m.snapshot()['scan_error'],'')
+    self.m.pending=None;self.m._update(busy=False,error='',scan_error='');self.t.connected=False;self.m.next_retry=0
  def test_missing_unknown_unauthorized_rejected(self):
   self.assertEqual(gate.generation(SAFE),self.generation)
   for patchval in ({'state':'recording'},{'state':'preparing'},{'busy':True},{'worker':None},{'worker':{'state':'unknown'}},{'revision':None},{'privacy':None}):
