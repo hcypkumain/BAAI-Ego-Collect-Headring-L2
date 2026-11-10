@@ -323,3 +323,5 @@ class CamdH264Source:
             pass  # closing the socket also stops the subscription
         self._connection.close()
         self._thread.join(5)
+        if self._thread.is_alive():
+            raise RuntimeError('%s: camd stream reader did not stop' % self.camera)

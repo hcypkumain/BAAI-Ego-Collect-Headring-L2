@@ -217,7 +217,22 @@ class EMG:
         self.jobs.put_nowait(rows)
         self.saved += 1
 
-from orangepi_collect.recorders.camera.mpp_camera_recorder import Camera
+from orangepi_collect.recorders.camera.mpp_camera_recorder import Camera, CameraDataError
+
+
+def close_camera_recorders(cameras, started, error_list, summary, shutdown_complete):
+    """Keep data-quality failures separate from unconfirmed camera shutdown."""
+    for camera in cameras:
+        try:
+            summary[camera.name] = camera.close()
+        except CameraDataError as exc:
+            if started:
+                error_list.append(camera.name + ': ' + str(exc))
+        except Exception as exc:
+            shutdown_complete = False
+            if started:
+                error_list.append(camera.name + ': ' + str(exc))
+    return shutdown_complete
 
 class BoardImu:
     """Record the Pi sensor_msgs/Imu source, independently of armband IMUs."""
@@ -558,13 +573,8 @@ class Capture:
                 except Exception as exc:
                     shutdown_complete=False
                     self.error_list.append('board_imu: '+str(exc))
-            for c in self.cameras:
-                try:
-                    self.summary[c.name] = c.close()
-                except Exception as exc:
-                    shutdown_complete=False
-                    if self.started:
-                        self.error_list.append(c.name+': '+str(exc))
+            shutdown_complete=close_camera_recorders(
+                self.cameras,self.started,self.error_list,self.summary,shutdown_complete)
             while not self.errors.empty():
                 self.error_list.append(self.errors.get())
             while not self.warnings.empty():

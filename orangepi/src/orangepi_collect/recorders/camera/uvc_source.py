@@ -111,7 +111,13 @@ class UvcSource:
             raise exception
 
     def close(self):
-        self.pipeline.set_state(self.Gst.State.NULL)
+        transition = self.pipeline.set_state(self.Gst.State.NULL)
+        if transition == self.Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError('UVC pipeline refused NULL state')
+        result, current, pending = self.pipeline.get_state(5 * self.Gst.SECOND)
+        if (result != self.Gst.StateChangeReturn.SUCCESS or current != self.Gst.State.NULL
+                or pending != self.Gst.State.VOID_PENDING):
+            raise RuntimeError('UVC pipeline did not reach NULL state')
 
 
 def probe(config, seconds=3, report=None):

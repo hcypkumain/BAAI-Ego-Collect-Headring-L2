@@ -37,6 +37,10 @@ from orangepi_collect.common.camera_resolution import jpeg_size,verify_resolutio
 CONFIG=devices()
 WRIST_CAMERAS=CONFIG.get('wrist_cameras',{})
 
+class CameraDataError(RuntimeError):
+    """The camera stopped cleanly, but its recording failed data validation."""
+
+
 class Camera:
     def __init__(self, owner, name, usb=False):
         try:
@@ -90,6 +94,7 @@ class Camera:
         self._h264_preview = None
         self._preview_frames = 0
         self._preview_errors = 0
+        self._preview_close_error = None
         self.last_accepted = time.monotonic()
         # H.264 frames are already compressed. Absorb short storage stalls without
         # discarding frames; persistent stalls remain fatal and bounded.
@@ -182,19 +187,19 @@ class Camera:
                 handle=publisher();now=time.monotonic()
                 if not handle.wants_camera(self.name):
                     preview,self._h264_preview=self._h264_preview,None
-                    if preview is not None:preview.close()
+                    if preview is not None:self._close_preview(preview)
                     continue
                 try:
                     size=(1920,1200) if handle.wants_full_camera(self.name) else (640,400)
                     if self._h264_preview is not None and self._h264_preview.size!=size:
-                        preview,self._h264_preview=self._h264_preview,None;preview.close()
+                        preview,self._h264_preview=self._h264_preview,None;self._close_preview(preview)
                     if self._h264_preview is not None:self._h264_preview.health()
                     elif now>=retry_at:self._h264_preview=H264JpegPreview(publish_jpeg,*size)
                 except Exception:
                     self._preview_errors+=1;retry_at=now+10
                     preview,self._h264_preview=self._h264_preview,None
                     if preview is not None:
-                        try:preview.close()
+                        try:self._close_preview(preview)
                         except Exception:pass
                 if self._h264_preview is None and now>=snapshot_at:
                     snapshot_at=now+PREVIEW_INTERVAL
@@ -204,7 +209,23 @@ class Camera:
                     except Exception:self._preview_errors+=1
         finally:
             preview,self._h264_preview=self._h264_preview,None
-            if preview is not None:preview.close()
+            if preview is not None:
+                try:self._close_preview(preview)
+                except Exception:pass
+
+    def _close_preview(self, preview):
+        try:
+            preview.close()
+            if preview.thread.is_alive():
+                raise RuntimeError('preview feeder thread did not stop')
+            result,current,pending=preview.pipeline.get_state(5 * preview.Gst.SECOND)
+            if (result != preview.Gst.StateChangeReturn.SUCCESS
+                    or current != preview.Gst.State.NULL
+                    or pending != preview.Gst.State.VOID_PENDING):
+                raise RuntimeError('preview pipeline did not reach NULL state')
+        except Exception as exc:
+            self._preview_close_error = exc
+            raise
 
     def camd_callback(self, payload, ts_us, keyframe, mono, wall):
         """One H.264 access unit from camd. ts_us is CLOCK_REALTIME microseconds."""
@@ -367,47 +388,102 @@ class Camera:
             raise RuntimeError(self.name + ': encoder stalled')
 
     def close(self):
+        resource_errors=[]
+        data_errors=[]
         self._preview_stop.set()
         if self._preview_thread is not None:
             self._preview_thread.join(3)
+            if self._preview_thread.is_alive():
+                resource_errors.append('preview thread did not stop')
+        if self._preview_close_error is not None:
+            resource_errors.append('preview close failed: '+str(self._preview_close_error))
         if self.input is not None:
-            self.input.close()
-            if self.usb and getattr(self.input,'last_invalid_frame',None):
-                (self.path/'uvc_input_diagnostics.json').write_text(json.dumps(dict(
-                    invalid_preparation_frames=self.input.invalid_preparation_frames,
-                    last_invalid_frame=self.input.last_invalid_frame),indent=2),encoding='utf-8')
-        try:
-            self.queue.put(None, timeout=3)
+            try:
+                self.input.close()
+            except Exception as exc:
+                resource_errors.append('input source did not stop: '+str(exc))
+            else:
+                if self.usb and getattr(self.input,'last_invalid_frame',None):
+                    try:
+                        (self.path/'uvc_input_diagnostics.json').write_text(json.dumps(dict(
+                            invalid_preparation_frames=self.input.invalid_preparation_frames,
+                            last_invalid_frame=self.input.last_invalid_frame),indent=2),encoding='utf-8')
+                    except Exception as exc:
+                        data_errors.append('could not write UVC diagnostics: '+str(exc))
+        if self.thread.is_alive():
+            try:
+                self.queue.put(None, timeout=3)
+            except Exception as exc:
+                resource_errors.append('could not stop camera feeder: '+str(exc))
             self.thread.join(8)
             if self.thread.is_alive():
-                raise RuntimeError('camera feeder did not stop')
-            self.source.emit('end-of-stream')
-            if self.accepted:
-                msg = self.bus.timed_pop_filtered(15 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
-                if msg is None or msg.type != Gst.MessageType.EOS:
-                    raise RuntimeError('hardware encoder failed to finish MP4')
-        finally:
-            self.pipeline.set_state(Gst.State.NULL)
+                resource_errors.append('camera feeder did not stop')
+        if not self.thread.is_alive():
+            try:
+                result=self.source.emit('end-of-stream')
+                if result != Gst.FlowReturn.OK:
+                    data_errors.append('pipeline rejected end-of-stream')
+                if self.accepted:
+                    msg = self.bus.timed_pop_filtered(15 * Gst.SECOND, Gst.MessageType.EOS | Gst.MessageType.ERROR)
+                    if msg is None:
+                        data_errors.append('hardware encoder did not finish MP4 (EOS timeout)')
+                    elif msg.type != Gst.MessageType.EOS:
+                        error, debug = msg.parse_error()
+                        data_errors.append('hardware encoder did not finish MP4: %s %s' % (error,debug))
+            except Exception as exc:
+                data_errors.append('hardware pipeline finalization failed: '+str(exc))
+        try:
+            transition=self.pipeline.set_state(Gst.State.NULL)
+            if transition == Gst.StateChangeReturn.FAILURE:
+                raise RuntimeError('recording pipeline refused NULL state')
+            result,current,pending=self.pipeline.get_state(5 * Gst.SECOND)
+            if (result != Gst.StateChangeReturn.SUCCESS or current != Gst.State.NULL
+                    or pending != Gst.State.VOID_PENDING):
+                raise RuntimeError('recording pipeline did not reach NULL state')
+        except Exception as exc:
+            resource_errors.append(str(exc))
+        try:
             self.file.flush()
-            os.fsync(self.file.fileno())
+        except Exception as exc:
+            resource_errors.append('timestamp file flush failed: '+str(exc))
+        try:
+            if not self.file.closed:
+                os.fsync(self.file.fileno())
+        except Exception as exc:
+            resource_errors.append('timestamp file sync failed: '+str(exc))
+        try:
             self.file.close()
+        except Exception as exc:
+            resource_errors.append('timestamp file close failed: '+str(exc))
+        if resource_errors:
+            raise RuntimeError('camera resource shutdown unconfirmed: '+'; '.join(resource_errors))
         if not self.accepted:
-            raise RuntimeError('no recorded video frames')
-        result = subprocess.run(['ffprobe','-v','error','-select_streams','v:0','-count_packets',
-            '-show_entries','stream=codec_name,width,height,nb_read_packets,duration',
-            '-of','json',str(self.path/'frames.mp4')], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-        text = result.stdout.decode(errors='replace')
-        if result.returncode or result.stderr.strip():
-            raise RuntimeError('ffprobe failed: '+ result.stderr.decode(errors='replace'))
-        data = json.loads(text[text.index('{'):])
-        (self.path/'video_check.json').write_text(json.dumps(data,indent=2))
-        stream = data['streams'][0]
-        verify_resolution((stream['width'],stream['height']),self.capture_size,self.name+' saved video')
-        expected_codec = 'hevc' if self.usb else 'h264'
-        if stream['codec_name'] != expected_codec or int(stream['nb_read_packets']) != self.accepted:
-            raise RuntimeError('encoded packet count differs from accepted frame count')
-        # Both camera kinds now carry delivery-gap evidence.
-        (self.path/'frame_gap_qc.json').write_text(json.dumps(self.frame_gap_qc,ensure_ascii=False,indent=2),encoding='utf-8')
+            data_errors.append('no recorded video frames')
+        stream=None
+        if self.accepted and not data_errors:
+            try:
+                result = subprocess.run(['ffprobe','-v','error','-select_streams','v:0','-count_packets',
+                    '-show_entries','stream=codec_name,width,height,nb_read_packets,duration',
+                    '-of','json',str(self.path/'frames.mp4')], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+                text = result.stdout.decode(errors='replace')
+                if result.returncode or result.stderr.strip():
+                    raise ValueError('ffprobe failed: '+ result.stderr.decode(errors='replace'))
+                data = json.loads(text[text.index('{'):])
+                stream = data['streams'][0]
+                verify_resolution((stream['width'],stream['height']),self.capture_size,self.name+' saved video')
+                expected_codec = 'hevc' if self.usb else 'h264'
+                if stream['codec_name'] != expected_codec or int(stream['nb_read_packets']) != self.accepted:
+                    raise ValueError('encoded packet count differs from accepted frame count')
+                (self.path/'video_check.json').write_text(json.dumps(data,indent=2))
+            except Exception as exc:
+                data_errors.append(str(exc))
+        try:
+            # Both camera kinds now carry delivery-gap evidence.
+            (self.path/'frame_gap_qc.json').write_text(json.dumps(self.frame_gap_qc,ensure_ascii=False,indent=2),encoding='utf-8')
+        except Exception as exc:
+            data_errors.append('could not write frame-gap evidence: '+str(exc))
+        if data_errors:
+            raise CameraDataError('; '.join(data_errors))
         return dict(frames=self.accepted, encoded=self.encoded, probe=stream,
                     writer_queue=self.queue.stats() if not self.usb else None,
                     max_timestamp_flush_seconds=self.max_timestamp_flush_seconds,
