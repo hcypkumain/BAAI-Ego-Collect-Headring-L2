@@ -5,6 +5,17 @@ from pathlib import Path
 
 USB_ROOT=Path('/home/orangepi/maintenance/usb-phone-adb')
 
+def render_systemd_unit(raw,root):
+    """Render only known legacy project-root prefixes without overlapping replacements."""
+    text=raw.decode('utf-8')
+    marker='__HEADRING_PROJECT_ROOT__'
+    if marker in text:raise ValueError('unit source contains reserved renderer marker')
+    roots=('/home/orangepi/Desktop/Embodied-Brain-Collect-main.2',
+           '/home/orangepi/Desktop/Embodied-Brain-Collect-main')
+    for old in sorted(roots,key=len,reverse=True):
+        text=re.sub(re.escape(old)+r'(?![A-Za-z0-9._-])',marker,text)
+    return text.replace(marker,str(root)).encode('utf-8')
+
 def plan(root,include_vendor,include_lan_time=False):
     result=[]
     for source in sorted((root/'services/phone-media').rglob('*')):
@@ -164,10 +175,7 @@ def main():
             saved=backup/target.relative_to('/');saved.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(target,saved)
         raw=source.read_bytes()
         if unit:
-            text=raw.decode('utf-8')
-            for old in ('/home/orangepi/Desktop/Embodied-Brain-Collect-main.2','/home/orangepi/Desktop/Embodied-Brain-Collect-main'):
-                text=text.replace(old,str(root))
-            raw=text.encode('utf-8')
+            raw=render_systemd_unit(raw,root)
         fd,temporary=tempfile.mkstemp(prefix='.'+target.name+'-',dir=str(target.parent))
         try:
             with os.fdopen(fd,'wb') as stream:stream.write(raw);stream.flush();os.fsync(stream.fileno())
