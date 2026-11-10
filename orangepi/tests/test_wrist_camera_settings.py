@@ -468,7 +468,8 @@ class ReportIntegrationTests(unittest.TestCase):
         modules, Gst, pipeline = runtime_modules(config)
         recorder = load_isolated_module('recorders/camera/mpp_camera_recorder.py', modules)
         report = self.report()
-        source = Mock(camera_settings=report, description='unchanged source pipeline')
+        source = Mock(camera_settings=report, description='unchanged source pipeline',
+                      last_invalid_frame=None,invalid_preparation_frames=0)
         probe = dict(streams=[dict(codec_name='hevc', width=640, height=480, nb_read_packets='1', duration='0.03')])
         result = SimpleNamespace(returncode=0, stdout=json.dumps(probe).encode(), stderr=b'')
         with tempfile.TemporaryDirectory() as tmp, patch.object(recorder, 'UvcSource', return_value=source), \

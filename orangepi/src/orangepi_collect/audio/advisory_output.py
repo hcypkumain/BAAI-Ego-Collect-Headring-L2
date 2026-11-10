@@ -182,13 +182,15 @@ class AudioRouter:
         self._lock=threading.Lock(); self._loaded=False; self._enabled=True
         self._jobs=set();self._cancel_version=0;self._operation_version=0
         self._server=SERVER; self._headphone=HEADPHONE; self._speaker=SPEAKER
-        self._desired=None; self._version=0; self._pending=False
+        self._desired=None; self._version=0; self._request_id=0; self._pending=False
         self._active=''; self._playing=''; self._route=''; self._applied={}
         self._volume_job=None; self._volume_meta=None; self._volume_block=None; self._next_volume_try=0
         self._job_factory=_Job; self._last_log=None
         self._state={'policy':'advisory','enabled':True,'state':'idle','active_sink':'',
                      'active_route':'','last_result':'unavailable','last_error':'',
-                     'volume_percent':None,'config_loaded':False,'config_degraded':False,
+                     'volume_percent':None,'volume_requested':None,'volume_applied':None,'volume_generation':0,
+                     'volume_state':'unknown','volume_sink':'','volume_error':'',
+                     'config_loaded':False,'config_degraded':False,
                      'route':'none','legacy_config':False,'headphone_address':'',
                      'selection_source':'legacy','selection_degraded':False}
 
@@ -287,7 +289,10 @@ class AudioRouter:
             if not self._version:
                 self._desired=desired
                 self._pending=desired is not None
-            self._state.update(enabled=enabled,volume_percent=self._desired,config_loaded=True,config_degraded=degraded,state='idle' if enabled else 'disabled',route='none' if enabled else 'disabled',legacy_config=legacy)
+            self._state.update(enabled=enabled,volume_percent=self._desired,volume_requested=self._desired,
+                volume_state='pending' if desired is not None and enabled else 'disabled' if not enabled else 'unknown',
+                config_loaded=True,config_degraded=degraded,state='idle' if enabled else 'disabled',
+                route='none' if enabled else 'disabled',legacy_config=legacy)
         self._loaded=True
         if degraded:self._log('config_degraded')
 
@@ -388,12 +393,13 @@ class AudioRouter:
             if len(fields)>=2 and fields[1] in (self._headphone,self._speaker):found.add(fields[1])
         return found,None
 
-    def request_volume(self, percent):
+    def request_volume(self, percent, request_id=None):
         percent=_volume(percent)
         with self._lock:
             self._desired=percent;self._version+=1;self._pending=True
+            self._request_id=request_id if type(request_id) is int and request_id>=0 else self._request_id+1
             self._next_volume_try=0;self._volume_block=None
-            self._state['volume_percent']=percent
+            self._state.update(volume_percent=percent,volume_requested=percent,volume_generation=self._request_id,volume_state='pending',volume_error='')
 
     def _stop_volume_job(self):
         if self._volume_job is not None:self._stop_job(self._volume_job)
@@ -405,12 +411,23 @@ class AudioRouter:
             result=self._poll_job(self._volume_job)
             if self._decision(cancelled,skipped):self._stop_volume_job();return
             if result is None:return
-            sink,percent,version=self._volume_meta
+            sink,percent,version,phase=self._volume_meta
             success=not result.error and result.code==0
+            if success and phase=='set':
+                self._volume_meta=(sink,percent,version,'readback')
+                self._update(volume_state='reading_back')
+                self._volume_job=self._new_job(['pactl','--server',self._server,'get-sink-volume',sink],self._environment(sink),VOLUME_SECONDS)
+                return
+            if success and phase=='readback':success=self._readback_matches(result.out,percent)
             if success:
-                self._applied[sink]=percent
-                self._update(volume_sink=sink)
-            else:self._volume_block=(sink,version);self._log('volume_failed',code=result.code,error=result.error or 'volume_failed')
+                self._applied[sink]=(percent,version)
+                with self._lock:
+                    if self._version==version:
+                        self._state.update(volume_applied=percent,volume_sink=sink,volume_state='applied',volume_error='')
+            else:
+                self._volume_block=(sink,version);self._log('volume_failed',code=result.code,error=result.error or 'volume_failed')
+                with self._lock:
+                    if self._version==version:self._state.update(volume_state='failed',volume_error='sink_readback_mismatch' if phase=='readback' and not result.error and result.code==0 else 'sink_apply_failed')
             with self._lock:
                 if success and self._version==version:self._pending=False
             self._volume_job=None;self._volume_meta=None
@@ -419,31 +436,44 @@ class AudioRouter:
         with self._lock:percent,version,pending=self._desired,self._version,self._pending
         if percent is None:return
         if self._volume_block==(sink,version):return
-        if not pending and self._applied.get(sink)==percent:return
-        self._volume_meta=(sink,percent,version)
+        if not pending and self._applied.get(sink)==(percent,version):return
+        self._volume_meta=(sink,percent,version,'set')
+        with self._lock:
+            if self._version==version:self._state.update(volume_state='applying',volume_error='')
         self._volume_job=self._new_job(['pactl','--server',self._server,'set-sink-volume',sink,str(percent)+'%'],self._environment(sink),VOLUME_SECONDS)
+
+    @staticmethod
+    def _readback_matches(output, percent):
+        try:
+            values=[float(value) for value in re.findall(rb'/\s*(\d+(?:\.\d+)?)%',output)]
+            return bool(values) and all(abs(value-percent)<=0.6 for value in values)
+        except (TypeError,ValueError):return False
 
     def _prepare_volume(self, cancelled, skipped):
         self._pump_volume(cancelled,skipped)
-        until=time.monotonic()+VOLUME_SECONDS+.05
+        until=time.monotonic()+2*VOLUME_SECONDS+.1
         while self._volume_job is not None and time.monotonic()<until:
             action=self._decision(cancelled,skipped)
             if action:self._stop_volume_job();return action,False
             self._pump_volume(cancelled,skipped)
             if self._volume_job is not None:time.sleep(.02)
-        if self._volume_job is not None:self._stop_volume_job()
-        with self._lock:desired=self._desired
-        return self._decision(cancelled,skipped),desired is None or self._applied.get(self._playing)==desired
+        if self._volume_job is not None:
+            phase=self._volume_meta[3] if self._volume_meta else 'set';self._stop_volume_job()
+            with self._lock:self._state.update(volume_state='failed',volume_error='sink_'+phase+'_timeout')
+        with self._lock:desired,version=self._desired,self._version
+        return self._decision(cancelled,skipped),desired is None or self._applied.get(self._playing)==(desired,version)
 
     def flush_volume(self):
         try:
             self._begin_operation()
             self._ensure_config()
-            if not self._enabled:return False
+            if not self._enabled:
+                self._update(volume_state='disabled',volume_error='')
+                return False
             with self._lock:pending=self._pending;next_try=self._next_volume_try
             if not pending:return True
             if time.monotonic()<next_try:return False
-            until=time.monotonic()+PROBE_SECONDS+VOLUME_SECONDS+.1
+            until=time.monotonic()+PROBE_SECONDS+2*VOLUME_SECONDS+.2
             found,_=self._probe(lambda:False,lambda:False)
             targets=[]
             for sink in (self._active,self._headphone,self._speaker):
@@ -454,10 +484,15 @@ class AudioRouter:
                 self._pump_volume()
                 while self._volume_job is not None and time.monotonic()<until:
                     self._pump_volume();time.sleep(.02)
-                if self._volume_job is not None:self._stop_volume_job();break
+                if self._volume_job is not None:
+                    phase=self._volume_meta[3] if self._volume_meta else 'set';self._stop_volume_job()
+                    with self._lock:self._state.update(volume_state='failed',volume_error='sink_'+phase+'_timeout')
+                    break
                 with self._lock:pending=self._pending
                 if not pending:self._playing='';return True
-            with self._lock:self._next_volume_try=time.monotonic()+1
+            with self._lock:
+                self._next_volume_try=time.monotonic()+1
+                if self._pending and not targets and self._state.get('volume_state')!='failed':self._state.update(volume_state='unavailable',volume_error='sink_unavailable')
             self._playing='';return False
         except Exception:
             self._stop_volume_job();self._playing='';self._log('volume_failed',error='internal_error');return False

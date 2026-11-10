@@ -50,14 +50,19 @@ class WebControls:
         except Exception:return {'warning':'音频状态暂不可用'}
         if not isinstance(value,dict):return {'warning':'音频状态暂不可用'}
         result={}
-        for key,limit in (('warning',160),('current_sink',255),('last_outcome',32)):
+        for key,limit in (('warning',160),('current_sink',255),('last_outcome',32),('volume_sink',255),('volume_error',64)):
             text=value.get(key)
             if isinstance(text,str):result[key]=''.join(c for c in text[:limit] if ord(c)>=32 and ord(c)!=127)
         if value.get('output') in ('headphones','speaker','none','disabled'):result['output']=value['output']
         if type(value.get('speaking')) is bool:result['speaking']=value['speaking']
-        for key,maximum in (('queue_size',8),('generation',9007199254740991),('volume_percent',150)):
+        for key,maximum in (('queue_size',8),('generation',9007199254740991),('volume_percent',150),('volume_generation',9007199254740991)):
             number=value.get(key)
             if type(number) is int and 0<=number<=maximum:result[key]=number
+        for key in ('volume_requested','volume_applied'):
+            number=value.get(key)
+            if type(number) is int and 0<=number<=120:result[key]=number
+        if value.get('volume_state') in ('unknown','pending','applying','reading_back','applied','failed','unavailable','disabled'):
+            result['volume_state']=value['volume_state']
         return result
 
     def countdown_voice(self,word):

@@ -247,7 +247,14 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.troubleshooting(name)
 
     def announce(self):
-        self.voice.say('本段任务参考图像，'+self.reference_image_title()+'。目前尚未录制，请按图像准备场景。设备就绪后，点击开始采集。')
+        from speech_prompts import task_announcement
+        prompt=task_announcement(self.reference_image_title())
+        self.voice.say(prompt)
+
+    def prefetch_reference_announcement(self):
+        from speech_prompts import task_announcement
+        prefetch=getattr(self.voice,'prefetch',None)
+        if callable(prefetch):prefetch({'task_announcement':task_announcement(self.reference_image_title())},priority='urgent')
 
     def prepare(self):
         if not self.retry_pending_owner(force=True):
@@ -305,6 +312,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         try:
             self.path=None
             selection=self.reference_begin_preparation()
+            self.prefetch_reference_announcement()
             self.attempted.add(str(self.image))
             self.path,identity=self.reference_reserve_directory(root);new_path=self.path
             # Freeze resolved devices and the exact task/queue identity for this owner.

@@ -60,13 +60,16 @@ class Speaker:
         self._retired = deque()
         self._assets_valid = False
         self._pending_volume = None
+        self._volume_revision = 0
         self._status = dict(warning='', output='none', current_sink='', speaking=False,
-                            last_outcome='deferred', volume_percent=None)
+                            last_outcome='deferred', volume_percent=None,volume_requested=None,
+                            volume_applied=None,volume_state='unknown',volume_sink='',volume_error='',volume_generation=0)
         self._thread = threading.Thread(target=self._work, name='advisory-voice', daemon=True)
         try: self._thread.start()
         except Exception:
             self._closed = True
             self._status.update(warning='语音后台暂不可用，采集不受影响。', last_outcome='failed')
+        else:self._enqueue('warm_fixed',None,1800)
 
     def snapshot(self):
         with self._condition:
@@ -86,11 +89,15 @@ class Speaker:
         with self._condition:
             if generation != self._generation or self._closed:
                 return
+            reported=changes.get('volume_generation')
+            if type(reported) is int and reported<self._volume_revision:
+                for key in ('volume_percent','volume_requested','volume_state','volume_error','volume_generation'):
+                    changes.pop(key,None)
             if 'speaking' in changes and bool(changes['speaking']) != self._status['speaking']:
                 self._prompt_event = (generation, bool(changes['speaking']))
             self._status.update(changes)
 
-    def _enqueue(self, kind, value, ttl):
+    def _enqueue(self, kind, value, ttl, front=False):
         if type(ttl) not in (int, float) or not math.isfinite(ttl) or ttl <= 0:
             with self._condition:
                 self._status.update(warning='语音提示有效期无效，采集不受影响。', last_outcome='failed')
@@ -105,7 +112,8 @@ class Speaker:
             if len(self._queue) == QUEUE_LIMIT:
                 self._queue.popleft()
                 warning = '语音队列已满，已丢弃较早提示。'
-            self._queue.append((self._generation, self._event, time.monotonic()+float(ttl), kind, value))
+            item=(self._generation, self._event, time.monotonic()+float(ttl), kind, value)
+            self._queue.appendleft(item) if front else self._queue.append(item)
             self._status.update(last_outcome='queued', warning=warning)
             self._condition.notify_all()
 
@@ -119,6 +127,20 @@ class Speaker:
 
     def speak_prompt(self, text, ttl=DEFAULT_TTL):
         self.say(text, ttl)
+
+    def prefetch(self, prompts, ttl=300.0, priority='warm'):
+        rows=[]
+        if isinstance(prompts,dict):rows=list(prompts.items())
+        else:
+            for index,item in enumerate(prompts or ()):
+                if isinstance(item,(tuple,list)) and len(item)==2:rows.append((item[0],item[1]))
+                else:rows.append(('dynamic_%d'%index,item))
+        clean=[]
+        for name,text in rows:
+            if isinstance(name,str) and isinstance(text,str) and text and len(text)<=TEXT_LIMIT:
+                clean.append((name[:96],text))
+        if clean:self._enqueue('prefetch',(clean,'urgent' if priority=='urgent' else 'warm'),ttl,front=priority=='urgent')
+        return len(clean)
 
     def play(self, path, ttl=DEFAULT_TTL):
         if not isinstance(path, (str, Path)):
@@ -147,20 +169,24 @@ class Speaker:
             self._event.set()
             self._generation += 1
             self._event = threading.Event()
+            warm=[item for item in self._queue if item[3] in ('prefetch','warm_fixed')] if not closing else []
             self._queue.clear()
+            for _,_,deadline,kind,value in warm:
+                self._queue.append((self._generation,self._event,deadline,kind,value))
             self._cancel_flag = self._skip_flag = False
             self._prompt_event = (self._generation, False)
             self._status.update(speaking=False, current_sink='', last_outcome='cancelled')
             router, cache = self._router, self._cache
-            if cache is not None:
+            if cache is not None and closing:
                 self._cache = None
                 self._retired.append(cache)
+            if not closing:cache=None
             self._condition.notify_all()
         # Snapshot handles under the short lifecycle lock; terminate outside it.
         if router is not None:
             try: router.cancel_active()
             except Exception: pass
-        if cache is not None:
+        if cache is not None and closing:
             try: cache.closed = True  # CloudCache checks this before registering a spawned child.
             except Exception: pass
             self._terminate(getattr(cache, 'process', None))
@@ -177,8 +203,8 @@ class Speaker:
         with self._condition:
             if self._closed:
                 return
-            self._pending_volume = percent
-            self._status['volume_percent'] = percent
+            self._volume_revision+=1;self._pending_volume=(percent,self._volume_revision)
+            self._status.update(volume_percent=percent,volume_requested=percent,volume_state='pending',volume_error='',volume_generation=self._volume_revision)
             self._condition.notify_all()
 
     def tick(self):
@@ -232,7 +258,19 @@ class Speaker:
         if output == 'speaker' and playing:
             warning = '耳机暂不可用，使用扬声器播报。'
         self._publish(job[0], output=output, current_sink=sink, speaking=playing,
-                      last_outcome='playing' if playing else self.snapshot()['last_outcome'], warning=warning)
+                      last_outcome='playing' if playing else self.snapshot()['last_outcome'], warning=warning,
+                      **self._volume_changes(job[0],info))
+
+    def _volume_changes(self, generation, info):
+        returned=info.get('volume_generation',0)
+        with self._condition:
+            if generation!=self._generation or self._closed:return {}
+            current=self._status.get('volume_generation',0)
+            if ((self._pending_volume is not None and self._pending_volume[1]>returned) or current>returned):
+                return {key:info[key] for key in ('volume_applied','volume_sink') if key in info}
+        return dict(volume_percent=info.get('volume_requested'),volume_requested=info.get('volume_requested'),
+            volume_applied=info.get('volume_applied'),volume_state=info.get('volume_state','unknown'),
+            volume_sink=info.get('volume_sink',''),volume_error=info.get('volume_error',''),volume_generation=returned)
 
     def _poll_cancel(self, job):
         self._submit_volume()
@@ -286,9 +324,12 @@ class Speaker:
         with self._condition:
             router = self._router
             if router is None or self._closed: return
-            value, self._pending_volume = self._pending_volume, None
-        if value is not None:
-            try: router.request_volume(value)
+            pending, self._pending_volume = self._pending_volume, None
+        if pending is not None:
+            value,revision=pending
+            try:
+                try:router.request_volume(value,request_id=revision)
+                except TypeError:router.request_volume(value)
             except Exception:
                 self._publish(self._generation, warning='音量暂未应用，采集不受影响。')
 
@@ -298,7 +339,7 @@ class Speaker:
         if cache is None:
             cache = self._cache_factory()
             with self._condition:
-                if not self._reason(job):
+                if not self._closed:
                     self._cache, self._cache_generation = cache, job[0]
                 else:
                     self._retired.append(cache)
@@ -322,9 +363,26 @@ class Speaker:
         self._submit_volume()
         if router is not None:
             router.flush_volume()
+            try:
+                info=router.status;generation=self.snapshot()['generation'];state=info.get('volume_state','unknown')
+                changes=self._volume_changes(generation,info)
+                if state in ('failed','unavailable'):changes['warning']='音量未能应用，采集不受影响。'
+                self._publish(generation,**changes)
+            except Exception:pass
 
     def _perform(self, job):
         generation, event, deadline, kind, value = job
+        if kind in ('prefetch','warm_fixed'):
+            if self._closed or time.monotonic()>=deadline:return
+            cache=self._get_cache(job)
+            try:
+                if kind=='warm_fixed':
+                    from speech_prompts import fixed_prompts
+                    rows=fixed_prompts().items();priority='warm'
+                else:rows,priority=value
+                for prompt_id,text in rows:cache.request(text,wait=0,priority=priority,prompt_id=prompt_id)
+            except Exception:pass
+            return
         reason = self._reason(job)
         if reason:
             self._publish(generation, last_outcome=reason)
@@ -343,10 +401,14 @@ class Speaker:
             path = None
             while not self._reason(job):
                 self._submit_volume()
-                path = cache.request(value, wait=min(.1, max(0, deadline-time.monotonic())))
+                path = cache.request(value, wait=min(.1, max(0, deadline-time.monotonic())),priority='urgent')
                 if path: break
                 if getattr(cache, 'config', {}).get('enabled') is False: break
-                self._publish(generation, warning='语音正在生成，采集继续。')
+                terminal=getattr(cache,'terminal_error',lambda _text:None)(value)
+                if terminal:
+                    self._publish(generation,warning='语音合成失败（'+str(terminal)[:80]+'），本次提示已跳过；采集继续。',last_outcome='failed')
+                    return
+                self._publish(generation, warning='语音正在准备或重试，采集继续。')
                 event.wait(.01)
             if not path or self._reason(job):
                 self._publish(generation, warning='语音未及时生成，本次提示已跳过。', last_outcome=self._reason(job) or 'deferred')

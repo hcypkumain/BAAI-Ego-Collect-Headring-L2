@@ -331,7 +331,10 @@ class ReferenceControlsMixin:
         else:identifier=value['image_id']
         self._reference_manual_id=identifier;self._apply_reference_snapshot(snapshot)
         entry=next(entry for entry in self._reference_entries if entry['snapshot']['items'][entry['index']]['id']==identifier)
-        self.image=entry['path'];self.state_write()
+        self.image=entry['path']
+        prefetch=getattr(self,'prefetch_reference_announcement',None)
+        if callable(prefetch):prefetch()
+        self.state_write()
         if self.state!='device_confirm' and self.selected_devices:self.state='idle';self.prepare()
 
     def _apply_reference_snapshot(self,snapshot):

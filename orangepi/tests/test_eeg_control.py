@@ -13,6 +13,7 @@ from eeg_settings import DEFAULT, apply
 from eeg_worker import HostGate
 from eeg_bridge import EegProcess
 import dashboard
+import web_controls
 
 
 class EegControlTests(unittest.TestCase):
@@ -64,6 +65,21 @@ class EegControlTests(unittest.TestCase):
         bridge.process=Mock();bridge.process.poll.return_value=1
         bridge.process.returncode=1;bridge.error='disconnected'
         with self.assertRaisesRegex(RuntimeError,'disconnected'):bridge.health()
+
+    def test_dashboard_filter_action_persists_selected_preset(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base=Path(temp);(base/'runtime').mkdir()
+            owner=web_controls.WebControls();owner.state='ready';owner.ui_revision=4
+            owner.worker=None;owner.keyboard=None;owner.voice=Mock();owner.selected_devices=None
+            owner.dashboard=Mock();owner.dashboard.take.return_value={'action':'eeg_filter','revision':4,'value':'raw'}
+            owner.ui_publish=Mock();owner.state_write=Mock();owner.release_prepared=Mock();owner.stop_preview=Mock();owner.ensure_preview=Mock()
+            owner.web_config={'eeg':dict(DEFAULT)}
+            with patch.object(web_controls,'BASE',base),patch.object(web_controls,'devices',return_value={'eeg':dict(DEFAULT)}):
+                owner.dashboard_tick()
+            saved=json.loads((base/'runtime/eeg_preferences.json').read_text())
+            self.assertEqual(saved,{'filter_preset':'raw'})
+            self.assertEqual(owner.web_config['eeg']['filter_preset'],'raw')
+            owner.dashboard.complete.assert_called_once_with(None)
 
 
 if __name__=='__main__':unittest.main()

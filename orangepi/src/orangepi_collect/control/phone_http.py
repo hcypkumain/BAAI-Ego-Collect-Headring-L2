@@ -14,6 +14,7 @@ import struct
 from urllib.parse import parse_qs, urlsplit
 
 ASSETS = {'/phone-app.js': ('phone_app.js', 'text/javascript; charset=utf-8'),
+          '/dashboard-settings.js':('dashboard_settings.js','text/javascript; charset=utf-8'),
           '/reference-bundles.js': ('reference_bundles.js','text/javascript; charset=utf-8'),
           '/phone-references.js': ('phone_references.js', 'text/javascript; charset=utf-8'),
           '/phone-diagnostics.js': ('phone_diagnostics.js', 'text/javascript; charset=utf-8'),
