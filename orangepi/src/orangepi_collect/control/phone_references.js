@@ -6,7 +6,7 @@
   let pickerTarget=null,pendingSelection=null,resumeOffered=false;
   let lastTransfer=null;
    let pendingBundles=null;
-   let usbData=null,usbSelected=new Set(),usbState={state:'idle'},usbPolling=false,usbPollAt=0,usbCompleteSeen='';
+   let usbData=null,usbSelected=new Set(),usbRemove=new Set(),usbState={state:'idle'},usbPolling=false,usbPollAt=0,usbCompleteSeen='',usbSubmitting=false,usbUnknown=false,usbStatusKnown=false,usbSubmissionStamp='';
   const singleList=()=>status().task_list?.selection_scope==='single_list';
   const manualTasks=()=>status().task_list?.manual_task_switch===true;
   const activeTask=()=>manualTasks()?status().task_list?.block_task_id:status().task_list?.id;
@@ -21,8 +21,9 @@
   function release(){for(const url of urls)URL.revokeObjectURL(url);urls.clear();}
   function suspend(){if(lastTransfer?.state==='running')lastTransfer.state='interrupted';generation++;key='';loaded=false;list=null;release();root.hidden=true;root.replaceChildren();}
   function lock(value){busy=value;for(const node of root.querySelectorAll('button,input,select'))node.disabled=value;controls();}
-   let select,uploadLabel,bundleLabel,use,refresh,trashButton,hiddenButton,sampling,newName,createButton,items,count,more,preview,activeList,selectionBox,transfer,transferText,progress,usbScan,usbPanel,usbChoices,usbApply,usbInfo,usbProgress;
-   const usbActive=()=>['building','ready','committing','needs_recovery'].includes(usbState.state)||['usb_importing','usb_import_recovery'].includes(status().state);
+   let select,uploadLabel,bundleLabel,use,refresh,trashButton,hiddenButton,sampling,newName,createButton,items,count,more,preview,activeList,selectionBox,transfer,transferText,progress,usbScan,usbPanel,usbChoices,usbOldChoices,usbApply,usbInfo,usbProgress;
+   const usbServerActive=()=>['building','ready','committing','needs_recovery'].includes(usbState.state)||['usb_importing','usb_import_recovery'].includes(status().state);
+   const usbActive=()=>!usbStatusKnown||usbSubmitting||usbUnknown||usbServerActive();
   // Keep the native input connected while a mobile gallery is open. Privacy
   // suspension still removes every displayed image and cancels all requests.
   const files=el('input');files.type='file';files.accept='image/png,image/jpeg,image/webp';files.multiple=true;files.id='phone-reference-files';files.className='phone-reference-file';files.tabIndex=-1;files.setAttribute('aria-label','选择参考图片');root.parentElement.append(files);
@@ -36,14 +37,14 @@
    if(current()&&loaded&&target===selected){await uploadFiles(chosen);return;}
    pendingSelection={files:chosen,listId:target};resumeOffered=false;
   };
-   function controls(){if(!use)return;const editable=!busy&&loaded&&!!key&&!usbActive();
+   function controls(){if(!use)return;const editable=!busy&&loaded&&!!key&&!(usbSubmitting||usbUnknown||usbServerActive());
    use.disabled=!editable||trash||hiddenView||(manualTasks()&&(!switchAllowed(selected)||!list||list.remaining===0||list.sampling_enabled===false))||(singleList()&&(!list||list.import_pending||['pool','all'].includes(selected)))||!(status().actions||[]).includes('reference_list');
    for(const node of root.querySelectorAll('[data-switch-task]')){const id=node.dataset.switchTask,current=id===activeTask();node.textContent=current?'当前列表':'切换到此列表';node.disabled=!editable||!switchAllowed(id)||current||node.dataset.unavailable==='true'||!(status().actions||[]).includes('reference_list');}
    files.disabled=!editable||trash||hiddenView;uploadLabel.classList.toggle('disabled',files.disabled);createButton.disabled=!editable||trash||hiddenView;newName.disabled=!editable||trash||hiddenView;more.hidden=next===null;
     bundles.disabled=!editable||trash||hiddenView;bundleLabel.classList.toggle('disabled',bundles.disabled);
-    usbScan.disabled=!editable||!(status().actions||[]).includes('usb_task_import');
-    usbApply.disabled=usbScan.disabled||!usbData||usbSelected.size===0;
-    for(const node of usbChoices.querySelectorAll('input'))node.disabled=!editable;
+    usbScan.disabled=!editable||!usbStatusKnown||!(status().actions||[]).includes('usb_task_import');
+    usbApply.disabled=usbScan.disabled||!usbData||(!usbSelected.size&&!usbRemove.size);
+    for(const node of usbPanel.querySelectorAll('input'))node.disabled=!editable;
    uploadLabel.parentElement.hidden=trash||hiddenView;
     for(const node of root.querySelectorAll('.phone-reference-item button,.phone-reference-selection button'))if(node!==usbApply)node.disabled=!editable;
    for(const node of sampling?.querySelectorAll('input[type=checkbox],input[type=radio]')||[])node.disabled=!editable||hiddenView||node.dataset.pending==='true'||(singleList()&&!(status().actions||[]).includes('reference_list'));
@@ -64,9 +65,9 @@
     usbScan=button('从 U 盘选择 ZIP',scanUsb);usbScan.id='phone-reference-usb-scan';upload.insertBefore(usbScan,use);
     usbPanel=el('section','','phone-reference-selection');usbPanel.id='phone-reference-usb-panel';
     usbInfo=el('p','插入U盘后扫描，勾选需要的 ZIP；不会默认全选。','phone-hint');usbInfo.setAttribute('role','status');usbInfo.setAttribute('aria-live','polite');
-    usbChoices=el('div');usbApply=button('导入选中并替换旧列表',applyUsb,'danger');usbApply.id='phone-reference-usb-apply';
+    usbChoices=el('div');usbOldChoices=el('div');usbApply=button('应用所选导入和删除',applyUsb,'primary');usbApply.id='phone-reference-usb-apply';
     usbProgress=el('progress');usbProgress.hidden=true;usbProgress.setAttribute('aria-label','U盘任务包导入进度');
-    usbPanel.append(usbInfo,usbChoices,usbProgress,usbApply,el('small','确认后移除全部旧列表，仅导入勾选的包；旧库自动备份，历史录制和本机标定不删除。'));
+    usbPanel.append(usbInfo,el('b','从U盘添加任务包'),usbChoices,el('b','旧任务列表（默认保留）'),usbOldChoices,usbProgress,usbApply,el('small','勾选的旧列表会移入回收站，可在回收站恢复。未勾选旧列表、历史录制和本机标定保持不变。'));
    const create=row();newName=el('input');newName.placeholder='新列表名称';newName.maxLength=128;newName.setAttribute('aria-label','新列表名称');newName.id='phone-reference-name';
    createButton=button('新建列表',async()=>{if(busy||!loaded)return;const name=newName.value.trim();if(!name){message('请输入新列表名称。');newName.focus();return;}await mutate({action:'create_list',name},true);});create.append(newName,createButton);
    selectionBox=el('section','','phone-reference-selection');selectionBox.id='phone-reference-selection';selectionBox.hidden=true;
@@ -112,7 +113,8 @@
    if(!reset&&data.revision!==revision)throw Error('图库已更新，请先刷新。');
    revision=data.revision;list=data.list;next=data.next_offset;loaded=true;
    if(reset){release();items.replaceChildren();preview.hidden=true;preview.querySelector('img').removeAttribute('src');}
-   count.textContent=trash?'回收站：删除的图片可恢复，已采集数据保留。':list.name+' · '+list.remaining+' / '+list.count+' 张待采集'+(list.readonly?' · 上传时自动新建列表':'');
+   count.textContent=trash?(list.deleted?'回收站列表：图片与已采集数据保留。':'回收站：删除的图片可恢复，已采集数据保留。'):list.name+' · '+list.remaining+' / '+list.count+' 张待采集'+(list.readonly?' · 上传时自动新建列表':'');
+   if(reset&&trash&&list.deleted){const restore=button('恢复此列表',()=>mutate({action:'restore_list',id:list.id},true));restore.id='phone-reference-restore-list';items.append(restore);}
    const jobs=[];
    for(const item of data.items){const card=el('article','','phone-reference-item'),thumb=el('img');thumb.alt=item.name;thumb.loading='lazy';const title=el('b',item.name),detail=el('small',item.deleted?'已删除':item.completed?'已完成采集':'待采集'),actions=row();
     actions.append(button('放大查看',()=>{if(!thumb.src)return;preview.querySelector('img').src=thumb.src;preview.hidden=false;preview.querySelector('button').focus();}));
@@ -199,33 +201,37 @@
     try{
      usbInfo.textContent='正在扫描头环上的U盘…';
      const data=await (await request('/api/phone/usb-task-import/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scan:true}),timeoutMs:30000})).json();if(!valid(id))return;
-     usbData=data;usbSelected=new Set();usbChoices.replaceChildren();usbProgress.hidden=true;
+     usbData=data;usbSelected=new Set();usbRemove=new Set();usbChoices.replaceChildren();usbOldChoices.replaceChildren();usbProgress.hidden=true;
      for(const file of data.files){const label=el('label','','phone-pool-row'),check=el('input');check.type='checkbox';check.checked=false;check.dataset.zipId=file.id;
-      check.onchange=()=>{if(check.checked)usbSelected.add(file.id);else usbSelected.delete(file.id);usbInfo.textContent='找到 '+data.files.length+' 个 ZIP，已选 '+usbSelected.size+' 个；当前旧列表 '+data.old_list_count+' 个。';controls();};
+      check.onchange=()=>{if(check.checked)usbSelected.add(file.id);else usbSelected.delete(file.id);usbInfo.textContent='找到 '+data.files.length+' 个 ZIP，已选 '+usbSelected.size+' 个；旧列表默认保留。';controls();};
       label.append(check,document.createTextNode(file.volume+' / '+file.relative_path+'（'+(file.size_bytes/1024/1024).toFixed(1)+' MiB）'));usbChoices.append(label);}
-     usbInfo.textContent=data.files.length?'找到 '+data.files.length+' 个 ZIP，请勾选要导入的包（当前未选中任何包）。':'没有找到 ZIP。请检查U盘连接，并把任务包放在根目录或前三层子目录。';
+     for(const old of data.old_lists||[]){const label=el('label','','phone-pool-row'),check=el('input');check.type='checkbox';check.checked=false;check.dataset.listId=old.id;check.onchange=()=>{if(check.checked)usbRemove.add(old.id);else usbRemove.delete(old.id);controls();};label.append(check,document.createTextNode(old.name+(old.readonly?'（系统列表，需先复制参考图）':'')));usbOldChoices.append(label);}
+     usbInfo.textContent=data.files.length?'找到 '+data.files.length+' 个 ZIP；默认不删除旧列表。':'没有找到 ZIP，可只选择要移入回收站的旧列表。';
     }catch(error){if(valid(id)){usbData=null;usbInfo.textContent=errorMessage(error);}}
     finally{if(valid(id))lock(false);}
    }
    function applyUsb(){
-    if(usbApply.disabled||!usbData||!usbSelected.size)return;
-    if(!global.confirm('将用选中的 '+usbSelected.size+' 个 ZIP 替换全部旧列表。旧库会备份，历史录制与标定不改动。确认继续？'))return;
+    if(usbApply.disabled||!usbData||(!usbSelected.size&&!usbRemove.size))return;
+    if(!global.confirm('导入 '+usbSelected.size+' 个任务包，并将 '+usbRemove.size+' 个旧列表移入回收站？其他旧列表会保留。'))return;
     pendingBundles=pendingSelection=null;showPendingSelection();
-    action('usb_task_import',{scan_id:usbData.scan_id,zip_ids:[...usbSelected],catalog_revision:usbData.catalog_revision,confirm_replace:true});
-    usbInfo.textContent='已提交，等待头环确认；请保持U盘连接。';usbApply.disabled=true;
+    usbSubmitting=true;controls();usbInfo.textContent='已提交，正在核实头环处理状态；请勿重复提交。';
+    const id=generation,submitted=usbData,payload={scan_id:submitted.scan_id,zip_ids:[...usbSelected],remove_list_ids:[...usbRemove],catalog_revision:submitted.catalog_revision};usbSubmissionStamp=String(usbState.updated_at||'');usbData=null;usbSelected.clear();usbRemove.clear();
+    Promise.resolve(action('usb_task_import',payload)).then(()=>{if(id!==generation)return;usbSubmitting=false;usbUnknown=true;usbInfo.textContent='正在核实头环处理状态；若状态仍未明确，请刷新页面后再操作。';controls();}).catch(()=>{if(id!==generation)return;usbSubmitting=false;usbUnknown=true;usbInfo.textContent='请求结果未知，请刷新页面核对头环状态后再操作；请勿重复提交。';controls();});
    }
-   async function pollUsb(){
-    if(usbPolling||!current()||root.hidden||Date.now()-usbPollAt<2000)return;
+   async function pollUsb(force=false){
+    if(usbPolling||!current()||root.hidden||(!force&&Date.now()-usbPollAt<2000))return;
     const id=generation;usbPolling=true;usbPollAt=Date.now();
     try{
      const data=await (await request('/api/phone/usb-task-import/status')).json();if(!valid(id))return;
-     usbState=data;
+     usbState=data;usbStatusKnown=true;
+     const stamp=String(data.updated_at||'');
+     if((usbSubmitting||usbUnknown)&&stamp&&stamp!==usbSubmissionStamp&&['building','ready','committing','needs_recovery','complete','failed'].includes(data.state)){usbSubmitting=false;usbUnknown=false;}
      if(data.state!=='idle'){
       usbInfo.textContent=(data.message||data.state)+(data.total?' · '+data.done+' / '+data.total:'');
       usbProgress.hidden=!data.total;usbProgress.max=Math.max(1,data.total||1);usbProgress.value=data.done||0;
      }
-     const stamp=String(data.updated_at||'');
-     if(data.state==='complete'&&stamp!==usbCompleteSeen&&!busy){usbCompleteSeen=stamp;usbData=null;usbSelected.clear();usbChoices.replaceChildren();await load();}
+     if(data.state==='complete'&&stamp!==usbCompleteSeen&&!busy){usbCompleteSeen=stamp;usbData=null;usbSelected.clear();usbRemove.clear();usbChoices.replaceChildren();usbOldChoices.replaceChildren();await load();}
+     if(data.state==='idle'&&usbUnknown){usbInfo.textContent='服务器状态仍为待确认，请刷新页面查询后再操作。';}
      controls();
     }catch(error){if(valid(id)&&usbActive())usbInfo.textContent='连接中断，导入可能仍在头环继续；恢复连接后刷新查看，不要重复提交。';}
     finally{usbPolling=false;}
@@ -235,7 +241,8 @@
     if(!busy&&loaded&&Number.isSafeInteger(snapshot.task_list?.catalog_revision)&&snapshot.task_list.catalog_revision>revision){invalidate('图库已在其他页面更新，请刷新后继续。');message('参考图库已更新，请点击刷新。');}
     controls();pollUsb();}}
   async function open(){suspend();const id=generation;selected=pendingSelection?.listId||(['interrupted','paused'].includes(lastTransfer?.state)?lastTransfer.listId:null)||activeTask()||status().task_list?.id||'all';resumeOffered=!!(pendingSelection||pendingBundles);trash=false;busy=false;ui();lock(true);message('正在连接参考图库…');
-   try{const access=await (await request('/api/phone/reference-access')).json();if(!valid(id))return;key=access.access_code;await catalog(selected,id);if(valid(id))message(manualTasks()?'选择想先拍的列表；当前列表做完后自动进入下一个，已完成进度保留。':singleList()?'选择一个列表采集；每段仅在该列表内随机抽图，完成后手动换列表。':'勾选参与抽取的列表；每段在混合任务池随机抽图，重采保持同一张。');}
+   usbStatusKnown=false;usbPollAt=0;usbSubmitting=false;usbUnknown=false;usbData=null;usbSelected.clear();usbRemove.clear();
+   try{const access=await (await request('/api/phone/reference-access')).json();if(!valid(id))return;key=access.access_code;await catalog(selected,id);await pollUsb(true);if(valid(id))message(manualTasks()?'选择想先拍的列表；当前列表做完后自动进入下一个，已完成进度保留。':singleList()?'选择一个列表采集；每段仅在该列表内随机抽图，完成后手动换列表。':'勾选参与抽取的列表；每段在混合任务池随机抽图，重采保持同一张。');}
    catch(error){failure(error,id);}finally{if(valid(id))lock(false);}
   }
   return {suspend,open,update,resumeNeeded:()=>!!(pendingSelection||pendingBundles)&&!resumeOffered};

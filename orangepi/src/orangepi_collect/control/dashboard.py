@@ -381,13 +381,17 @@ class Dashboard:
                     raise ValueError('请选择当前图库版本中的任务列表')
             if data['action']=='usb_task_import':
                 value=data.get('value')
-                if (not isinstance(value,dict) or set(value)!={'scan_id','zip_ids','catalog_revision','confirm_replace'}
-                        or value.get('confirm_replace') is not True or not valid_id(value.get('scan_id'))
-                        or not isinstance(value.get('zip_ids'),list) or not 1<=len(value['zip_ids'])<=50
+                if (not isinstance(value,dict) or set(value)!={'scan_id','zip_ids','catalog_revision','remove_list_ids'}
+                        or not valid_id(value.get('scan_id'))
+                        or not isinstance(value.get('zip_ids'),list) or len(value['zip_ids'])>50
                         or any(not valid_id(v) for v in value['zip_ids'])
                         or len(set(value['zip_ids']))!=len(value['zip_ids'])
+                        or not isinstance(value.get('remove_list_ids'),list)
+                        or any(not valid_id(v) for v in value['remove_list_ids'])
+                        or len(set(value['remove_list_ids']))!=len(value['remove_list_ids'])
+                        or not value['zip_ids'] and not value['remove_list_ids']
                         or type(value.get('catalog_revision')) is not int):
-                    raise ValueError('请勾选当前U盘任务包，并确认替换旧列表')
+                    raise ValueError('请选择任务包或要移入回收站的旧列表')
             if data['action'] in ('delete_recording','retain_error_recording'):
                 value=data.get('value')
                 if (not isinstance(value,dict) or set(value)!={'session_id','token'}

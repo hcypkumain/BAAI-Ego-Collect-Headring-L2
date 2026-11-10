@@ -166,7 +166,7 @@ class ReferenceControlsMixin:
         privacy=self.dashboard.privacy.snapshot()
         if (not self.reference_can_change() or privacy.get('required')
                 or privacy.get('stop_confirmed') is not True or privacy.get('phase')!='idle'):
-            raise ValueError('请先结束或放弃当前准备/采集，再替换任务库')
+            raise ValueError('请先结束或放弃当前准备/采集，再整理任务库')
         if self.usb_task_importer is None:raise ValueError('U盘导入暂未就绪')
         self.usb_task_importer.start(value)
         self._usb_import_previous_state=self.state
@@ -190,7 +190,7 @@ class ReferenceControlsMixin:
                 if pending.exists():
                     manager.update(state='needs_recovery',error=str(error),message='任务库提交结果待恢复，暂时禁止采集：'+str(error))
                     self.state='usb_import_recovery';self.state_write();return
-                manager.update(state='failed',error=str(error),message='旧列表未替换：'+str(error))
+                    manager.update(state='failed',error=str(error),message='任务库修改未完成，原有列表保留：'+str(error))
             state=manager.status()['state']
         if state in ('complete','failed'):
             self.state=getattr(self,'_usb_import_previous_state','device_confirm')

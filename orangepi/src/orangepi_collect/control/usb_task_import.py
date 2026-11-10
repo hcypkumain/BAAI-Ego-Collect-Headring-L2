@@ -1,4 +1,4 @@
-"""Selected USB ZIPs -> staged catalog -> one controller-owned replacement.
+"""Selected USB ZIPs -> staged catalog -> controller-owned merge commit.
 
 No recorder, calibration, network setting, or recording ledger is modified.
 Image bytes remain immutable; old catalog/preferences are backed up for recovery.
@@ -19,7 +19,7 @@ import uuid
 import zipfile
 
 from reference_catalog import (ReferenceCatalog, CatalogError, _durable, _encoded,
-    _sync_directory, unique_json, valid_id, MAX_IMAGES, MAX_INPUT_BYTES,
+    _sync_directory, unique_json, valid_id, MAX_IMAGES, MAX_LISTS, MAX_INPUT_BYTES,
     MAX_SCENE_FILES, MAX_SCENE_FILE_BYTES)
 
 SAFE_STATES = frozenset(('device_confirm', 'idle', 'failed_wait', 'exhausted'))
@@ -202,27 +202,33 @@ class UsbTaskImporter:
             self.scan_id = uuid.uuid4().hex;self.files = choices
         current = self.catalog._load()
         return dict(scan_id=self.scan_id, files=rows, catalog_revision=current['revision'],
-                    old_list_count=sum(not x.get('deleted') for x in current['lists'].values()))
+                    old_lists=[dict(id=row['id'],name=row['name'],readonly=row['readonly'],deleted=row['deleted'])
+                               for row in current['lists'].values() if not row['deleted']])
 
     def start(self, value):
         with self.lock:
             if self.active:raise ValueError('正在导入，请勿重复提交')
-            if (not isinstance(value, dict) or set(value)!={'scan_id','zip_ids','catalog_revision','confirm_replace'}
-                    or value['confirm_replace'] is not True or value['scan_id'] != self.scan_id):
-                raise ValueError('请重新扫描U盘，并确认替换旧列表')
+            if (not isinstance(value, dict) or set(value)!={'scan_id','zip_ids','catalog_revision','remove_list_ids'}
+                    or value['scan_id'] != self.scan_id):
+                raise ValueError('请重新扫描U盘并选择要导入的任务包')
             ids = value['zip_ids']
-            if (not isinstance(ids, list) or not 1<=len(ids)<=MAX_ZIPS or any(not isinstance(i,str) or i not in self.files for i in ids) or len(set(ids))!=len(ids)):
-                raise ValueError('请选择1到50个当前U盘 ZIP')
+            if (not isinstance(ids, list) or len(ids)>MAX_ZIPS or any(not isinstance(i,str) or i not in self.files for i in ids) or len(set(ids))!=len(ids)):
+                raise ValueError('请选择最多50个当前U盘 ZIP')
             current = self.catalog._load()
             if value['catalog_revision']!=current['revision']:raise ValueError('图库已更新，请重新扫描后选择')
+            remove_ids=value['remove_list_ids']
+            if (not isinstance(remove_ids,list) or len(set(remove_ids))!=len(remove_ids)
+                    or any(not isinstance(i,str) or i not in current['lists'] or current['lists'][i]['deleted'] for i in remove_ids)):
+                raise ValueError('请选择当前图库中的有效列表')
+            if not ids and not remove_ids:raise ValueError('请选择要导入的任务包或要移入回收站的旧列表')
             selected = [copy.deepcopy(self.files[i]) for i in ids]
             if sum(v['identity'][2] for v in selected)>MAX_BATCH_BYTES:raise ValueError('选中 ZIP 总大小最多4 GiB')
             self.ready = None;self.cancel.clear()
             self.update(state='building', done=0, total=0, selected=len(ids), message='正在校验选中的 ZIP，旧列表暂不改变', error=None)
-            self.thread = threading.Thread(target=self._build, args=(selected,current['revision']), daemon=True)
+            self.thread = threading.Thread(target=self._build, args=(selected,current['revision'],remove_ids), daemon=True)
             self.thread.start()
 
-    def _build(self, selected, revision):
+    def _build(self, selected, revision, remove_ids):
         job = uuid.uuid4().hex;stage = self.root/'staging'/job
         try:
             stage.mkdir(parents=True);stage_base = stage/'orangepi';(stage_base/'configs').mkdir(parents=True)
@@ -256,7 +262,32 @@ class UsbTaskImporter:
                             self.update(done=done,message=name+'：'+filename)
                 if _identity(path)!=entry['identity']:raise ValueError('读取过程中 ZIP 已变化，未替换旧库')
                 store.complete_bundle(identifier,store.revision)
-            new=copy.deepcopy(store._load());new['legacy_import_disabled']=True
+            imported=copy.deepcopy(store._load())
+            old=copy.deepcopy(self.catalog._load())
+            if old['revision']!=revision:raise ValueError('导入期间图库已变化，旧列表未被替换，请重新操作')
+            new=copy.deepcopy(old)
+            if len(set(new['images'])|set(imported['images']))>MAX_IMAGES or len(new['lists'])+len(imported['lists'])>MAX_LISTS:
+                raise ValueError('合并后图库超过容量限制，请减少本批任务包或联系管理员整理图库')
+            for identifier,image in imported['images'].items():
+                if identifier in new['images']:
+                    if new['images'][identifier]['deleted']:
+                        raise ValueError('任务包包含已在回收站的图片，请先恢复该图片再导入')
+                    continue
+                new['images'][identifier]=image;new['image_order'].append(identifier)
+            for identifier,item in imported['lists'].items():
+                if identifier in new['lists']:raise ValueError('任务列表标识冲突，请重新扫描任务包')
+                new['lists'][identifier]=item;new['list_order'].append(identifier)
+            active=[row for row in new['lists'].values() if not row['deleted']]
+            for identifier in remove_ids:
+                item=new['lists'][identifier]
+                if item['readonly']:
+                    remaining={image['id'] for image in self.catalog._active_items(new,item)}
+                    for other in active:
+                        if other['id']==identifier or other['id'] in remove_ids or other['readonly']:continue
+                        remaining-=set(other['items'])
+                    if remaining:raise ValueError('系统列表需先复制为自定义列表，并确保剩余旧列表仍包含全部参考图')
+                item['deleted']=True
+            self.catalog._validate(new)
             # Install immutable assets before publication. No existing file is replaced.
             for source in store.library.rglob('*'):
                 if not source.is_file():continue
@@ -270,13 +301,13 @@ class UsbTaskImporter:
                         _durable(target,source.read_bytes())
                 _sync_directory(target.parent)
             if self.cancel.is_set():raise ValueError('导入已取消')
-            prefs=_preferences(unique_json((self.base/'configs/reference_control.json').read_bytes()))
             backup=self.root/'backups'/job;backup.mkdir(parents=True)
+            prefs=_preferences(unique_json((self.base/'configs/reference_control.json').read_bytes()))
             old=copy.deepcopy(self.catalog._load())
             if old['revision']!=revision:raise ValueError('导入期间图库已变化，旧库未被替换，请重新操作')
             _json(backup/'catalog.json',old);_json(backup/'reference_control.json',prefs)
             self.ready=dict(job=job,new=new,old=old,preferences=prefs,backup=backup)
-            self.update(state='ready',message='任务包已校验，正在提交新列表')
+            self.update(state='ready',message='任务包已校验，正在合并到现有图库')
         except Exception as error:
             self.update(state='failed',error=str(error),message='导入失败，旧列表未替换：'+str(error))
         finally:
@@ -293,7 +324,16 @@ class UsbTaskImporter:
             prefs=_preferences(unique_json((self.base/'configs/reference_control.json').read_bytes()))
             if prefs!=item['preferences']:raise ValueError('采集列表设置已变化，未替换旧库')
             new=copy.deepcopy(item['new']);new['revision']=current['revision']+1
-            new_prefs=dict(prefs,selected_list_id=new['list_order'][0])
+            selected=prefs['selected_list_id']
+            if selected not in ('pool','all') and (selected not in new['lists'] or new['lists'][selected]['deleted']):
+                selected=next((identifier for identifier in new['list_order']
+                    if not new['lists'][identifier]['deleted'] and not new['lists'][identifier].get('hidden',False)
+                    and new['lists'][identifier].get('sampling_enabled',True)
+                    and (new['lists'][identifier].get('bundle') or {}).get('state')!='importing'),None)
+            if self.catalog.single_list_mode and (selected in ('pool','all') or selected is None):
+                raise ValueError('单列表采集模式需要至少保留一个可用任务列表')
+            if selected is None:selected='pool'
+            new_prefs=dict(prefs,selected_list_id=selected)
             old_digest=hashlib.sha256(catalog.path.read_bytes()).hexdigest() if catalog.path.exists() else None
             journal=dict(old_sha256=old_digest,new_sha256=hashlib.sha256(_encoded(new)).hexdigest(),
                          old_preferences=prefs,new_preferences=new_prefs)
@@ -308,7 +348,7 @@ class UsbTaskImporter:
             except Exception:
                 if pending.exists():recover_replace(self.base,self.project)
                 if hashlib.sha256(catalog.path.read_bytes()).hexdigest()!=journal['new_sha256']:raise
-            self.update(state='complete',message='已替换为选中的任务包；旧列表已备份，历史录制与标定未改动',
+            self.update(state='complete',message='已将选中任务包加入图库；未勾选删除的旧列表已保留，历史录制与标定未改动',
                         backup=str(item['backup'].relative_to(self.base)),lists=len(new['lists']),images=len(new['images']))
             return new_prefs
 
