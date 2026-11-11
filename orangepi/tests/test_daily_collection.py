@@ -27,7 +27,11 @@ class DailyTests(unittest.TestCase):
         p=self.store.root/name;p.mkdir()
         start=self.now-3600 if start is None else start
         meta=dict(created_unix=start,duration=duration,retained=kept,reference_attempt_succeeded=kept,
-                  id=name,token='test-token',status='success' if kept else 'unconfirmed',qc_level=level,reference_name='擦眼镜',reference_path='a.png')
+                  id=name,token='test-token',status='success' if kept else 'unconfirmed',qc_level=level,reference_name='擦眼镜',reference_path='a.png',
+                  # This accounting unit fixture starts at the already-qualified
+                  # source boundary; strict qualification is covered by the
+                  # RecordingStore/device-contract integration tests.
+                  qualified=bool(kept and level in ('INFO','WARN')))
         summary=dict(start_unix_ns=round(start*1e9),stop_unix_ns=round((start+duration)*1e9),
                      start_monotonic_ns=10**12,stop_monotonic_ns=10**12+round(duration*1e9),status='success',qc_level=level,emg_left=dict(emg_frames=10))
         report=dict(level=level,findings=[],streams={})
@@ -108,6 +112,7 @@ class DailyTests(unittest.TestCase):
     def test_qc_completion_does_not_double_count_saved(self):
         p=self.pending();self.daily.refresh()
         meta=json.loads((p/'meta.json').read_text());meta.update(status='success',reference_attempt_succeeded=True,qc_level='WARN')
+        meta['qualified']=True
         summary=json.loads((p/'capture_summary.json').read_text());summary.update(status='success',qc_level='WARN')
         for name,value in [('meta.json',meta),('capture_summary.json',summary),('qc_report.json',dict(level='WARN'))]:
             (p/name).write_text(json.dumps(value))

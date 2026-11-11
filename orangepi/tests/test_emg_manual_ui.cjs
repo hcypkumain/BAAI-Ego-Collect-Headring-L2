@@ -10,19 +10,24 @@ const vm=require('node:vm');
 const crypto=require('node:crypto');
 const {chromium}=require('playwright');
 const pageFile=path.join(__dirname,'../src/orangepi_collect/control/dashboard.html');
+const controlDir=path.resolve(__dirname,'../src/orangepi_collect/control');
 const source=fs.readFileSync(pageFile,'utf8');
 new vm.Script(source.match(/<script>([\s\S]*?)<\/script>/)[1],{filename:'dashboard-inline.js'});
 assert(!source.includes('data-action="swap_emg"'));
 assert(source.includes('data-action="calibrate_emg"'));
-assert(source.includes('setInterval(()=>renderEmg(status),500)'));
+const renderLoop="if(!phoneCompanion?.managesPreview)setInterval(frames,500);setInterval(()=>{if(!document.hidden&&!privacyScreen.isLocked()&&status?.state==='emg_manual'&&$('#emg-card').getClientRects().length)renderEmg(status)},500);statusLoop();";
+assert(source.includes(renderLoop),'manual EMG rendering stays gated to a visible, unlocked manual-assignment card');
 // Only scheduling/auth are replaced in the fixture; the production functions,
 // event handlers, DOM and CSS execute unchanged in a real browser.
 const fixtureHtml=source.replace('<body>','<body data-access-code-required="false">')
- .replace('setInterval(poll,750);setInterval(frames,500);setInterval(()=>renderEmg(status),500);poll();','');
+ .replace(renderLoop,'');
 const clone=value=>JSON.parse(JSON.stringify(value));
 function snapshot(){
  const s={state:'emg_manual',revision:7,preview_id:'preview-1',server_time:1000,
   system:{boot_id:'boot-1',controller_pid:101},actions:['assign_emg_roles'],
+  collection_mode:'emg',collection_context:'emg:test',session:'session-1',busy:false,
+  worker:{recording_active:false,state:'idle'},
+  privacy:{policy:'screen_black_before_capture_v1',instance:'privacy-1',generation:0,phase:'idle',required:false,stop_confirmed:true,nonce:'',session_id:''},
   emg_assignment:{session_id:'session-1',preview_id:'preview-1',sources:{emg_left:'/dev/test-a',emg_right:'/dev/test-b'}},
   emg_calibration:{valid:false},emg_serial_roles:{emg_left:'UNTRUSTED11111',emg_right:'UNTRUSTED22222'},
   wrist_calibration:{valid:false},previews:{},signals:{},devices:[],
@@ -37,10 +42,11 @@ function snapshot(){
 }
 let browser,passed=0,cases=[];
 const dashboardSha=crypto.createHash('sha256').update(source).digest('hex');
-const validationPath=path.resolve(__dirname,'../../../ui_validation.json');
+const validationPath=process.env.UI_VALIDATION_PATH||path.resolve(__dirname,'../../../ui_validation.json');
 function saveValidation(ok,error){fs.writeFileSync(validationPath,JSON.stringify({passed:ok,dashboard_sha256:dashboardSha,cases,javascript_syntax:'passed',network:'All requests locally intercepted; no Pi/device access',error:error||null},null,2));}
 async function harness(viewport={width:1250,height:1000}){
  const context=await browser.newContext({viewport,serviceWorkers:'block'});
+ context.setDefaultTimeout(5000);
  // Deterministic UI time: browser scrolling/CI load cannot consume the 3s
  // freshness allowance of our deliberately frozen mock server timestamps.
  await context.addInitScript(()=>{window.__emgTestNow=10000;Object.defineProperty(performance,'now',{value:()=>window.__emgTestNow});});
@@ -49,9 +55,20 @@ async function harness(viewport={width:1250,height:1000}){
   const url=new URL(route.request().url());
   if(url.origin!=='http://emg-ui.test')return route.abort();
   if(url.pathname==='/')return route.fulfill({contentType:'text/html',body:fixtureHtml});
+  const asset=path.resolve(controlDir,decodeURIComponent(url.pathname.slice(1)).replaceAll('-','_'));
+  if(asset.startsWith(controlDir+path.sep)&&asset.endsWith('.js')&&fs.existsSync(asset))
+   return route.fulfill({contentType:'text/javascript',body:fs.readFileSync(asset,'utf8')});
   if(url.pathname==='/api/status')return h.offline?route.abort():route.fulfill({json:clone(h.current)});
+  if(url.pathname==='/api/display-state'){
+   const s=h.current;
+   return route.fulfill({json:{state:s.state,session:s.session,preview_id:s.preview_id,image:s.image||null,
+    selected_devices:s.selected_devices||[],revision:s.revision,collection_mode:s.collection_mode,
+    collection_context:s.collection_context,busy:s.busy,result:s.result||null,
+    worker:{recording_active:s.worker?.recording_active,state:s.worker?.state},privacy:clone(s.privacy),
+    display_registration:{client_id:url.searchParams.get('client_id'),instance:s.privacy.instance}}});
+  }
   if(url.pathname==='/api/action'){
-   h.posts.push(route.request().postDataJSON());
+   const post=route.request().postDataJSON();if(post.action!=='privacy_display')h.posts.push(post);
    if(h.holdAction)await new Promise(resolve=>h.releaseAction=resolve);
    return route.fulfill({status:202,json:{ok:true}});
   }
@@ -60,9 +77,9 @@ async function harness(viewport={width:1250,height:1000}){
  h.page=await context.newPage();
  h.page.on('pageerror',error=>h.errors.push(error.message));
  await h.page.goto('http://emg-ui.test/',{waitUntil:'domcontentloaded'});
- h.set=async s=>{h.current=clone(s);await h.page.evaluate(value=>{online=true;lastStatusReceivedAt=performance.now();render(value)},h.current);};
+ h.set=async s=>{h.current=clone(s);await h.page.evaluate(()=>poll());};
+ h.pick=async(slot,side)=>{await h.set(h.current);await h.page.click('#'+slot+' .emg-role-buttons [data-side=\"'+side+'\"]');};
  await h.set(h.current);
- h.pick=async(slot,side)=>{await h.set(h.current);await h.page.click('#'+slot+' .emg-role-buttons [data-side="'+side+'"]');};
  h.selected=async()=>h.page.locator('.emg-role-buttons [aria-pressed="true"]').count();
  h.close=async()=>{if(h.releaseAction)h.releaseAction();await context.close();};
  return h;
@@ -96,7 +113,7 @@ async function main(){
   await test('confirmation posts exact session/preview/left_slot/revision only',async h=>{
    await h.pick('emg_right','left');await h.page.click('#confirm-emg');
    await h.page.waitForFunction(()=>!inFlight);
-   assert.deepEqual(h.posts,[{action:'assign_emg_roles',value:{session_id:'session-1',preview_id:'preview-1',left_slot:'emg_right'},revision:7}]);
+   assert.deepEqual(h.posts,[{action:'assign_emg_roles',value:{session_id:'session-1',preview_id:'preview-1',left_slot:'emg_right'},revision:7,collection_context:'emg:test'}]);
   });
   await test('one stale/missing/wrong-source/wrong-preview signal clears draft and drawing',async h=>{
    const mutations=[s=>s.signals.emg_left.live=false,s=>delete s.signals.emg_right,
@@ -153,8 +170,10 @@ async function main(){
    await h.pick('emg_left','left');const s=snapshot();s.state='idle';s.actions=['calibrate_emg'];s.emg_assignment=null;
    s.emg_calibration={valid:true,method:'manual'};s.emg_serial_roles={emg_left:'NEWLEFT33333',emg_right:'NEWRIGHT44444'};
    await h.set(s);assert.equal(await h.selected(),0);assert(await h.page.locator('#emg-assignment').isHidden());
-   assert.equal(await h.page.locator('#emg_left b').textContent(),'左臂肌电');
-   assert((await h.page.locator('#emg_left .signal-meta').textContent()).includes('33333'));
+   assert.equal(await h.page.locator('#emg_left .signal-head b').textContent(),'左臂肌电');
+   assert((await h.page.locator('#subtitle').textContent()).includes('左肌电 33333'));
+   assert((await h.page.locator('#subtitle').textContent()).includes('右肌电 44444'));
+   await h.page.getByRole('button',{name:'更多控制'}).click();
    await h.page.locator('[data-action="calibrate_emg"]').click();await h.page.waitForFunction(()=>!inFlight);
    assert.equal(h.posts[0].action,'calibrate_emg');
    await h.set(snapshot());assert.equal(await h.selected(),0);
@@ -164,12 +183,12 @@ async function main(){
    await h.page.keyboard.press('a');await h.page.keyboard.press('b');assert.equal(h.posts.length,0);
   });
   await test('EEG removed; wrist-manual and exposure controls remain available',async h=>{
-   assert.equal(await h.page.locator('#eeg').count(),0);
+   assert(await h.page.locator('#eeg').isHidden());
    assert.equal(await h.page.locator('#wrist-methods button').count(),2);
    const s=snapshot();s.state='idle';s.actions=['wrist_camera_settings'];s.emg_assignment=null;
-   await h.set(s);await h.page.selectOption('#wrist-fps-policy','false');await h.page.click('#set-wrist-fps-policy');
+   await h.set(s);await h.page.getByRole('button',{name:'更多控制'}).click();await h.page.selectOption('#wrist-fps-policy','false');await h.page.click('#set-wrist-fps-policy');
    await h.page.waitForFunction(()=>!inFlight);assert.equal(h.posts[0].action,'wrist_camera_settings');assert.equal(h.posts[0].value,false);
-   assert.equal(await h.page.locator('#set-eeg-filter').count(),0);
+   assert(await h.page.locator('#set-eeg-filter').isHidden());
   });
   const h=await harness({width:390,height:844});
   try{

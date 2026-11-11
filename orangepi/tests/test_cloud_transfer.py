@@ -1,18 +1,24 @@
 import contextlib,copy,hashlib,io,json,os,tempfile,types,unittest
 from pathlib import Path
 import sys
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/orangepi_collect/control'))
+ROOT=Path(__file__).resolve().parents[1]/'src/orangepi_collect'
+sys.path[:0]=[str(ROOT/'common'),str(ROOT/'control')]
 from unittest.mock import Mock,patch
 import cloud_common as common
 import cloud_worker as worker
 import cloud_uploads as queue
+import standard_bridge
 
 class Store:
     def __init__(self,base):
         self.base=base;self.root=base/'volume/data/session-night';self.root.mkdir(parents=True)
         self.session='L2-001-2026-11-02-00-53-37';self.source=self.root/self.session;self.source.mkdir()
         (self.source/'meta.yaml').write_text('test: true\n');(self.source/'video.bin').write_bytes(b'original video data');(self.source/'empty').touch()
-        self.meta=dict(id=self.session,token='unchanged',retained=True,reference_name='test',qc_level='WARN',day='2026-11-02',created_unix=1793552017,duration=14,reference_state='collected')
+        # This fake Store is the protocol-test boundary: full-QC qualification
+        # is independently exercised by RecordingStore fault-injection tests.
+        self.meta=dict(id=self.session,token='unchanged',retained=True,qualified=True,
+            qualification_error='',qc_state='completed',reference_name='test',qc_level='WARN',day='2026-11-02',
+            created_unix=1793552017,duration=14,reference_state='collected')
     def roots(self):return self.root,self.base/'volume'
     def path(self,identifier):
         if identifier!=self.session or not self.source.is_dir():raise ValueError('missing')
@@ -54,6 +60,17 @@ class CloudTests(unittest.TestCase):
         self.payload=dict(base=str(self.base),directory=str(self.directory),job=copy.deepcopy(self.job),credentials=dict(ak='example-access',sk='example-secret'))
         self.client=Client();self.vendor=types.SimpleNamespace(detect_data_format=lambda source:'OTHER');self.config=types.SimpleNamespace(UPLOAD_TARGET='data',BUCKET_NAME='bucket')
         self.patch=patch.object(worker,'authenticate',return_value=(self.client,self.vendor,self.config));self.patch.start();self.addCleanup(self.patch.stop)
+        def verify_prequalified_protocol_source(job,source):
+            if job.get('recording',{}).get('qualified') is not True:
+                raise common.CloudError('protocol fixture must start with an already qualified source')
+        self.qualification=patch.object(worker,'_verify_qualified_source',side_effect=verify_prequalified_protocol_source)
+        self.qualification.start();self.addCleanup(self.qualification.stop)
+        # This suite covers queue transfer/receipt semantics; the isolated
+        # standard exporter and mounted-volume guard have separate coverage.
+        self.prepare=patch.object(standard_bridge,'prepare',side_effect=lambda job,directory,manifest,emit:(self.store.source,manifest,{}))
+        self.prepare.start();self.addCleanup(self.prepare.stop)
+        self.package_cleanup=patch.multiple(standard_bridge,check_cleanup=Mock(return_value=None),cleanup_cache=Mock())
+        self.package_cleanup.start();self.addCleanup(self.package_cleanup.stop)
         self.events=[];self.emit=patch.object(worker,'emit',side_effect=lambda **event:self.events.append(event));self.emit.start();self.addCleanup(self.emit.stop)
     def run_upload(self):worker.upload(self.payload)
     def test_credentials_encrypted_and_masked_not_sent_in_status(self):
@@ -108,6 +125,13 @@ class CloudTests(unittest.TestCase):
         with self.assertRaises(common.CloudError):common.verify_remote(manifest,'data/',[types.SimpleNamespace(name='data/meta.yaml',size=11)])
     def test_queued_data_mutations_are_checked_before_worker(self):
         self.store.meta['retained']=False;self.manager._launch(self.job);self.assertEqual(self.job['state'],'failed')
+    def test_enqueue_refuses_unqualified_source_at_the_live_queue_gate(self):
+        self.store.meta['qualified']=False
+        request=dict(selection=[dict(session_id=self.store.session,token='unchanged')],settings=dict(queue.DEFAULTS))
+        count=len(self.manager.state['jobs'])
+        with patch.object(queue.subprocess,'Popen') as spawn, self.assertRaises(common.CloudError):
+            self.manager.enqueue(request)
+        self.assertEqual(len(self.manager.state['jobs']),count);spawn.assert_not_called()
     def test_active_capture_blocks_local_cleanup(self):
         self.run_upload();self.job['state']='success';self.display['state']='recording'
         with self.assertRaises(common.CloudError):self.manager.cleanup(dict(job_ids=[self.job['id']],confirmation='DELETE_UPLOADED_LOCAL'))

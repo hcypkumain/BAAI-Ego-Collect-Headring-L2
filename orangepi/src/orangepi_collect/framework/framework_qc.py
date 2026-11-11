@@ -34,6 +34,8 @@ from mpp_qc import video_backend
 from practical_evidence import PiTimingEvidence, PiVideoEvidence
 from capture_integrity import checks_for_stream
 from qc_policy import apply_policy, load_policy
+from required_device_contract import (build_contract,resolve_selection,
+                                      qualification_errors)
 
 def atomic_json(path, value):
     path=Path(path)
@@ -259,11 +261,22 @@ def pi_qc_inputs(path):
                     or not all(isinstance(item,str) and item in PI_QC_STREAMS for item in items)
                     or len(set(items))!=len(items) or not isinstance(config,dict)):
                 raise ValueError('invalid frozen Pi device selection')
+            legacy='required_device_contract' not in frozen
+            mode=frozen.get('collection_mode') or config.get('collection_mode')
+            expected=build_contract(config,mode=mode,legacy=legacy)
+            resolved,contract_errors,_=resolve_selection(config,frozen)
+            if contract_errors:
+                finding('ERROR','必需设备合同无效：'+'；'.join(contract_errors),
+                        'RequiredDeviceContract','device_selection.json')
+            # QC coverage always follows the profile contract, not the saved
+            # selection subset. This makes missing required directories visible
+            # even in an older partial selection file.
+            selected=set(expected['required_devices'])
             # EgoRecord v0.1.10 retired the ROS bridge: headband cameras are
             # identified by their camd name and the board IMU by its character
             # device. Keep demanding a traceable source, just the current one,
             # while still accepting a frozen pre-migration session.
-            for item in items:
+            for item in expected['required_devices']:
                 if item.startswith('cam_ros_'):
                     camera=config.get('cameras',{}).get(item[len('cam_ros_'):],{})
                     if not isinstance(camera,dict):
@@ -284,7 +297,6 @@ def pi_qc_inputs(path):
                     valid_topic=isinstance(topic,str) and topic.startswith('/')
                     if not (valid_device or valid_topic):
                         raise ValueError('frozen board IMU source missing (device or topic)')
-            selected=set(items)
         except (OSError,ValueError,TypeError,AttributeError,RecursionError) as exc:
             finding('ERROR','冻结设备清单不可验证：'+str(exc),'PiSelection','device_selection.json')
     if selected is not None:
@@ -575,6 +587,9 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused
         for name, stream in report.streams.items():
             context=CheckContext(stream=name,directory=root/name,window=None)
             try:
+                timing=PiTimingEvidence().run(context)
+                stream.findings.extend(timing.findings)
+                stream.stats['PiTimingEvidence']=timing.stats
                 for extra in checks_for_stream(name):
                     result=extra.run(context)
                     stream.findings.extend(result.findings)
@@ -598,10 +613,12 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused
             return StreamReport(stream=directory.name,files=sorted(p.name for p in directory.iterdir() if p.is_file()),
                 findings=[Finding('INFO','未知模态 — 已跳过',check='Dispatch')])
         checker=cls(cfg)
-        # Instance-local additions reuse each original context and decoder.
-        # Class-level check lists, checker thresholds and parallelism stay intact.
-        # EMG and board IMU qualification follow their original checkers only.
-        additions=[] if directory.name in ('emg_left','emg_right','board_imu') else [PiTimingEvidence()]+list(checks_for_stream(directory.name))
+        # Instance-local timing facts do not change the original checker
+        # verdict. Keep the existing wrist evidence, while EMG/board acceptance
+        # remains governed by their original checker rules.
+        additions=[PiTimingEvidence()]
+        if directory.name not in ('emg_left','emg_right','board_imu'):
+            additions.extend(checks_for_stream(directory.name))
         if isinstance(checker,CameraChecker):
             black_cfg=next((v for k,v in cfg.items() if k.lower().replace('_','')=='blackframe'),{})
             lum=black_cfg.get('lum_thr',8.) if isinstance(black_cfg,dict) else 8.
@@ -635,6 +652,17 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused
 
 def check_session(path,html=False,progress=None,reused_streams=None,local_findings=None):
     import cv2
+    from capture_qc_receipt import input_signature as qc_input_signature
+    qc_input_signature_before=None;qc_input_signature_error=None
+    try:
+        frozen_for_signature=_qc_json(Path(path)/'device_selection.json')
+        contract_for_signature,contract_errors_for_signature,_=resolve_selection(
+            frozen_for_signature.get('device_config'),frozen_for_signature)
+        if contract_errors_for_signature:
+            qc_input_signature_error='冻结设备合同无效：'+'；'.join(contract_errors_for_signature)
+        else:qc_input_signature_before=qc_input_signature(path,contract_for_signature,require_marker=True)
+    except (OSError,ValueError,TypeError,KeyError,RecursionError) as exc:
+        qc_input_signature_error=str(exc)
     cv2.setNumThreads(1)
     original=framework.CHECKERS
     framework.CHECKERS=(PiEegChecker,BoardImuChecker,PiCameraChecker,CameraChecker)+tuple(c for c in original if c not in (CameraChecker,PiCameraChecker,BoardImuChecker,PiEegChecker) and c.__name__ != 'EegChecker')
@@ -652,6 +680,16 @@ def check_session(path,html=False,progress=None,reused_streams=None,local_findin
     # The original findings remain available. Only the explicit Pi acceptance
     # policy determines which results prevent saving and normal downstream pack.
     report.findings.extend(local_findings or [])
+    if qc_input_signature_before is None:
+        report.findings.append(Finding('ERROR','完整质检输入无法绑定：'+str(qc_input_signature_error or '缺少冻结输入签名'),
+            check='RequiredCaptureIntegrity'))
+    else:
+        try:qc_input_signature_after=qc_input_signature(path,contract_for_signature,require_marker=True)
+        except (OSError,ValueError,TypeError,KeyError,RecursionError) as exc:
+            qc_input_signature_after=None;qc_input_signature_error=str(exc)
+        if qc_input_signature_after!=qc_input_signature_before:
+            report.findings.append(Finding('ERROR','完整质检期间必需设备输入发生变化'+('：'+str(qc_input_signature_error) if qc_input_signature_error else ''),
+                check='RequiredCaptureIntegrity'))
     raw=report.to_dict()
     raw_path=Path(path)/'qc_raw_report.json'
     atomic_json(raw_path,raw)
@@ -666,6 +704,33 @@ def check_session(path,html=False,progress=None,reused_streams=None,local_findin
                    raw_level=raw['level'],effective_level=report.level,error=str(exc))
     audit.update(raw_report='qc_raw_report.json',
                  raw_report_sha256=hashlib.sha256(raw_path.read_bytes()).hexdigest())
+    # Apply the existing practical QC policy first. Some original checker
+    # ERRORs are intentionally downgraded only when measured facts support it.
+    # The required-device gate runs on that effective report so it cannot block
+    # an allowed WARN, while it remains an independent hard ERROR on missing
+    # streams, artifacts or continuity evidence.
+    prior_findings=len(report.findings)
+    try:
+        frozen=_qc_json(Path(path)/'device_selection.json')
+        contract,contract_errors,legacy=resolve_selection(frozen.get('device_config'),frozen)
+        if contract_errors:
+            integrity_errors=['冻结必需设备合同无效：'+'；'.join(contract_errors)]
+        else:
+            summary=_qc_json(Path(path)/'capture_summary.json')
+            integrity_errors=qualification_errors(path,summary,contract,report.to_dict(),legacy=legacy)
+        for error in dict.fromkeys(integrity_errors):
+            report.findings.append(Finding('ERROR','本机必需数据完整性未通过：'+error,
+                check='RequiredCaptureIntegrity'))
+    except (OSError,ValueError,TypeError,KeyError,RecursionError) as exc:
+        report.findings.append(Finding('ERROR','本机必需设备完整性证据无法验证：'+str(exc),
+            check='RequiredCaptureIntegrity'))
+    audit['effective_level']=report.level
+    audit['accepted']=report.level!='ERROR'
+    for index,finding in enumerate(report.findings[prior_findings:],start=prior_findings):
+        if finding.level not in ('WARN','ERROR'):continue
+        target=audit.setdefault('blockers',[]) if finding.level=='ERROR' else audit.setdefault('advisories',[])
+        target.append(dict(stream='session',finding_index=index,check=finding.check,
+            level=finding.level,field=finding.field,subject=finding.subject,message=finding.message))
     atomic_json(Path(path)/'qc_policy.json',audit)
     report.qc_raw_level=raw['level']
     report.qc_policy=audit.get('preset','practical-v1')
@@ -678,6 +743,7 @@ def check_session(path,html=False,progress=None,reused_streams=None,local_findin
     if hasattr(report,'pi_timing'):atomic_json(Path(path)/'qc_timing.json',report.pi_timing)
     if html or cfg.get('html',False):
         (Path(path)/'qc.html').write_text(build_page(data,session_dir=path,opt=Options(frames=False,filter=False)),encoding='utf-8')
+    report.pi_qc_input_signature=qc_input_signature_before
     framework.print_report(report)
     return report
 

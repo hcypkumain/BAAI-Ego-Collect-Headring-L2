@@ -196,6 +196,10 @@ class WebControls:
         # its worker was reaped. Do not present that old error as a live worker.
         try:worker=self.worker_status() if getattr(self,'worker',None) is not None else {}
         except (OSError,ValueError):worker={}
+        if (getattr(self,'owner_exit_recovered',False)
+                and (getattr(self,'worker',None) is None or self.worker.poll() is not None)):
+            worker=dict(worker or {},state='error',recording_active=False,
+                        errors=list(getattr(self,'last_help',[])))
         cfg=getattr(self,'web_config',{})
         keyboard=getattr(self,'keyboard',None)
         if now-getattr(self,'ui_last_disk',0)>5:
@@ -261,6 +265,9 @@ class WebControls:
             keyboard_names=getattr(keyboard,'names',[]),storage=storage,
             review_session=str(review) if review and self.state not in ('recording','countdown') else None,
             last_completed=getattr(self,'last_completed',None),
+            scan_ok=getattr(self,'scan_ok',False),
+            required_devices=(getattr(self,'required_device_contract',{}) or {}).get('required_devices',[]),
+            required_devices_missing=getattr(self,'required_devices_missing',[]),
             controller_time=time.time()))
 
     def stop_preview(self,clear=True):
@@ -398,14 +405,20 @@ class WebControls:
             try:
                 impedance = self.worker_status().get('eeg_impedance', {}) if 'eeg' in (getattr(self,'selected_devices',None) or ()) else dict(required=False)
                 allowed=list(actions_for(self.state,impedance))
-                if job['action']=='stop' and not dashboard.privacy.target_matches(job.get('privacy_target')):
+                privacy=dashboard.privacy.snapshot()
+                stop_bound=(job['action']=='stop' and dashboard.privacy.target_matches(
+                    job.get('privacy_target'),allow_same_session=True))
+                if privacy.get('required') and privacy.get('stop_confirmed') is not True and stop_bound:
+                    allowed.append('stop')
+                if job['action']=='stop' and not stop_bound:
                     raise ValueError('采集会话已变化，请刷新后重试')
                 if getattr(self,'reference_can_switch_list',getattr(self,'reference_can_change',lambda:False))():allowed.append('reference_list')
                 mode_action=job['action']=='collection_mode'
                 if mode_action:
                     from project_paths import COLLECTION_CONTEXT
                     if job.get('collection_context')!=COLLECTION_CONTEXT:raise ValueError('采集模式已变化，请刷新页面后操作')
-                if (not mode_action and job['revision']!=getattr(self,'ui_revision',0)) or job['action'] not in allowed:
+                stale_revision=job['revision']!=getattr(self,'ui_revision',0)
+                if (not mode_action and stale_revision and not stop_bound) or job['action'] not in allowed:
                     raise ValueError('流程已经变化，本次点击未执行，请重新选择')
                 action=job['action']
                 if action not in ('volume','eeg_filter','wrist_camera_settings'):
@@ -421,6 +434,15 @@ class WebControls:
                     if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
                 if action=='abandon':
                     self.abandon_preparation()
+                elif action=='stop':
+                    privacy=dashboard.privacy
+                    target=job.get('privacy_target')
+                    if not privacy.target_matches(target,allow_same_session=True):
+                        raise ValueError('采集会话已变化，请刷新后重试')
+                    if not privacy.snapshot().get('required'):
+                        raise ValueError('当前会话已经确认停止，请刷新页面')
+                    if self.stop_before_prompt(target) is False:
+                        raise ValueError(getattr(self,'owner_command_error',None) or '停止请求未能送达，请重试')
                 elif action=='discard_recording':
                     if self.discard_recording() is False:
                         raise ValueError(getattr(self,'owner_command_error',None) or '设备停止尚未确认，本段尚未清理')

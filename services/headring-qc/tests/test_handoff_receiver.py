@@ -2,18 +2,20 @@ import hashlib,json,os
 from pathlib import Path
 import sys,tempfile,threading,types,unittest,uuid
 ROOT=Path(__file__).resolve().parents[3];sys.path.insert(0,str(ROOT/'services/headring-qc'));sys.path.insert(0,str(ROOT/'orangepi/src/orangepi_collect/common'))
+sys.path.insert(0,str(ROOT/'orangepi/tests'))
 from handoff_receiver import HandoffReceiver
 from receiver_state import Conflict
 from raw_handoff import sha_value
+from required_capture_fixture import write_session
+from capture_qc_receipt import portable_input_signature
+from required_device_contract import resolve_selection
 
 @unittest.skipIf(os.name=='nt','Linux copy/fsync receiver tests')
 class Tests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup);root=Path(self.temp.name)
         self.app=root/'app';self.app.mkdir();self.data=root/'data';self.data.mkdir();self.source=root/'pi-source/L2-020-fixture';self.source.mkdir(parents=True)
-        for name,value in {'native_capture_summary.json':{'status':'success','fixture':True},'capture_summary.json':{'status':'pending_qc'},'meta.json':{},'status.json':{'state':'pending_qc'}}.items():
-            (self.source/name).write_text(json.dumps(value))
-        (self.source/'meta.yaml').write_text('fixture: true\n');(self.source/'raw.bin').write_bytes(b'fixture raw data')
+        write_session(self.source,mode='emg',write_receipt=True)
         self.key=b'synthetic-test-key';(self.app/'secrets').mkdir();(self.app/'secrets/cp_0020').write_bytes(self.key)
         def digest(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
         def verify(path,manifest,durable=False):
@@ -53,9 +55,18 @@ class Tests(unittest.TestCase):
         job=self.receiver.store.claim('receive');self.receiver.receive(job);return self.receiver.store.job(self.id)
     def fake_qc(self,job,work):
         resultdir=self.data/'results'/job['device']/job['session'];artifact=resultdir/'artifacts/qc_report.json'
-        self.write_json(artifact,{'level':'WARN','streams':{}})
-        result=dict(version=1,session_id=job['session'],request_id=job['details']['request_id'],native_sha256=job['details']['native_sha256'],
-            level='WARN',raw_level='ERROR',elapsed_seconds=1,metadata={},artifacts={'qc_report.json':hashlib.sha256(artifact.read_bytes()).hexdigest()})
+        report=json.loads((work/'qc_report.json').read_text(encoding='utf-8'));self.write_json(artifact,report)
+        selection=json.loads((work/'device_selection.json').read_text(encoding='utf-8'))
+        contract,errors,legacy=resolve_selection(selection.get('device_config'),selection)
+        self.assertFalse(errors);self.assertFalse(legacy)
+        source_receipt=job['raw_receipt']
+        result=dict(version=1,session_id=job['session'],request_id=source_receipt['qc_request_id'],native_sha256=source_receipt['native_sha256'],
+            reference_sha256=source_receipt['reference_sha256'],input_signature=source_receipt['input_signature'],
+            local_input_signature=source_receipt['local_input_signature'],
+            checked_input_signature=portable_input_signature(work,contract,require_marker=True),
+            level='WARN',raw_level='WARN',passed=True,elapsed_seconds=1,metadata={},derived_counts={},
+            archived_chunks={'emg_left':[],'emg_right':[],'eeg':[]},
+            artifacts={'qc_report.json':hashlib.sha256(artifact.read_bytes()).hexdigest()})
         self.write_json(resultdir/'result.json',result);return result
     def test_host_committed_receipt_precedes_any_pi_delete(self):
         job=self.receive();self.assertEqual(job['receive_state'],'host_committed')

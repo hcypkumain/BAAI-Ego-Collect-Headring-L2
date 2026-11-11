@@ -244,6 +244,88 @@ class Registry:
                 or child['pgrp']!=value['pgid'] or child['sid']!=value['sid']):
                 raise RegistryError('设备进程身份已变化')
             return value
+
+    def verify_signalable_group(self,run,kind,allow_exited_leader=False):
+        """Verify the current run still owns this process group before signaling it.
+
+        When a reaped leader leaves descendants in its original private session,
+        SIGKILL may still target the group only if the PID was not reused and all
+        remaining members retain the recorded SID/PGID.
+        """
+        with self.locked():
+            value=self._read();identity=proc_identity(os.getpid())
+            if (not value or value.get('run')!=run or value.get('kind')!=kind
+                    or value.get('phase')!='registered' or value.get('owner_pid')!=os.getpid()
+                    or not identity or value.get('owner_start')!=identity['start']
+                    or value.get('boot')!=boot_id()):
+                raise RegistryError('当前控制器不再拥有此设备进程组')
+            self._bound_witness(value)
+            pid=value.get('wrapper_pid');start=value.get('wrapper_start');leader=proc_identity(pid)
+            if leader and leader.get('start')!=start:
+                raise RegistryError('原设备进程PID已被复用，禁止向该进程组发送信号')
+            leader_live=bool(leader and leader.get('start')==start and leader.get('state') not in ('Z','X'))
+            if not leader_live and not allow_exited_leader:
+                raise RegistryError('设备进程入口已退出，不能确认可安全发送信号')
+            if value.get('pgid')!=pid or value.get('sid')!=pid or not group_exists(value.get('pgid')):
+                raise RegistryError('登记的设备进程组不存在或身份不匹配')
+            members=[]
+            try:entries=list(Path('/proc').iterdir())
+            except OSError as error:raise RegistryError('无法列出进程表，禁止向设备进程组发送信号') from error
+            for entry in entries:
+                if not entry.name.isdigit():continue
+                member=proc_identity(int(entry.name))
+                if member and member.get('pgrp')==value['pgid']:
+                    if member.get('sid')!=value['sid']:
+                        raise RegistryError('设备进程组成员的会话身份不一致')
+                    members.append(int(entry.name))
+            if not members:raise RegistryError('登记进程组没有可验证成员')
+            return dict(value,leader_live=leader_live,group_members=sorted(members))
+
+    def verify_exited(self,run,kind='capture',record_hint=None,witness_hint=None):
+        """Read-only evidence that this owner and its whole group have exited."""
+        with self.locked():
+            value=self._read()
+            if value is None and isinstance(record_hint,dict):value=dict(record_hint)
+            identity=proc_identity(os.getpid())
+            if (not value or value.get('run')!=run or value.get('kind')!=kind
+                    or value.get('owner_pid')!=os.getpid() or not identity
+                    or value.get('owner_start')!=identity['start'] or value.get('boot')!=boot_id()):
+                raise RegistryError('当前控制器与设备退出证明不匹配')
+            if value.get('phase')=='registered':
+                try:self._bound_witness(value)
+                except RegistryError:
+                    witness=witness_hint
+                    if not isinstance(witness,dict) or not record_hint or value!=record_hint:
+                        raise
+                    if (witness.get('run')!=run or witness.get('nonce')!=value.get('nonce')
+                            or witness.get('boot')!=value.get('boot')
+                            or witness.get('owner_pid')!=value.get('owner_pid')
+                            or witness.get('owner_start')!=value.get('owner_start')
+                            or checksum(witness)!=value.get('witness_sha256')):
+                        raise RegistryError('缓存的设备见证与原设备记录不匹配')
+            elif value.get('phase')=='terminal' and value.get('terminal_reason')=='normal_confirmed':
+                witness=value.get('terminal_witness')
+                if not isinstance(witness,dict):witness=witness_hint
+                if (not isinstance(witness,dict) or checksum(witness)!=value.get('witness_sha256')
+                        or witness.get('run')!=run or witness.get('nonce')!=value.get('nonce')
+                        or witness.get('boot')!=value.get('boot')
+                        or witness.get('owner_pid')!=value.get('owner_pid')
+                        or witness.get('owner_start')!=value.get('owner_start')):
+                    raise RegistryError('终结设备见证损坏')
+            else:raise RegistryError('设备所有权尚未登记或不是正常停止终结')
+            pid=value.get('wrapper_pid');start=value.get('wrapper_start')
+            if type(pid) is not int or type(start) is not int or pid!=value.get('pgid') or pid!=value.get('sid'):
+                raise RegistryError('设备进程组身份不完整')
+            wrapper=proc_identity(pid)
+            if wrapper and wrapper.get('start')==start and wrapper.get('state') not in ('Z','X'):
+                raise RegistryError('设备进程入口仍在运行')
+            if group_exists(value['pgid']):raise RegistryError('设备进程组仍存在')
+            return dict(run=run,nonce=value.get('nonce'),boot=value.get('boot'),kind=kind,
+                phase=value.get('phase'),
+                owner_pid=value.get('owner_pid'),owner_start=value.get('owner_start'),
+                wrapper_pid=pid,wrapper_start=start,pgid=value['pgid'],sid=value['sid'],
+                liveness_verified=True,registry_cleanup_confirmed=False,group_absent=True)
+
     def finish(self,run):
         with self.locked():
             value=self._read()

@@ -9,6 +9,7 @@ from recording_store import RecordingStore
 import ledger,dashboard
 from web_controls import WebControls
 from reference_controls import ReferenceControlsMixin
+from required_capture_fixture import write_session
 
 class StoreTests(unittest.TestCase):
     def setUp(self):
@@ -17,12 +18,21 @@ class StoreTests(unittest.TestCase):
         self.library=self.project/'configs/environments/scene';self.library.mkdir(parents=True);self.image=self.library/'task_1.png';self.image.write_bytes(b'reference')
         self.volume=self.root/'volume';self.sessions=self.volume/'data/session-night';self.sessions.mkdir(parents=True)
         self.now=1793318400.;self.store=RecordingStore(self.base,self.project,ledger,lambda:self.sessions,lambda:self.volume,lambda:self.now)
-        self.patches=[patch.object(ledger,'BASE',self.base),patch.object(ledger,'LIBRARY',self.project/'configs/environments')]
+        self.patches=[patch.object(ledger,'BASE',self.base),patch.object(ledger,'PROJECT',self.project),patch.object(ledger,'LIBRARY',self.project/'configs/environments')]
         for p in self.patches:p.start();self.addCleanup(p.stop)
-    def take(self,name='L2-001-2026-10-30-10-00-00',status='success',keep=True):
-        path=self.sessions/name;path.mkdir();value={'status':status,'retention_state':'kept' if keep else 'unconfirmed','reference_image':'configs/environments/scene/task_1.png','session_created_unix':self.now,'duration':10}
-        (path/'meta.yaml').write_text(__import__('yaml').safe_dump(value));(path/'capture_summary.json').write_text(json.dumps({'status':status,'start_unix_ns':int(self.now*1e9),'stop_unix_ns':int((self.now+10)*1e9)}));(path/'frames.mp4').write_bytes(b'preserved-video')
-        if keep:ledger.mark(self.image,path,'success')
+    def take(self,name='L2-001-2026-10-30-10-00-00',status='success',keep=True,start=None,duration=10):
+        path=self.sessions/name
+        start=self.now if start is None else start
+        write_session(path,level='WARN' if status=='success' else 'ERROR',
+            summary_status=status,start_unix_ns=int(start*1e9),duration_ns=int(duration*1e9))
+        # Preserve the legacy top-level video artifact used by the deletion
+        # custody assertion; qualification evidence lives in stream folders.
+        (path/'frames.mp4').write_bytes(b'preserved-video')
+        value=__import__('yaml').safe_load((path/'meta.yaml').read_text())
+        value.update(status=status,retention_state='kept' if keep else 'unconfirmed',
+            reference_image='configs/environments/scene/task_1.png',session_created_unix=start,duration=duration)
+        (path/'meta.yaml').write_text(__import__('yaml').safe_dump(value))
+        if keep and status=='success':ledger.mark(self.image,path,'success')
         return path
     def test_retained_take_has_collected_reference_and_upload_entry(self):
         path=self.take();value=self.store.page();self.assertEqual(value['retained_count'],1);self.assertEqual(value['items'][0]['reference_state'],'collected')
@@ -32,18 +42,20 @@ class StoreTests(unittest.TestCase):
     def test_cross_midnight_take_belongs_to_confirmation_date(self):
         import yaml
         now=datetime.datetime(2026,10,30,0,1,tzinfo=datetime.timezone(datetime.timedelta(hours=8))).timestamp();self.now=now
-        path=self.take();meta=yaml.safe_load((path/'meta.yaml').read_text());meta['retained_at_unix']=now
-        (path/'meta.yaml').write_text(yaml.safe_dump(meta));(path/'capture_summary.json').write_text(json.dumps({'status':'success','start_unix_ns':int((now-120)*1e9),'stop_unix_ns':int((now-60)*1e9)}))
+        path=self.take(start=now-120,duration=60);meta=yaml.safe_load((path/'meta.yaml').read_text());meta['retained_at_unix']=now
+        (path/'meta.yaml').write_text(yaml.safe_dump(meta))
         self.assertEqual(self.store.page('today')['retained_count'],1);self.assertEqual(self.store.page('today')['day'],'2026-10-30')
     def test_retaining_error_preserves_quality_and_leaves_reference_uncollected(self):
         path=self.take(status='error',keep=False);summary=json.loads((path/'capture_summary.json').read_text());summary['cam_ros_left']={'frames':1};summary['qc_level']='ERROR';(path/'capture_summary.json').write_text(json.dumps(summary));ledger.mark(self.image,path,'error')
         raw=(path/'capture_summary.json').read_bytes();row=self.store.page()['items'][0];self.store.retain_error(path.name,row['token'])
         row=self.store.page()['items'][0];self.assertTrue(row['retained']);self.assertEqual(row['retention_kind'],'unsuccessful');self.assertFalse(row['reference_attempt_succeeded']);self.assertEqual(row['reference_state'],'uncollected');self.assertEqual(row['qc_level'],'ERROR')
-        self.assertEqual((path/'capture_summary.json').read_bytes(),raw);self.assertEqual(len(self.store.upload_manifest()['recordings']),1)
+        self.assertEqual((path/'capture_summary.json').read_bytes(),raw);self.assertEqual(self.store.upload_manifest()['recordings'],[])
     def test_fresh_images_precede_error_images_and_warn_is_success(self):
         fresh=self.library/'task_2.png';fresh.write_bytes(b'new');warn=self.library/'task_3.png';warn.write_bytes(b'warn')
         error=self.take(status='error',keep=False);(error/'capture_summary.json').write_text(json.dumps({'status':'error','cam_ros_left':{'frames':1}}));ledger.mark(self.image,error,'error')
-        good=self.sessions/'good';good.mkdir();(good/'capture_summary.json').write_text(json.dumps({'status':'success','qc_level':'WARN'}));ledger.mark(warn,good,'success')
+        good=self.sessions/'good';write_session(good)
+        meta=__import__('yaml').safe_load((good/'meta.yaml').read_text());meta['reference_image']='configs/environments/scene/task_3.png'
+        (good/'meta.yaml').write_text(__import__('yaml').safe_dump(meta));ledger.mark(warn,good,'success')
         control=ReferenceControlsMixin();control._reference_project=self.project;control._reference_ledger=ledger;control.refresh_reference_histories()
         self.assertTrue(control._reference_histories[warn.relative_to(self.project).as_posix()]['collected'])
         entries=[{'path':self.image},{'path':fresh}]
@@ -75,7 +87,7 @@ class StoreTests(unittest.TestCase):
         self.assertFalse(path.exists());self.store.recover();self.assertEqual(ledger.read(self.library/'used.yaml')['used'],{})
         journal=json.loads(next(self.store.operations.glob('*.json')).read_text());self.assertEqual(journal['phase'],'complete')
     def test_abandoned_preparation_is_outside_upload_tree_and_started_take_is_refused(self):
-        path=self.take(status='cancelled',keep=False);result=self.store.abandon_preparation(path)
+        path=self.take(status='cancelled',keep=False);(path/'start_gate.json').unlink();result=self.store.abandon_preparation(path)
         self.assertFalse(path.exists());self.assertTrue(result['deleted']);self.assertEqual(list((self.volume/'.discarding-recordings').iterdir()),[]);self.assertEqual(self.store.page('all')['total'],0)
         path=self.take();(path/'start_gate.json').write_text('{}')
         with self.assertRaises(ValueError):self.store.abandon_preparation(path)

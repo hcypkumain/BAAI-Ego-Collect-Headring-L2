@@ -128,6 +128,16 @@ def _base_actions_for(state, impedance=None):
 
 def snapshot_actions(snapshot):
     actions=actions_for(snapshot.get('state',''),snapshot.get('eeg_impedance'))
+    privacy=snapshot.get('privacy',{})
+    if (privacy.get('required') is True and privacy.get('stop_confirmed') is not True
+            and all(isinstance(privacy.get(key),str) and privacy.get(key)
+                    for key in ('instance','session_id','nonce'))
+            and 'stop' not in actions):
+        # STOP stays reachable through native-error/fault states. The target
+        # still has to match this exact committed privacy session at dispatch.
+        actions.append('stop')
+    if snapshot.get('state')=='device_confirm' and snapshot.get('scan_ok') is not True:
+        actions=[action for action in actions if action!='confirm_devices']
     if snapshot.get('collection_mode')=='emg':
         actions=[action for action in actions if action!='eeg_filter' and not action.startswith('impedance_')]
     if snapshot.get('task_list',{}).get('manual_task_switch') and not snapshot.get('task_list',{}).get('can_switch'):
@@ -356,19 +366,24 @@ class Dashboard:
         if data.get('action')=='privacy_ack':
             self.privacy.acknowledge(data.get('value'));return
         if data.get('action')=='stop':
-            # Cancellation may interrupt a busy START, but only for the
-            # current revision and the exact displayed privacy session.
+            # STOP is session-bound; unrelated status revisions must not make
+            # a valid retry unreachable after the native writer faults.
             with self.lock:
                 if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
                     raise ValueError('采集模式已变化，请刷新页面后操作')
-                if data.get('revision')!=self.snapshot.get('revision'):
-                    raise ValueError('流程已变化，请刷新后操作')
-                if self.privacy.cancel_request(data.get('privacy_target')):return
+                target=data.get('privacy_target')
+                if not self.privacy.target_matches(target,allow_same_session=True):
+                    raise ValueError('采集会话已变化，请刷新后重试')
+                if target.get('generation')==self.privacy.generation and self.privacy.cancel_request(target):return
         with self.lock:
             if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
                 raise ValueError('采集模式已变化，请刷新页面后操作')
-            if (self.busy and not self.prompting) or self.pending is not None:raise ValueError('正在执行上一步，请等待')
-            if data.get('action')!='collection_mode' and data.get('revision')!=self.snapshot.get('revision'):raise ValueError('流程已变化，请刷新后操作')
+            current_stop=(data.get('action')=='stop'
+                and self.privacy.target_matches(data.get('privacy_target'),allow_same_session=True))
+            if ((self.busy and not self.prompting) or self.pending is not None) and not current_stop:
+                raise ValueError('正在执行上一步，请等待')
+            if data.get('action') not in ('collection_mode','stop') and data.get('revision')!=self.snapshot.get('revision'):
+                raise ValueError('流程已变化，请刷新后操作')
             if data.get('action') not in snapshot_actions(dict(self.snapshot,privacy=self.privacy.snapshot())):raise ValueError('当前步骤不允许这个操作')
             if data['action']=='collection_mode' and data.get('value') not in ('emg','eeg'):
                 raise ValueError('请选择脑电或肌电')
@@ -420,7 +435,7 @@ class Dashboard:
                                for k in ('session_id','preview_id'))):
                     raise ValueError('请选择当前预览对应的左右设备')
             if data['action']=='stop':
-                target=self.privacy.stopping(data.get('privacy_target'))
+                target=self.privacy.stopping(data.get('privacy_target'),allow_same_session=True)
                 data=dict(data,privacy_target=target)
             self.pending=dict(data);self.result=None
 

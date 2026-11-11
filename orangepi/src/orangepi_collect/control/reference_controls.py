@@ -80,7 +80,19 @@ def _completed_paths(project,ledger):
         image=Path(image);path=image.parent/'used.yaml'
         if path not in cache:cache[path]=ledger.read(path).get('used',{})
         entry=cache[path].get(image.name)
-        if entry is not None and ledger.valid_used(entry):
+        if entry is not None and ledger.valid_used(entry,image):
+            result.append(image.relative_to(project).as_posix())
+    return tuple(sorted(set(result)))
+
+
+def _reserved_paths(project,ledger):
+    """Pending QC reserves a reference for deduplication but is not completion."""
+    cache={};result=[]
+    for image in ledger.images():
+        image=Path(image);path=image.parent/'used.yaml'
+        if path not in cache:cache[path]=ledger.read(path).get('used',{})
+        entry=cache[path].get(image.name)
+        if entry is not None and ledger.reserved_used(entry,image):
             result.append(image.relative_to(project).as_posix())
     return tuple(sorted(set(result)))
 
@@ -106,9 +118,10 @@ def reference_cli_queue(base,project,ledger,selected=None):
     preferences=_preferences(base)
     identifier='all' if selected and not catalog.single_list_mode else preferences['selected_list_id']
     snapshot=catalog.freeze_list(identifier,catalog.revision,include_completed=True)
-    completed=set(_completed_paths(project,ledger));first=_first_image_index(snapshot,selected,project)
+    completed=set(_completed_paths(project,ledger));reserved=set(_reserved_paths(project,ledger));first=_first_image_index(snapshot,selected,project)
     return [Path(project)/item['relative_path'] for index,item in enumerate(snapshot['items'])
             if (first is None or index>=first) and
+               item['relative_path'] not in reserved and
                (index==first or item['relative_path'] not in completed)]
 
 
@@ -121,7 +134,7 @@ class ReferenceControlsMixin:
         self.reference_error=None;self.reference_access_error=None
         self._reference_preferences_error=None
         self.collector_id='';self._reference_preferences=None;self._reference_snapshot=None
-        self._reference_completed=();self._reference_entries=[];self._reference_active=None
+        self._reference_completed=();self._reference_reserved=();self._reference_entries=[];self._reference_active=None
         self._reference_retry=None;self._reference_reap_outcome=None;self._reference_cli_image=None;self._reference_cli_force=False
         self._reference_manual_id=None;self._reference_histories={}
         self._deferred_catalog_revision=None
@@ -147,6 +160,7 @@ class ReferenceControlsMixin:
                 if not self.reference_catalog.single_list_mode:identifier='all'
                 self.selected_image=selected_image
             self._reference_completed=_completed_paths(PROJECT,ledger)
+            self._reference_reserved=_reserved_paths(PROJECT,ledger)
             self.refresh_reference_histories()
             snapshot=self.reference_catalog.freeze_list(identifier,self.reference_catalog.revision,include_completed=True)
             self._apply_reference_snapshot(snapshot)
@@ -190,7 +204,12 @@ class ReferenceControlsMixin:
                 if pending.exists():
                     manager.update(state='needs_recovery',error=str(error),message='任务库提交结果待恢复，暂时禁止采集：'+str(error))
                     self.state='usb_import_recovery';self.state_write();return
-                    manager.update(state='failed',error=str(error),message='任务库修改未完成，原有列表保留：'+str(error))
+                else:
+                    current=manager.status().get('state')
+                    if current=='complete':
+                        self.reference_error='任务列表已提交，但参考图进度刷新失败：'+str(error)
+                    elif current!='failed':
+                        manager.update(state='failed',error=str(error),message='任务库修改未完成，原有列表保留：'+str(error))
             state=manager.status()['state']
         if state in ('complete','failed'):
             self.state=getattr(self,'_usb_import_previous_state','device_confirm')
@@ -219,6 +238,7 @@ class ReferenceControlsMixin:
         self.reference_catalog.freeze_list(identifier,value['catalog_revision'],include_completed=True)
         snapshot=self.reference_catalog.freeze_list('pool',value['catalog_revision'],include_completed=True)
         completed=_completed_paths(self._reference_project,self._reference_ledger)
+        reserved=_reserved_paths(self._reference_project,self._reference_ledger)
         candidates=[item for item in snapshot['items'] if any(row['id']==identifier for row in item.get('source_lists',[]))]
         if not candidates:raise ValueError('此列表未启用，请先勾选该列表参与抽取')
         if all(item['relative_path'] in set(completed) for item in candidates):raise ValueError('这个列表已完成，请选择其他未完成列表')
@@ -234,7 +254,7 @@ class ReferenceControlsMixin:
         try:blocks.switch_task(identifier,snapshot,completed)
         except (OSError,ValueError) as error:
             self.reference_error='任务列表切换未确认保存，请重新选择：'+str(error);raise
-        self._reference_preferences=preferences;self._reference_completed=completed
+        self._reference_preferences=preferences;self._reference_completed=completed;self._reference_reserved=reserved
         self._reference_retry=None;self._reference_manual_id=None;self._reference_cli_image=None;self._reference_cli_force=False
         self._reference_active=None;self._deferred_catalog_revision=None;self.selected_image=None
         self.path=None;self.image=None;self.reference_error=None;self._reference_preferences_error=None
@@ -267,10 +287,10 @@ class ReferenceControlsMixin:
             image=Path(image);path=image.parent/'used.yaml'
             if path not in cache:cache[path]=self._reference_ledger.read(path)
             document=cache[path];entry=document.get('used',{}).get(image.name)
-            complete=entry is not None and self._reference_ledger.valid_used(entry)
+            complete=entry is not None and self._reference_ledger.valid_used(entry,image)
             attempts=[v for v in document.get('attempts',{}).get(image.name,[]) if isinstance(v,dict) and v.get('has_data')]
             latest=attempts[-1] if attempts else None
-            pending=bool(isinstance(entry,dict) and entry.get('status')=='pending_qc' and complete)
+            pending=entry is not None and self._reference_ledger.reserved_used(entry,image)
             state='pending_qc' if pending else 'collected' if complete else 'unattempted' if not attempts else 'attempted_uncollected'
             result[image.relative_to(self._reference_project).as_posix()]=dict(state=state,ever_recorded=bool(attempts),attempt_count=len(attempts),
                 collected=complete and not pending,pending_qc=pending,latest_qc=latest.get('qc_level') if latest else None,
@@ -323,12 +343,18 @@ class ReferenceControlsMixin:
             path=self.path;self.release_prepared()
             if path and path.is_dir():self.recording_store.abandon_preparation(path)
         self._reference_retry=None;self._reference_manual_id=None;self._reference_cli_image=None;self._reference_cli_force=False
-        self._reference_completed=_completed_paths(self._reference_project,self._reference_ledger);self.refresh_reference_histories();self._apply_reference_snapshot(snapshot)
+        self._reference_completed=_completed_paths(self._reference_project,self._reference_ledger)
+        self._reference_reserved=_reserved_paths(self._reference_project,self._reference_ledger)
+        self.refresh_reference_histories();self._apply_reference_snapshot(snapshot)
         if next_image:
             entries=[entry for entry in self._reference_entries if entry['path']!=previous] or self._reference_entries
             if not entries:raise ValueError('当前列表没有待采集参考图，可手动选择已采集图重新采集')
             entry=self._reference_entry_choice(entries);identifier=entry['snapshot']['items'][entry['index']]['id']
-        else:identifier=value['image_id']
+        else:
+            identifier=value['image_id']
+            selected=next((item for item in snapshot['items'] if item['id']==identifier),None)
+            if selected and selected['relative_path'] in set(self._reference_reserved):
+                raise ValueError('该参考图等待完整质检，暂不能重复抽取')
         self._reference_manual_id=identifier;self._apply_reference_snapshot(snapshot)
         entry=next(entry for entry in self._reference_entries if entry['snapshot']['items'][entry['index']]['id']==identifier)
         self.image=entry['path']
@@ -352,9 +378,11 @@ class ReferenceControlsMixin:
                 snapshot=retry['snapshot']
         else:
             self._deferred_catalog_revision=None
-        completed=set(self._reference_completed);first=_first_image_index(snapshot,self._reference_cli_image,self._reference_project)
+        completed=set(self._reference_completed);reserved=set(getattr(self,'_reference_reserved',()))
+        first=_first_image_index(snapshot,self._reference_cli_image,self._reference_project)
         entries=[dict(snapshot=snapshot,index=index,path=self._reference_project/item['relative_path'])
                  for index,item in enumerate(snapshot['items']) if (first is None or index>=first)
+                 and item['relative_path'] not in reserved
                  and ((index==first and self._reference_cli_force) or item['relative_path'] not in completed or item['id']==getattr(self,'_reference_manual_id',None))]
         if retry and retry['snapshot']['list_id']==snapshot['list_id']:
             entries=[retry]+[entry for entry in entries if entry['index']!=retry['index']]
@@ -404,6 +432,7 @@ class ReferenceControlsMixin:
                 and self.reference_catalog.revision==getattr(self,'_deferred_catalog_revision',None)):
             return False
         self._reference_completed=_completed_paths(self._reference_project,self._reference_ledger)
+        self._reference_reserved=_reserved_paths(self._reference_project,self._reference_ledger)
         self.refresh_reference_histories()
         identifier=current['list_id'] if self._reference_cli_image and current else self._reference_preferences['selected_list_id']
         try:snapshot=self.reference_catalog.freeze_list(identifier,self.reference_catalog.revision,include_completed=True)
@@ -458,6 +487,7 @@ class ReferenceControlsMixin:
         self._reference_preferences=preferences;self._reference_cli_image=None;self._reference_cli_force=False;self.selected_image=None
         self._reference_retry=None;self._deferred_catalog_revision=None
         self._reference_completed=_completed_paths(self._reference_project,self._reference_ledger)
+        self._reference_reserved=_reserved_paths(self._reference_project,self._reference_ledger)
         self._apply_reference_snapshot(snapshot);self._reference_preferences_error=None;self.reference_error=None
         if self.state=='exhausted' and self.images:self.state='idle'
         self.state_write()
@@ -550,7 +580,7 @@ class ReferenceControlsMixin:
         active=getattr(self,'_reference_active',None)
         outcome=getattr(self,'_reference_reap_outcome',None);self._reference_reap_outcome=None
         if outcome in ('success','pending_qc'):self._reference_cli_force=False;self._reference_manual_id=None
-        if active and outcome in ('success','pending_qc'):
+        if active and outcome=='success':
             blocks=getattr(self,'_reference_task_blocks',None)
             if blocks:blocks.success(active['entry'])
         if active:

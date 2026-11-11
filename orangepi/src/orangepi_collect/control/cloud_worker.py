@@ -1,6 +1,8 @@
 """One upload or cleanup process. Credentials arrive only through stdin."""
 import base64,contextlib,hashlib,io,json,os,shutil,signal,sys,time
 from pathlib import Path
+import yaml
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'common'))
 from cloud_common import CloudError,atomic,read_json,source_manifest,check_source,verify_remote,same_manifest,session_lock,sync_dir
 
 SERVER='https://ei2rmd.baai.ac.cn'
@@ -49,10 +51,56 @@ def upload_empty(client,config,key):
     stored=[row for row in connection.get_bucket(config.BUCKET_NAME).list(prefix=key,delimiter='') if row.name==key]
     if len(stored)!=1 or int(stored[0].size)!=0:raise CloudError('零字节文件云端核验未通过，本地数据保留')
 
+
+def _verify_qualified_source(job,source):
+    """Recheck source qualification and enqueue token under the session lease."""
+    if source.is_symlink() or not source.is_dir():raise CloudError('上传源目录无效')
+    recording=job.get('recording') if isinstance(job.get('recording'),dict) else {}
+    if recording.get('qualified') is not True:raise CloudError('上传队列缺少完整质检资格快照')
+    meta_path=source/'meta.yaml';summary_path=source/'capture_summary.json'
+    selection_path=source/'device_selection.json';report_path=source/'qc_report.json'
+    try:
+        raw_meta=meta_path.read_bytes();meta=yaml.safe_load(raw_meta.decode('utf-8')) or {}
+        summary_raw=summary_path.read_bytes();summary=json.loads(summary_raw.decode('utf-8'),parse_constant=lambda v:(_ for _ in ()).throw(ValueError('nonfinite '+v)))
+        selection=json.loads(selection_path.read_text(encoding='utf-8'),parse_constant=lambda v:(_ for _ in ()).throw(ValueError('nonfinite '+v)))
+        report=json.loads(report_path.read_text(encoding='utf-8'),parse_constant=lambda v:(_ for _ in ()).throw(ValueError('nonfinite '+v)))
+    except (OSError,ValueError,TypeError,UnicodeError,yaml.YAMLError) as exc:
+        raise CloudError('本地完整质检证据缺失或无效，请刷新批次：'+str(exc)[:180])
+    from required_device_contract import resolve_selection,qualification_errors
+    from capture_qc_receipt import verify as verify_qc_receipt
+    if not isinstance(meta,dict) or not isinstance(summary,dict) or not isinstance(selection,dict) or not isinstance(report,dict):
+        raise CloudError('本地完整质检证据结构无效，请刷新批次')
+    contract,contract_errors,legacy=resolve_selection(selection.get('device_config'),selection)
+    if contract_errors:raise CloudError('本地必需设备合同无效：'+'；'.join(contract_errors)[:180])
+    if meta.get('status')!='success' or summary.get('status')!='success' or summary.get('errors'):
+        raise CloudError('本地采集或完整质检未成功，请刷新批次')
+    errors=qualification_errors(source,summary,contract,report,legacy=legacy)
+    if errors:raise CloudError('本地完整质检不再合格：'+'；'.join(errors[:8]))
+    receipt_errors=verify_qc_receipt(source)
+    if receipt_errors:raise CloudError('本机完整质检回执已失效：'+'；'.join(receipt_errors[:8]))
+    reference=recording.get('reference_path')
+    pi=meta.get('pi') if isinstance(meta.get('pi'),dict) else {}
+    ref_selection=meta.get('reference_selection') if isinstance(meta.get('reference_selection'),dict) else pi.get('reference_selection')
+    asset=ref_selection.get('asset') if isinstance(ref_selection,dict) else None
+    frozen=(asset.get('relative_path') if isinstance(asset,dict) else None) or meta.get('reference_image') or pi.get('reference_image')
+    if isinstance(frozen,str) and not frozen.startswith('configs/environments/'):
+        frozen='configs/environments/'+frozen
+    if not isinstance(reference,str) or not reference or frozen!=reference:
+        raise CloudError('上传任务参考图身份与本段冻结身份不一致')
+    try:
+        from recording_store import capture_evidence_token
+        signature=source.stat()
+        token=hashlib.sha256(str((signature.st_dev,signature.st_ino)).encode()+
+            capture_evidence_token(source,raw_meta,summary_raw).encode()).hexdigest()
+    except (OSError,ValueError,TypeError,RecursionError) as exc:
+        raise CloudError('无法重新核对本地批次内容：'+str(exc)[:180])
+    if token!=job.get('source_token'):raise CloudError('本地批次在排队后已变化，请刷新列表后重新选择')
+
 def upload(payload):
     base=Path(payload['base']);job=payload['job'];source=Path(job['source']);directory=Path(payload['directory'])
     if source.resolve().parent!=Path(job['allowed_root']).resolve() or source.name!=job['session_id']:raise CloudError('上传目录越界')
     with session_lock(base,job['session_id']):
+        _verify_qualified_source(job,source)
         emit(state='checking',phase='校验本地文件')
         manifest_path=directory/'manifest.json';manifest=read_json(manifest_path)
         if manifest is None:

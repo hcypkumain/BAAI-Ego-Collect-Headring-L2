@@ -88,6 +88,9 @@ class UploadManager:
                 path=self.store.path(entry['session_id']);meta=self.store.metadata(path)
                 if meta['token']!=entry['token'] or not meta['retained']:raise CloudError('批次状态已变化或尚未确认保留，请刷新列表')
                 if meta.get('qc_state')=='pending':raise CloudError('该段等待主机质检，尚不能作为已检数据上传')
+                if meta.get('qualified') is not True:
+                    reason=meta.get('qualification_error') or '完整质检/必需设备完整性尚未证明'
+                    raise CloudError('该段未达到标准上传条件（仅可本地诊断）：'+str(reason)[:300])
                 old=next((job for job in reversed(self.state['jobs']) if job['session_id']==meta['id'] and not job.get('local_deleted')),None)
                 if old and old['state'] in ACTIVE|{'queued','paused','cleanup_queued','success'}:raise CloudError('所选批次已在队列或已上传，请刷新；失败任务请用重试')
                 ids.append((path,meta))
@@ -102,7 +105,7 @@ class UploadManager:
                 meta=dict(meta,day=datetime.datetime.fromtimestamp(meta['created_unix'],CST).date().isoformat())
                 from project_paths import COLLECTION_MODE
                 identifier=uuid.uuid4().hex;remote=config['target_parent']+'/'+COLLECTION_MODE+'/'+meta['day']+'/'+meta['id']+'-'+identifier[:8]
-                snapshot={k:meta.get(k) for k in ('id','token','reference_name','qc_level','day','duration','retained','reference_state')}
+                snapshot={k:meta.get(k) for k in ('id','token','reference_name','reference_path','qc_level','day','duration','retained','reference_state','qualified')}
                 job=dict(collection_mode=COLLECTION_MODE,id=identifier,session_id=meta['id'],source=str(path),allowed_root=str(root),volume=str(volume),source_token=meta['token'],
                     daily_report=reports.get(meta['day']),recording=snapshot,settings=dict(config),remote_path=remote,state='queued',phase='等待上传',created_at=time.time(),
                     total_files=0,total_bytes=0,completed_files=0,completed_bytes=0,current_file='',error='',local_deleted=False)
@@ -194,7 +197,8 @@ class UploadManager:
         mode='cleanup' if job['state']=='cleanup_queued' else 'upload'
         if mode=='upload':
             meta=self.store.metadata(self.store.path(job['session_id']))
-            if meta['token']!=job['source_token'] or not meta['retained']:
+            if (meta['token']!=job['source_token'] or not meta['retained']
+                    or meta.get('qualified') is not True):
                 with self.lock:job.update(state='failed',error='本地批次已变化，请刷新后重新选择',phase='需要核对');self._save()
                 return
         credentials=self.credentials() if mode=='upload' else None

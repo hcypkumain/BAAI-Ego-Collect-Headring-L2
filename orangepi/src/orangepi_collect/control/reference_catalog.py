@@ -529,9 +529,10 @@ class ReferenceCatalog:
     def set_list_scene(self, identifier, task, notes, files, expected_revision):
         """Attach a task bundle's scene metadata (config.yaml / placements.csv).
 
-        `files` maps a plain file name to its bytes. Contents are written beside
-        the uploaded images under _scenes/<list_id>/ and recorded with their
-        digest, so the scene that produced a list stays recoverable.
+        `files` maps a plain file name to its bytes. Contents are written under
+        an immutable _scenes/<list_id>/<sha256>/<name> path and recorded with
+        their digest, so failed catalog transactions cannot change a prior
+        scene's bytes.
         """
         if not isinstance(files, dict) or not files or len(files) > MAX_SCENE_FILES:
             raise CatalogError('场景文件数量无效')
@@ -560,22 +561,50 @@ class ReferenceCatalog:
         # Write and fsync outside the catalog lock; only the commit is locked.
         recorded = {}
         for name, raw in files.items():
-            relative = '_scenes/%s/%s' % (identifier, name)
+            digest = hashlib.sha256(raw).hexdigest()
+            relative = '_scenes/%s/%s/%s' % (identifier, digest, name)
             destination = self._resolve(relative)
-            descriptor, temporary = tempfile.mkstemp(prefix='.scene-', dir=str(destination.parent))
             try:
-                with os.fdopen(descriptor, 'wb') as target:
-                    target.write(raw); target.flush()
-                    if hasattr(os, 'fchmod'):os.fchmod(target.fileno(), 0o600)
-                    else:os.chmod(temporary, 0o600)
-                    os.fsync(target.fileno())
-                os.replace(temporary, str(destination))
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination = self._resolve(relative)
+                unchanged = False
+                try:
+                    info = destination.lstat()
+                except FileNotFoundError:
+                    info = None
+                if info is not None:
+                    if stat.S_ISREG(info.st_mode) and info.st_size == len(raw):
+                        existing = destination.read_bytes()
+                        unchanged = (existing == raw and hashlib.sha256(existing).hexdigest() == digest)
+                    if not unchanged:
+                        descriptor, temporary = tempfile.mkstemp(prefix='.scene-', dir=str(destination.parent))
+                        try:
+                            with os.fdopen(descriptor, 'wb') as target:
+                                target.write(raw); target.flush()
+                                if hasattr(os, 'fchmod'):os.fchmod(target.fileno(), 0o600)
+                                else:os.chmod(temporary, 0o600)
+                                os.fsync(target.fileno())
+                            os.replace(temporary, str(destination))
+                        finally:
+                            try:os.unlink(temporary)
+                            except FileNotFoundError:pass
+                else:
+                    descriptor, temporary = tempfile.mkstemp(prefix='.scene-', dir=str(destination.parent))
+                    try:
+                        with os.fdopen(descriptor, 'wb') as target:
+                            target.write(raw); target.flush()
+                            if hasattr(os, 'fchmod'):os.fchmod(target.fileno(), 0o600)
+                            else:os.chmod(temporary, 0o600)
+                            os.fsync(target.fileno())
+                        os.replace(temporary, str(destination))
+                    finally:
+                        try:os.unlink(temporary)
+                        except FileNotFoundError:pass
+                if not unchanged:
+                    _sync_directory(destination.parent)
             except OSError as error:
-                try:os.unlink(temporary)
-                except FileNotFoundError:pass
                 raise CatalogError('场景文件保存失败，请检查磁盘空间', 'storage_error', 503) from error
-            recorded[name] = dict(sha256=hashlib.sha256(raw).hexdigest(),
-                                  size_bytes=len(raw), path=relative)
+            recorded[name] = dict(sha256=digest, size_bytes=len(raw), path=relative)
         _sync_directory(directory)
         with self._transaction(expected_revision) as value:
             item = self._list(value, identifier)
@@ -588,12 +617,18 @@ class ReferenceCatalog:
             merged.update(recorded)
             if len(merged) > MAX_SCENE_FILES:
                 raise CatalogError('场景文件数量已满', 'scene_full', 413)
-            scene = dict(imported_at=time.time())
             task = task or previous.get('task')
             notes = notes or previous.get('notes')
+            scene = dict(files=merged)
             if task:scene['task'] = display_name(task, default='')[:1024]
             if notes:scene['notes'] = str(notes)[:1024]
-            scene['files'] = merged
+            unchanged = (previous.get('files') == merged
+                         and previous.get('task') == scene.get('task')
+                         and previous.get('notes') == scene.get('notes'))
+            if unchanged:
+                scene = previous
+            else:
+                scene['imported_at'] = time.time()
             item['scene'] = scene
         return dict(id=identifier, revision=value['revision'], files=sorted(merged))
 

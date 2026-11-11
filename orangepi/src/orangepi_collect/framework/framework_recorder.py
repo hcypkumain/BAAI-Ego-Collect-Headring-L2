@@ -147,10 +147,25 @@ class PiBundleRecorder(BaseRecorder):
         # The stop gate only stops accepting new samples. Publish a separate
         # receipt after the native process has exited and its writers have
         # closed successfully; bind it to the original privacy proof.
-        if summary_path.is_file():publish_capture_completion(path,self.process,summary)
+        completion_published=(publish_capture_completion(path,self.process,summary)
+                              if summary_path.is_file() else False)
+        if not code and summary.get('status')=='success' and not completion_published:
+            summary['status']='error'
+            summary.setdefault('errors',[]).append('Native STOP/reap completion proof is missing or invalid')
+            atomic_json(summary_path,summary)
+            atomic_json(path/'status.json',dict(state='error',pid=os.getpid(),time=time.time(),
+                recording_active=False,errors=summary['errors']))
+            raise RuntimeError('Native STOP/reap completion proof is missing or invalid')
         # Native STOP closes all readers/encoders. Keep the adapter alive while
         # the operator decides, without starting standardization or QC.
         if self.config.wait_for_save and not code and summary.get('status')!='cancelled':
+            if not completion_published:
+                summary['status']='error'
+                summary.setdefault('errors',[]).append('Native STOP/reap completion proof is missing; save decision is unavailable')
+                atomic_json(summary_path,summary)
+                atomic_json(path/'status.json',dict(state='error',pid=os.getpid(),time=time.time(),
+                    recording_active=False,errors=summary['errors']))
+                raise RuntimeError('Native STOP/reap completion proof is missing; save decision is unavailable')
             atomic_json(path/'status.json',dict(state='awaiting_decision',pid=os.getpid(),time=time.time(),recording_active=False))
             while decision is None:
                 if (path/'discard_request.json').is_file():decision='DISCARD';break
@@ -239,6 +254,17 @@ class PiBundleRecorder(BaseRecorder):
         atomic_json(path/'status.json',dict(state=summary['status'],pid=os.getpid(),time=time.time(),
                 errors=summary['errors'],qc_level=report.level,
                 qc_raw_level=summary['qc_raw_level'],qc_policy=summary['qc_policy'],storage_durability=proof))
+        if summary['status']=='success':
+            try:
+                from capture_qc_receipt import write as write_qc_receipt
+                write_qc_receipt(path,expected_input_signature=getattr(report,'pi_qc_input_signature',None))
+            except (OSError,ValueError,TypeError,KeyError,RecursionError) as exc:
+                summary['status']='qc_error'
+                summary.setdefault('errors',[]).append('本机完整质检回执未能生成：'+str(exc)[:240])
+                meta['status']='qc_error';meta['qc_level']='ERROR'
+                atomic_json(path/'capture_summary.json',summary);atomic_yaml(meta_path,meta)
+                atomic_json(path/'status.json',dict(state='qc_error',pid=os.getpid(),time=time.time(),
+                    errors=summary['errors'],qc_level='ERROR',qc_policy=summary.get('qc_policy'),storage_durability=proof))
 
     def run(self):
         result=super().run()

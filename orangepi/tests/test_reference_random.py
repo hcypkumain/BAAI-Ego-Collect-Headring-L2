@@ -49,6 +49,9 @@ class ReferenceTests(unittest.TestCase):
         self.controller=Controller(); c=self.controller
         c.refresh_reference_histories=Mock()
         c._reference_project=self.project; c._reference_base=self.base; c._reference_ledger=Mock()
+        # This catalog-only test has no pending ledger reservations. Keep the
+        # new reservation scan at its real empty-list boundary.
+        c._reference_ledger.images.return_value=[]
         c.reference_catalog=self.catalog; c._reference_preferences={'selected_list_id':self.list_id}
         c._reference_preferences_error=None; c.reference_error=None
         c._reference_retry=None; c._reference_active=None; c._reference_snapshot=None

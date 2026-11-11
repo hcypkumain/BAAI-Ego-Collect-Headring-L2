@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -93,6 +94,100 @@ class HandoffReceiver:
             native_sha256=self.legacy.hash_file(path/'native_capture_summary.json'))
         validate_manifest(value);return value
 
+    def _handoff_binding(self,path,job,manifest):
+        """Require verifiable source-QC identity before authorizing Pi deletion."""
+        common=self.root/'collector/orangepi/src/orangepi_collect/common'
+        if not common.is_dir():common=Path(__file__).resolve().parents[2]/'orangepi/src/orangepi_collect/common'
+        if str(common) not in sys.path:sys.path.insert(0,str(common))
+        from required_device_contract import resolve_selection
+        from capture_qc_receipt import (verify_portable as verify_portable_qc_receipt,
+            verify_portable_input_signature,portable_input_signature)
+        path=Path(path);sid=job['session'];details=job['details']
+        selection=json.loads((path/'device_selection.json').read_text(encoding='utf-8'))
+        raw_meta=json.loads((path/'meta.json').read_text(encoding='utf-8'))
+        import yaml
+        meta=yaml.safe_load((path/'meta.yaml').read_text(encoding='utf-8')) if (path/'meta.yaml').is_file() else {}
+        meta=meta if isinstance(meta,dict) else {}
+        summary=json.loads((path/'capture_summary.json').read_text(encoding='utf-8'))
+        contract,errors,legacy=resolve_selection(selection.get('device_config'),selection)
+        if errors or legacy or contract.get('version')!='required-devices-v1':
+            raise ValueError('QC_HOST_UPGRADE_REQUIRED: frozen required-device contract is missing/invalid')
+        if (selection.get('collection_mode') not in ('emg','eeg')
+                or not isinstance(raw_meta.get('reference_sha256'),str)
+                or meta.get('status') not in ('success','pending_qc','qc_error')
+                or summary.get('status') not in ('success','pending_qc','qc_error')
+                or summary.get('capture_status') not in (None,'success')):
+            raise ValueError('QC_HOST_UPGRADE_REQUIRED: source is not an eligible closed capture')
+        if details.get('native_sha256')!=manifest.get('native_sha256'):
+            raise ValueError('Frozen native capture identity differs from custody manifest')
+        pending_path=path/'qc_pending.json';pending=None
+        if pending_path.is_file():
+            pending=json.loads(pending_path.read_text(encoding='utf-8'))
+        if isinstance(pending,dict) and pending.get('state')=='pending':
+            if (pending.get('session_id')!=sid or pending.get('native_sha256')!=manifest.get('native_sha256')
+                    or pending.get('request_id')!=details.get('request_id')
+                    or pending.get('reference_sha256')!=raw_meta.get('reference_sha256')):
+                raise ValueError('Frozen pending-QC identity differs from source capture')
+            portable=pending.get('input_signature');local=pending.get('local_input_signature')
+        else:
+            if summary.get('status')!='success' or meta.get('status')!='success':
+                raise ValueError('QC_HOST_UPGRADE_REQUIRED: pending-QC input signature is unavailable')
+            receipt_errors=verify_portable_qc_receipt(path)
+            if receipt_errors:
+                raise ValueError('QC_HOST_UPGRADE_REQUIRED: source full-QC receipt is missing/invalid')
+            receipt=json.loads((path/'capture_qc_receipt.json').read_text(encoding='utf-8'))
+            if (receipt.get('session_id')!=sid or receipt.get('contract_version')!=contract['version']
+                    or receipt.get('required_devices')!=contract['required_devices']):
+                raise ValueError('Source full-QC receipt identity mismatch')
+            portable=portable_input_signature(path,contract,require_marker=True)
+            local=receipt.get('input_signature')
+            pending=dict(version=1,request_id=details['request_id'],session_id=sid,
+                native_sha256=manifest['native_sha256'],reference_sha256=raw_meta['reference_sha256'],
+                input_signature=portable,local_input_signature=local,state='pending',created_at=time.time())
+        if (not isinstance(portable,str) or len(portable)!=64
+                or not isinstance(local,str) or len(local)!=64
+                or not verify_portable_input_signature(path,portable,contract,require_marker=False)):
+            raise ValueError('QC_HOST_UPGRADE_REQUIRED: frozen portable input signature is missing/invalid')
+        return dict(request_id=pending['request_id'],session_id=sid,native_sha256=manifest['native_sha256'],
+            reference_sha256=raw_meta['reference_sha256'],input_signature=portable,local_input_signature=local,
+            contract_version=contract['version'],required_devices=contract['required_devices'],pending=pending)
+
+    def _ensure_work_pending(self,work,job,receipt):
+        common=self.root/'collector/orangepi/src/orangepi_collect/common'
+        if not common.is_dir():common=Path(__file__).resolve().parents[2]/'orangepi/src/orangepi_collect/common'
+        if str(common) not in sys.path:sys.path.insert(0,str(common))
+        from required_device_contract import resolve_selection
+        from capture_qc_receipt import verify_portable_input_signature
+        work=Path(work);sid=job['session']
+        selection=json.loads((work/'device_selection.json').read_text(encoding='utf-8'))
+        contract,errors,legacy=resolve_selection(selection.get('device_config'),selection)
+        if errors or legacy:raise ValueError('QC_HOST_UPGRADE_REQUIRED: frozen device contract unavailable')
+        if (receipt.get('qc_protocol_version')!=2 or receipt.get('session_id')!=sid
+                or receipt.get('qc_request_id')!=job['details']['request_id']
+                or receipt.get('native_sha256')!=job['details']['native_sha256']
+                or receipt.get('required_device_contract_version')!=contract['version']
+                or receipt.get('input_signature_kind')!='portable-content-sha256-v1'):
+            raise ValueError('QC_HOST_UPGRADE_REQUIRED: handoff receipt does not bind this capture')
+        if not verify_portable_input_signature(work,receipt.get('input_signature'),contract,require_marker=False):
+            raise ValueError('Copied PC inputs differ from the signed Pi capture')
+        pending_path=work/'qc_pending.json';existing=None
+        if pending_path.is_file():
+            existing=json.loads(pending_path.read_text(encoding='utf-8'))
+        if isinstance(existing,dict) and existing.get('state')=='pending':
+            if (existing.get('request_id')!=receipt.get('qc_request_id')
+                    or existing.get('input_signature')!=receipt.get('input_signature')
+                    or existing.get('local_input_signature')!=receipt.get('local_input_signature')
+                    or existing.get('reference_sha256')!=receipt.get('reference_sha256')):
+                raise ValueError('Copied pending-QC identity differs from signed Pi source')
+            pending=existing
+        else:
+            pending=dict(version=1,request_id=receipt['qc_request_id'],session_id=sid,
+                native_sha256=receipt['native_sha256'],reference_sha256=receipt['reference_sha256'],
+                input_signature=receipt['input_signature'],local_input_signature=receipt['local_input_signature'],
+                state='pending',created_at=receipt.get('committed_at',time.time()))
+        self.legacy.atomic(pending_path,pending)
+        return contract,pending
+
     def _scan_one(self,definition):
         device=definition['id']
         try:
@@ -161,6 +256,15 @@ class HandoffReceiver:
             self._guard();self._storage();self._idle(device)
             if job.get('raw_receipt'):
                 self.legacy.verify_tree(raw,job['raw_receipt']['manifest'],durable=True)
+                proof=verify_signature(job['raw_receipt'],(self.root/'secrets'/device).read_bytes(),RAW_PURPOSE)
+                binding=self._handoff_binding(raw,job,job['raw_receipt']['manifest'])
+                if (proof.get('qc_protocol_version')!=2
+                        or proof.get('qc_qualification_protocol')!='required-device-contract-v1'
+                        or proof.get('qc_request_id')!=binding['request_id']
+                        or proof.get('input_signature')!=binding['input_signature']
+                        or proof.get('local_input_signature')!=binding['local_input_signature']
+                        or proof.get('reference_sha256')!=binding['reference_sha256']):
+                    raise ValueError('QC_HOST_UPGRADE_REQUIRED: existing custody receipt lacks source-QC identity')
                 self.store.update(identifier,receive_state='host_committed',process_state='queued');return
             manifest=job.get('manifest')
             if manifest is None:
@@ -176,10 +280,16 @@ class HandoffReceiver:
                 if raw.parent.resolve()!=raw.parent or raw.is_symlink():raise ValueError('Custody destination linked')
                 incoming.rename(raw);self.legacy.sync_dir(raw.parent)
             self.legacy.verify_tree(raw,manifest,durable=True)
+            binding=self._handoff_binding(raw,job,manifest)
             receipt=signed(dict(version=1,purpose=RAW_PURPOSE,device_id=device,session_id=sid,
                 server_id=self.config['server_id'],transaction_id=uuid.uuid4().hex,manifest=manifest,
                 host_path=str(raw),host_storage_uuid=self.config['storage_uuid'],host_verified=True,
-                host_fsynced=True,qc_request_id=job['details']['request_id'],committed_at=time.time()),
+                host_fsynced=True,qc_request_id=binding['request_id'],qc_protocol_version=2,
+                qc_qualification_protocol='required-device-contract-v1',
+                input_signature_kind='portable-content-sha256-v1',input_signature=binding['input_signature'],
+                local_input_signature=binding['local_input_signature'],reference_sha256=binding['reference_sha256'],
+                required_device_contract_version=binding['contract_version'],native_sha256=binding['native_sha256'],
+                committed_at=time.time()),
                 (self.root/'secrets'/device).read_bytes())
             self.store.update(identifier,raw_path=str(raw),raw_receipt=receipt,raw_receipt_sha256=sha_value(receipt),
                 receive_state='host_committed',process_state='queued',receive_error=None)
@@ -226,16 +336,67 @@ class HandoffReceiver:
         result=json.loads(result_path.read_text());self._validate_result(job,resultdir,result);return result
 
     def _validate_result(self,job,resultdir,result):
+        common=self.root/'collector/orangepi/src/orangepi_collect/common'
+        if not common.is_dir():common=Path(__file__).resolve().parents[2]/'orangepi/src/orangepi_collect/common'
+        if str(common) not in sys.path:sys.path.insert(0,str(common))
+        from required_device_contract import resolve_selection
         if resultdir.is_symlink() or resultdir.resolve()!=resultdir:raise ValueError('QC result root linked')
         if (result.get('session_id')!=job['session'] or result.get('request_id')!=job['details']['request_id']
-                or result.get('native_sha256')!=job['details']['native_sha256'] or result.get('level') not in ('INFO','WARN','ERROR')):
+                or result.get('native_sha256')!=job['details']['native_sha256'] or result.get('level') not in ('INFO','WARN','ERROR')
+                or result.get('passed') is not (result.get('level')!='ERROR')):
             raise ValueError('QC result differs from committed raw identity')
+        receipt=job.get('raw_receipt') if isinstance(job.get('raw_receipt'),dict) else {}
+        digest=lambda value:isinstance(value,str) and len(value)==64 and all(ch in '0123456789abcdef' for ch in value)
+        if (receipt.get('qc_protocol_version')!=2
+                or receipt.get('qc_qualification_protocol')!='required-device-contract-v1'
+                or result.get('input_signature')!=receipt.get('input_signature')
+                or result.get('local_input_signature')!=receipt.get('local_input_signature')
+                or result.get('reference_sha256')!=receipt.get('reference_sha256')
+                or not digest(result.get('checked_input_signature'))):
+            raise ValueError('QC_HOST_UPGRADE_REQUIRED: host result lacks bound input/qualification identity')
+        chunks=result.get('archived_chunks')
+        if not isinstance(chunks,dict) or set(chunks)!=set(('emg_left','emg_right','eeg')):
+            raise ValueError('QC result lacks standardized raw-chunk archive evidence')
+        for stream,names in chunks.items():
+            if (not isinstance(names,list) or len(names)!=len(set(names))
+                    or any(not isinstance(name,str) or Path(name).name!=name
+                        or not name.startswith('chunk_') or not name.endswith('.npz') for name in names)):
+                raise ValueError('Unsafe standardized raw-chunk evidence')
+        derived=result.get('derived_counts')
+        if (not isinstance(derived,dict) or set(derived)-{'eeg_samples'}
+                or 'eeg_samples' in derived and (type(derived['eeg_samples']) is not int or derived['eeg_samples']<=0)):
+            raise ValueError('QC derived count proof is invalid')
         if 'qc_report.json' not in result.get('artifacts',{}):raise ValueError('QC report missing')
+        allowed={'qc_report.json','qc_raw_report.json','qc_policy.json','qc_timing.json','qc.html'}
+        selection_path=Path(job['raw_path'])/'device_selection.json'
+        try:
+            selection=json.loads(selection_path.read_text(encoding='utf-8'))
+            contract,errors,legacy=resolve_selection(selection.get('device_config'),selection)
+            if errors or legacy:raise ValueError('Invalid frozen device contract')
+            streams=set(contract['required_devices'])|{'marker'}
+        except Exception as error:raise ValueError('QC_HOST_UPGRADE_REQUIRED: frozen device contract unavailable') from error
         for relative,sha in result['artifacts'].items():
             path=Path(relative);artifact=resultdir/'artifacts'/path
             if path.is_absolute() or '..' in path.parts or artifact.is_symlink() or (resultdir/'artifacts').resolve() not in artifact.resolve().parents:
                 raise ValueError('Unsafe QC artifact')
+            parts=path.parts
+            allowed_stream=(len(parts)==2 and parts[0] in streams and parts[1]==parts[0]+'.npz')
+            if len(parts)==2 and parts[0] in ('emg_left','emg_right') and parts[1]=='timestamp_rebuild.json':
+                allowed_stream=True
+            if len(parts)==2 and parts[0]=='eeg' and parts[1] in ('gate_finalization.json','eeg_summary.json','metadata.json'):
+                allowed_stream=True
+            if relative not in allowed and not allowed_stream:raise ValueError('QC result contains a non-derived/identity artifact: '+relative)
             if self.legacy.hash_file(artifact)!=sha:raise ValueError('QC artifact checksum changed')
+        report=json.loads((resultdir/'artifacts/qc_report.json').read_text(encoding='utf-8'))
+        report_streams=report.get('streams') if isinstance(report,dict) else None
+        if (not isinstance(report,dict) or report.get('level')!=result['level']
+                or report.get('scope','full')!='full'
+                or not isinstance(report_streams,dict)
+                or not set(contract['required_devices']).issubset(report_streams)):
+            raise ValueError('QC report does not cover the frozen full capture')
+        report_session=report.get('session_dir')
+        if isinstance(report_session,str) and Path(report_session).name!=job['session']:
+            raise ValueError('QC report session identity mismatch')
 
     def process(self,job):
         self._storage();raw=Path(job['raw_path']);sid=job['session'];device=job['device'];identifier=job['id']
@@ -258,18 +419,31 @@ class HandoffReceiver:
             self.wake.set();return
         parent=self.data/'work/manual-handoff'/job['raw_receipt']['transaction_id'];work=parent/sid
         parent.mkdir(parents=True,exist_ok=True)
+        common=self.root/'collector/orangepi/src/orangepi_collect/common'
+        if not common.is_dir():common=Path(__file__).resolve().parents[2]/'orangepi/src/orangepi_collect/common'
+        if str(common) not in sys.path:sys.path.insert(0,str(common))
+        from required_device_contract import resolve_selection,qualification_errors
+        from capture_qc_receipt import verify_portable_input_signature,portable_input_signature,write as write_qc_receipt
+        source_selection=json.loads((raw/'device_selection.json').read_text(encoding='utf-8'))
+        source_contract,source_errors,source_legacy=resolve_selection(source_selection.get('device_config'),source_selection)
+        if source_errors or source_legacy:raise ValueError('QC_HOST_UPGRADE_REQUIRED: frozen device contract unavailable')
+        source_signature=job['raw_receipt'].get('input_signature')
+        if not isinstance(source_signature,str):raise ValueError('QC_HOST_UPGRADE_REQUIRED: portable source signature missing')
+        if work.exists() and not verify_portable_input_signature(work,source_signature,source_contract,require_marker=False):
+            shutil.rmtree(work)
         if not work.exists():
-            temporary=parent/(sid+'.copy');temporary.mkdir(exist_ok=True)
+            temporary=parent/(sid+'.copy')
+            if temporary.exists():shutil.rmtree(temporary)
+            temporary.mkdir(exist_ok=True)
             subprocess.run(['cp','-a','--reflink=auto',str(raw)+'/.',str(temporary)+'/'],check=True,capture_output=True,timeout=1800)
             self.legacy.verify_tree(temporary,job['raw_receipt']['manifest'],durable=True)
             temporary.rename(work);self.legacy.sync_dir(parent)
-        pending=dict(version=1,request_id=job['details']['request_id'],session_id=sid,
-            native_sha256=job['details']['native_sha256'],state='pending',created_at=job['raw_receipt']['committed_at'])
-        self.legacy.atomic(work/'qc_pending.json',pending)
+        self._ensure_work_pending(work,job,job['raw_receipt'])
         applied=work/'qc_applied.json'
         if applied.exists():
             history=work/'qc_history';history.mkdir(exist_ok=True);applied.rename(history/'pi-qc-applied.json')
         result=self._qc(job,work);resultdir=self.data/'results'/device/sid
+        self._validate_result(job,resultdir,result)
         # Rehydrate checked artifacts on a restart/cache hit; a fresh work copy
         # must never be archived as if cached QC had transformed it already.
         for relative,sha in result['artifacts'].items():
@@ -279,18 +453,47 @@ class HandoffReceiver:
                 temp=target.with_name(target.name+'.import');shutil.copy2(source,temp)
                 with temp.open('rb') as f:os.fsync(f.fileno())
                 temp.replace(target)
+        for stream,names in result['archived_chunks'].items():
+            directory=work/stream;archive=directory/'raw_chunks'
+            for name in names:
+                source=directory/name;target=archive/name
+                if target.exists() or target.is_symlink():raise ValueError('Raw chunk archive conflict: '+stream+'/'+name)
+                if source.is_symlink() or not source.is_file():raise ValueError('Raw chunk source missing: '+stream+'/'+name)
+                archive.mkdir(exist_ok=True);source.rename(target)
         self.store.update(identifier,result=result,result_sha256=self.legacy.hash_file(resultdir/'result.json'),
                           level=result['level'],raw_level=result.get('raw_level'))
         summary=json.loads((work/'native_capture_summary.json').read_text());outcome='qc_error' if result['level']=='ERROR' else 'success'
+        if isinstance(summary.get('eeg'),dict) and isinstance(result.get('derived_counts'),dict):
+            kept=result['derived_counts'].get('eeg_samples')
+            if type(kept) is int and kept>0:summary['eeg']['samples']=kept
         summary.update(status=outcome,qc_state='completed',qc_level=result['level'],qc_raw_level=result.get('raw_level'),
                        qc_executor='linux_host',qc_elapsed_seconds=result['elapsed_seconds'])
+        report=json.loads((work/'qc_report.json').read_text(encoding='utf-8'))
+        if outcome=='success':
+            qualification_errors_now=qualification_errors(work,summary,source_contract,report,legacy=False)
+            if qualification_errors_now:
+                outcome='qc_error';summary.update(status=outcome,qc_level='ERROR')
+                summary.setdefault('errors',[]).extend('QC host proof: '+error for error in qualification_errors_now[:8])
+        if portable_input_signature(work,source_contract,require_marker=True)!=result.get('checked_input_signature'):
+            raise ValueError('QC_HOST_UPGRADE_REQUIRED: standardized host data differ from checked signature')
         self.legacy.atomic(work/'capture_summary.json',summary)
         import yaml
-        meta=yaml.safe_load((work/'meta.yaml').read_text()) or {};meta.update(result.get('metadata',{}))
-        meta.update(status=outcome,qc_level=result['level'],qc_state='completed',retention_state='host_custody',
+        meta=yaml.safe_load((work/'meta.yaml').read_text()) or {}
+        meta.update(status=outcome,qc_level=summary.get('qc_level'),qc_state='completed',retention_state='host_custody',
                     upload_state='pending_cloud',pc_retention_rule='72_hours_after_verified_cloud_confirmation')
         (work/'meta.yaml').write_text(yaml.safe_dump(meta,allow_unicode=True,sort_keys=False))
-        self.legacy.atomic(work/'status.json',dict(state=outcome,recording_active=False,qc_state='completed',qc_level=result['level']))
+        self.legacy.atomic(work/'status.json',dict(state=outcome,recording_active=False,qc_state='completed',qc_level=summary.get('qc_level'),errors=summary.get('errors',[])))
+        if outcome=='success':
+            try:write_qc_receipt(work)
+            except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
+                outcome='qc_error';summary.update(status=outcome,qc_level='ERROR')
+                summary.setdefault('errors',[]).append('Full QC receipt failed: '+str(error)[:200])
+                try:(work/'capture_qc_receipt.json').unlink()
+                except FileNotFoundError:pass
+                self.legacy.atomic(work/'capture_summary.json',summary)
+                meta.update(status=outcome,qc_level='ERROR')
+                (work/'meta.yaml').write_text(yaml.safe_dump(meta,allow_unicode=True,sort_keys=False))
+                self.legacy.atomic(work/'status.json',dict(state=outcome,recording_active=False,qc_state='completed',qc_level='ERROR'))
         manifest=self._manifest(work);manifest.update(device_id=device,session_id=sid)
         category='quarantine' if outcome=='qc_error' else 'archive';destination=self.data/category/job['details']['day']/device/sid
         destination.parent.mkdir(parents=True,exist_ok=True)
@@ -299,7 +502,14 @@ class HandoffReceiver:
         verification=self.legacy.verify_tree(destination,manifest,durable=True)
         receipt=signed(dict(version=1,purpose='host_qc_archive_v1',device_id=device,session_id=sid,
             server_id=self.config['server_id'],archive_path=str(destination),archive_verified=True,
-            verification=verification,manifest=manifest,passed=result['level']!='ERROR',
+            verification=verification,manifest=manifest,passed=outcome=='success',
+            qc_protocol_version=2,qc_qualification_protocol='required-device-contract-v1',
+            input_signature=job['raw_receipt'].get('input_signature'),
+            local_input_signature=job['raw_receipt'].get('local_input_signature'),
+            checked_input_signature=result.get('checked_input_signature'),
+            reference_sha256=job['raw_receipt'].get('reference_sha256'),
+            qualification_receipt_sha256=(self.legacy.hash_file(destination/'capture_qc_receipt.json')
+                if outcome=='success' else None),
             raw_handoff_receipt_sha256=job['raw_receipt_sha256'],result_sha256=self.legacy.hash_file(resultdir/'result.json'),
             created_at=time.time()),(self.root/'secrets'/device).read_bytes())
         self.legacy.atomic(self.data/'receipts'/device/(sid+'.json'),receipt)
@@ -315,9 +525,18 @@ class HandoffReceiver:
             expected='/home/orangepi/maintenance/server-qc/results/'+job['session']
             if ready.get('result_directory')!=expected or ready.get('ready') is not True:raise ValueError('Unexpected result destination')
             self._transfer(job,resultdir,push=True)
+            archive=job.get('archive_receipt') if isinstance(job.get('archive_receipt'),dict) else {}
             receipt=signed(dict(version=1,purpose=RESULT_PURPOSE,device_id=job['device'],session_id=job['session'],
                 server_id=self.config['server_id'],handoff_receipt_sha256=job['raw_receipt_sha256'],
-                result_sha256=job['result_sha256'],server_path=str(resultdir)),(self.root/'secrets'/job['device']).read_bytes())
+                result_sha256=job['result_sha256'],server_path=str(resultdir),
+                qc_protocol_version=archive.get('qc_protocol_version'),
+                qc_qualification_protocol=archive.get('qc_qualification_protocol'),
+                input_signature=archive.get('input_signature'),
+                local_input_signature=archive.get('local_input_signature'),
+                checked_input_signature=archive.get('checked_input_signature'),
+                reference_sha256=archive.get('reference_sha256'),passed=archive.get('passed'),
+                qualification_receipt_sha256=archive.get('qualification_receipt_sha256')),
+                (self.root/'secrets'/job['device']).read_bytes())
             ack=self.rpc(job['device'],'apply_handoff_result',receipt=receipt)
             if ack.get('result_sha256')!=job['result_sha256']:raise ValueError('Post-handoff result ACK mismatch')
             self.store.update(job['id'],reply_state='complete',reply_ack=ack,reply_error=None)

@@ -57,8 +57,16 @@ class Tests(unittest.TestCase):
  def test_capture_late_cleanup_keeps_run_until_released(self):
   from scan_registry import RegistryError
   path=ROOT/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller')
-  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='owner_finished'];scope={'RegistryError':RegistryError}
-  exec(compile(ast.Module(body=[cls],type_ignores=[]),str(path),'exec'),scope);c=scope['Controller']();c.capture_owner_run='same-run';c.capture_owner_released=False;c.camera_registry=Mock();c.camera_registry.finish.side_effect=[RegistryError('busy'),None];c.state_write=Mock();c.last_help=[]
+  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('owner_finished','_persist_owner_exit_proof')];scope={'RegistryError':RegistryError}
+  exec(compile(ast.Module(body=[cls],type_ignores=[]),str(path),'exec'),scope);c=scope['Controller']();c.capture_owner_run='same-run';c.capture_owner_released=False;c.camera_registry=Mock();c.state_write=Mock();c.last_help=[]
+  record={'run':'same-run','nonce':'nonce','boot':'boot','kind':'capture','phase':'registered',
+          'owner_pid':101,'owner_start':1001,'wrapper_pid':202,'wrapper_start':2002,'pgid':202,'sid':202}
+  witness={'run':'same-run','nonce':'nonce','boot':'boot','owner_pid':101,'owner_start':1001}
+  liveness=dict(record,liveness_verified=True,registry_cleanup_confirmed=True,group_absent=True)
+  c.camera_registry.inspect.side_effect=[record,record,None]
+  c.camera_registry.inspect_evidence.return_value={'witness':witness,'errors':[]}
+  c.camera_registry.verify_exited.side_effect=[liveness,RegistryError('group alive'),liveness]
+  c.camera_registry.finish.side_effect=[RegistryError('busy'),None]
   self.assertFalse(c.owner_finished());self.assertEqual(c.capture_owner_run,'same-run');self.assertTrue(c.owner_finished());self.assertIsNone(c.capture_owner_run)
  def test_real_late_grandchild_exit_releases_same_run_for_all_five_kinds(self):
   import ctypes,signal,time
@@ -83,7 +91,7 @@ class Tests(unittest.TestCase):
       elif kind=='preview':
        c.preview_worker=child;c.preview_owner_run=run;c.preview_snapshot_id='x';c.preview_sources={};c.emg_preview_sources={};attempt=lambda:c.stop_preview(clear=False)
       else:
-       path=ROOT/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller');cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='owner_finished'];scope={'RegistryError':registry_module.RegistryError};exec(compile(ast.Module(body=[cls],type_ignores=[]),str(path),'exec'),scope)
+       path=ROOT/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller');cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('owner_finished','_persist_owner_exit_proof')];scope={'RegistryError':registry_module.RegistryError};exec(compile(ast.Module(body=[cls],type_ignores=[]),str(path),'exec'),scope)
        c=scope['Controller']();c.camera_registry=reg;c.capture_owner_run=run;c.capture_owner_released=False;c.state_write=Mock();c.last_help=[];attempt=c.owner_finished
       self.assertFalse(attempt());self.assertEqual(reg.inspect()['run'],run)
       with self.assertRaises(registry_module.RegistryError):reg.reserve('scan')

@@ -18,6 +18,9 @@ import yaml
 
 IDENTIFIER=re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z')
 CST=datetime.timezone(datetime.timedelta(hours=8))
+QUALIFIABLE_STREAMS=frozenset(
+    {'cam_ros_'+name for name in ('left','right','bleft','bright')} |
+    {'cam_left_wrist','cam_right_wrist','emg_left','emg_right','board_imu','eeg'})
 
 
 def atomic_json(path,value):
@@ -48,6 +51,57 @@ def bounded(path,limit=1024*1024):
         return raw
     finally:
         if fd is not None:os.close(fd)
+
+
+def capture_evidence_token(path,meta_raw,summary_raw):
+    """Bind an upload selection to the frozen QC/START/STOP and stream state.
+
+    Large video/array contents are not hashed on every phone-list refresh, but
+    their path, inode, mode, size and mtime are.  The uploader still computes a
+    content-hashed manifest before any transfer; this token prevents normal
+    queue-to-launch changes from silently replacing the qualification proof.
+    """
+    path=Path(path);h=hashlib.sha256();h.update(meta_raw);h.update(summary_raw)
+    names=('device_selection.json','native_capture_summary.json','start_gate.json',
+           'stop_gate.json','qc_report.json','qc_raw_report.json','qc_policy.json',
+           'emg_qc_report.json','emg_qc_binding.json','eeg_qc_report.json',
+           'eeg_qc_binding.json')
+    for name in names:
+        candidate=path/name
+        try:
+            info=candidate.lstat()
+            stamp=(name,info.st_mode,info.st_size,info.st_mtime_ns,info.st_ino)
+            if stat.S_ISREG(info.st_mode) and info.st_size<=8*1024*1024:
+                stamp+=(hashlib.sha256(bounded(candidate,8*1024*1024)).hexdigest(),)
+        except OSError:
+            stamp=(name,None)
+        h.update(repr(stamp).encode())
+    try:selection=json.loads(bounded(path/'device_selection.json',2*1024*1024))
+    except (OSError,ValueError,TypeError):selection={}
+    required=selection.get('required_device_contract',{})
+    selected=selection.get('selected',[])
+    if not isinstance(required,dict):required={}
+    if not isinstance(selected,list):selected=[]
+    required_names=required.get('required_devices',[])
+    if not isinstance(required_names,list):required_names=[]
+    streams=(set(x for x in selected if isinstance(x,str) and x in QUALIFIABLE_STREAMS)|
+             set(x for x in required_names if isinstance(x,str) and x in QUALIFIABLE_STREAMS))
+    for stream in sorted(streams):
+        folder=path/stream
+        try:
+            for current,dirs,files in os.walk(folder,followlinks=False):
+                current=Path(current)
+                for name in sorted(dirs+files):
+                    item=current/name
+                    try:
+                        info=item.lstat()
+                        stamp=(item.relative_to(path).as_posix(),info.st_mode,info.st_size,
+                               info.st_mtime_ns,info.st_ino)
+                    except OSError:stamp=(item.relative_to(path).as_posix(),None)
+                    h.update(repr(stamp).encode())
+        except OSError:
+            h.update((stream+':unreadable').encode())
+    return h.hexdigest()
 
 
 class RecordingStore:
@@ -93,7 +147,13 @@ class RecordingStore:
         if (path/'capture_summary.json').is_file():
             summary_raw=bounded(path/'capture_summary.json');summary=json.loads(summary_raw)
             if not isinstance(summary,dict):raise ValueError('采集总结格式无效')
-        signature=path.stat();token=hashlib.sha256(str((signature.st_dev,signature.st_ino)).encode()+raw+summary_raw).hexdigest()
+        qc_report={}
+        try:
+            raw_qc=bounded(path/'qc_report.json',8*1024*1024);qc_report=json.loads(raw_qc)
+            if not isinstance(qc_report,dict):qc_report={}
+        except (OSError,ValueError,TypeError):pass
+        signature=path.stat();token=hashlib.sha256(str((signature.st_dev,signature.st_ino)).encode()+
+            capture_evidence_token(path,raw,summary_raw).encode()).hexdigest()
         used=None
         if image:
             ledger_path=image.parent/'used.yaml'
@@ -106,14 +166,19 @@ class RecordingStore:
                     cached=(signature,self.ledger.read(ledger_path));ledger_cache[str(ledger_path)]=cached
                 book=cached[1]
             used=book.get('used',{}).get(image.name)
-        collected=used is not None and self.ledger.valid_used(used)
+        collected=used is not None and self.ledger.valid_used(used,image)
         owns=bool(isinstance(used,dict) and str(used.get('session',''))==str(path))
         status=meta.get('status') or pi.get('status') or summary.get('status') or 'unconfirmed'
         if (path/'recording_deleted.json').exists():status='deleted'
-        successful=status=='success' and summary.get('status','success')=='success' and collected and (owns or meta.get('retention_state')=='kept')
+        qualified,qualification_error=self._qualification(path,status,summary,pi)
+        successful=qualified and collected and (owns or meta.get('retention_state')=='kept')
         failed_kept=status not in ('success','deleted','archived','cancelled') and meta.get('retention_state')=='kept_failed'
         pending=status=='pending_qc' and summary.get('qc_state')=='pending' and meta.get('retention_state')=='kept_pending_qc'
-        kept=successful or failed_kept or pending
+        # Retention and quality are separate facts. A retained but incomplete
+        # or ERROR take remains visible for review, while never becoming a
+        # successful reference attempt or eligible normal upload.
+        retained_state=meta.get('retention_state') in ('kept','kept_failed','kept_pending_qc')
+        kept=retained_state or successful or failed_kept or pending
         stamp=summary.get('start_unix_ns',0)/1e9 or meta.get('start_time') or pi.get('session_created_unix') or meta.get('session_created_unix') or source.stat().st_mtime
         if not isinstance(stamp,(int,float)) or not math.isfinite(stamp):stamp=source.stat().st_mtime
         retained_at=meta.get('retained_at_unix') or summary.get('stop_unix_ns',0)/1e9 or stamp
@@ -125,11 +190,51 @@ class RecordingStore:
             reference_name=asset.get('name') or (image.stem if image else '参考图信息不可用'),
             reference_path=image.relative_to(self.project).as_posix() if image else None,
             reference_sha256=asset.get('sha256') or meta.get('reference_sha256') or pi.get('reference_sha256'),
-            status=status,retained=kept,reference_state='pending_qc' if pending else 'collected' if collected else 'uncollected',
-            qc_state='pending' if pending else meta.get('qc_state','completed'),retention_kind='pending_qc' if pending else 'successful' if successful else 'unsuccessful' if failed_kept else 'not_retained',reference_attempt_succeeded=successful,
-            upload_state='pending_qc' if pending else 'retained_for_upload' if successful else 'retained_unsuccessful_for_upload' if failed_kept else 'excluded',qc_level=meta.get('qc_level') or summary.get('qc_level') or ('ERROR' if status in ('error','qc_error') else None),
+            status=status,retained=kept,reference_state='pending_qc' if pending else 'collected' if successful else 'uncollected',
+            qc_state='pending' if pending else meta.get('qc_state') or ('completed' if qualified else 'incomplete'),
+            retention_kind='pending_qc' if pending else 'successful' if successful else 'unsuccessful' if kept else 'not_retained',
+            qualified=successful,qualification_error=qualification_error,
+            reference_attempt_succeeded=successful,
+            upload_state='pending_qc' if pending else 'qualified_for_upload' if successful else 'diagnostic_only' if kept else 'excluded',qc_level=qc_report.get('level') or meta.get('qc_level') or summary.get('qc_level') or ('ERROR' if status in ('error','qc_error') else None),
             selected_devices=meta.get('selected_devices') or pi.get('selected_devices') or [],
             _image=image)
+
+    def _qualification(self,path,status,summary,meta):
+        """Return full-QC qualification using frozen contract and saved data."""
+        from required_device_contract import resolve_selection,data_warnings,qualification_errors
+        from capture_qc_receipt import verify as verify_qc_receipt
+        if status!='success' or summary.get('status')!='success' or summary.get('errors'):
+            return False,'采集未以无错误状态成功收尾'
+        try:
+            selection=json.loads(bounded(Path(path)/'device_selection.json',2*1024*1024))
+            if not isinstance(selection,dict):raise ValueError('冻结设备选择无效')
+            config=selection.get('device_config')
+            contract,errors,legacy=resolve_selection(config,selection)
+            if errors:return False,'冻结设备合同无效：'+'；'.join(errors)
+            report=json.loads(bounded(Path(path)/'qc_report.json',8*1024*1024))
+            if not isinstance(report,dict):raise ValueError('完整质检报告无效')
+        except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
+            return False,'完整质检证明缺失或无效：'+str(error)
+        level=report.get('level')
+        if report.get('scope','full')!='full':return False,'本段只有局部质检，完整质检仍待完成'
+        if level not in ('INFO','WARN'):return False,'完整质检未通过：'+str(level or '缺少等级')
+        if (summary.get('qc_state')=='pending' or
+                summary.get('qc_mode') in ('deferred','emg_only','eeg_only') and summary.get('qc_state')!='completed'):
+            return False,'本段质检模式尚未完成完整质检'
+        if summary.get('qc_level') not in (None,level):return False,'质检报告与采集摘要等级不一致'
+        streams=report.get('streams')
+        if not isinstance(streams,dict) or not set(contract.get('required_devices',())).issubset(streams):
+            return False,'完整质检报告未覆盖冻结合同中的全部必需设备'
+        if any(not isinstance(streams[name],dict) or streams[name].get('level') not in ('INFO','WARN')
+               for name in contract.get('required_devices',())):
+            return False,'必需设备的单流质检缺失或未通过'
+        errors=qualification_errors(path,summary,contract,report,legacy=legacy)
+        if errors:return False,'必需数据不完整：'+'；'.join(errors[:12])
+        receipt_errors=verify_qc_receipt(path)
+        if receipt_errors:
+            return False,'缺少可验证的完整质检回执；请重新执行本机完整质检：'+'；'.join(receipt_errors[:8])
+        warnings=data_warnings(summary,legacy)
+        return True,('历史记录缺少新版在线证明：'+'；'.join(warnings[:8])) if warnings else ''
 
     def entries(self,day='today'):
         if day=='today':day=datetime.datetime.fromtimestamp(self.clock(),CST).date().isoformat()
@@ -157,8 +262,8 @@ class RecordingStore:
     def upload_manifest(self,day='today'):
         items,day=self.entries(day);root,_=self.roots()
         return dict(version=1,day=day,created_at_unix=self.clock(),scope='retained_local_takes_for_manual_cloud_upload',
-            note='按确认保留日期分组；成功/WARN标记已采集，用户保留的ERROR或失败数据明确标记未成功，不代表云端上传结果。',
-            recordings=[dict(item,relative_directory='data/'+root.name+'/'+item['id']) for item in items if item['retained'] and item.get('qc_state')!='pending'])
+            note='只包含完整QC通过且全部必需设备数据齐全的采集；保留的失败数据仅供本地诊断，不进入标准上传队列。',
+            recordings=[dict(item,relative_directory='data/'+root.name+'/'+item['id']) for item in items if item['retained'] and item.get('qualified') is True])
 
     def delete(self,identifier,token):
         from cloud_common import session_lock

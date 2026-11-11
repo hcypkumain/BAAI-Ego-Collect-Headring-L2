@@ -19,6 +19,7 @@ def submit_type():
 class Tests(unittest.TestCase):
  def setup_dashboard(self, committed=False):
   d=submit_type()();d.lock=threading.Lock();d.snapshot={'revision':25,'collection_context':'emg:3'}
+  d.busy=False;d.prompting=False;d.pending=None;d.result=None
   d.privacy=ScreenPrivacy();d.privacy.phase='arming';d.privacy.session='/new';d.privacy.nonce='new';d.privacy.generation=7;d.privacy.committed=committed
   target={'instance':d.privacy.instance,'session_id':'/new','nonce':'new','generation':7}
   return d,{'action':'stop','revision':25,'collection_context':'emg:3','privacy_target':target}
@@ -33,11 +34,14 @@ class Tests(unittest.TestCase):
  def test_valid_stop_cancels_arming_even_after_commit(self):
   for committed in (False,True):
    d,job=self.setup_dashboard(committed);d.submit(job)
-   self.assertTrue(d.privacy.cancelled);self.assertEqual(d.privacy.generation,8)
+   if committed:
+    self.assertFalse(d.privacy.cancelled);self.assertEqual(d.privacy.phase,'stopping')
+    self.assertEqual(d.pending['action'],'stop')
+   else:self.assertTrue(d.privacy.cancelled);self.assertEqual(d.privacy.generation,8)
  def test_old_generation_cannot_stop_new_state(self):
   d,job=self.setup_dashboard();d.privacy.generation+=1
-  with self.assertRaises(ValueError):d.submit(job)
-  self.assertFalse(d.privacy.cancelled)
+  d.submit(job)
+  self.assertFalse(d.privacy.cancelled);self.assertEqual(d.pending['action'],'stop')
  def test_legacy_stop_without_identity_requires_refresh(self):
   d,job=self.setup_dashboard(True);del job['privacy_target']
   with self.assertRaisesRegex(ValueError,'刷新'):

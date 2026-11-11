@@ -44,6 +44,9 @@ class StopCompletionTests(unittest.TestCase):
         self.complete={**self.gate,'native_reaped':True,'native_exit_code':0,'shutdown_complete':True,'capture_finalized':True,'summary_status':'success','finalized_monotonic_ns':time.monotonic_ns()}
         self.c=controller_type()();self.c.path=self.path;self.c.dashboard=SimpleNamespace(privacy=self.privacy)
         self.c.command=Mock();self.c.voice=SimpleNamespace(interrupt=Mock(),say=Mock());self.c.worker=Mock();self.c.state='recording';self.c.state_write=Mock()
+        # These tests cover native completion receipts, not Registry exit recovery.
+        self.c.worker.poll=Mock(return_value=None);self.c.capture_owner_released=False
+        self.c.owner_finished=Mock(return_value=False)
     def test_gate_is_not_completion_and_duplicate_stop_is_idempotent(self):
         (self.path/'stop_gate.json').write_text(json.dumps(self.gate))
         self.assertTrue(self.c.stop_before_prompt());self.assertTrue(self.c.stop_before_prompt())
@@ -63,7 +66,7 @@ class StopCompletionTests(unittest.TestCase):
         self.c.stop_before_prompt();self.c.stop_deadline=time.monotonic()-1;self.c.poll_stop()
         self.assertEqual(self.privacy.snapshot()['phase'],'fault');self.assertTrue(self.privacy.committed)
         self.assertEqual(self.c.state,'recording');self.assertTrue(self.c.stop_before_prompt())
-        self.assertEqual(self.c.command.call_count,1)
+        self.assertEqual(self.c.command.call_count,2)
         (self.path/'capture_complete.json').write_text(json.dumps(self.complete));self.c.poll_stop()
         self.assertEqual(self.c.state,'confirm_stop');self.assertFalse(self.privacy.committed)
     def test_adapter_publishes_only_after_matching_native_success(self):

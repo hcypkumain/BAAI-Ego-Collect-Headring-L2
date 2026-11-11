@@ -29,6 +29,7 @@ gi.require_version('Gst', '1.0')
 from gi.repository import Gst
 
 from project_paths import BASE, PROJECT, SRC, devices
+from required_device_contract import build_contract,validate_frozen,execution_missing,MAX_READY_AGE_SECONDS
 from live_preview import publisher
 import headband_calibration
 from impedance_record import bind_start
@@ -371,6 +372,23 @@ class Capture:
         self.error_list = []
         self.summary = {}
         self.headband_calibration_status = None
+        self.required_contract = None
+        self.required_device_start = None
+        self.required_device_stop = None
+
+    def required_readiness(self):
+        contract=self.required_contract or {};names=contract.get('required_devices',[])
+        devices={d.name:d for d in self.cameras+self.emgs+([self.board] if self.board else [])+([self.eeg] if self.eeg else [])}
+        now=time.monotonic();rows={};missing=[]
+        for name in names:
+            device=devices.get(name)
+            if device is None:
+                rows[name]=dict(ready=False,fresh=False,age_seconds=None,seen=0);missing.append(name);continue
+            last=float(getattr(device,'last',0) or 0);age=max(0.0,now-last)
+            ready=getattr(device,'ready',False) is True;fresh=ready and age<=MAX_READY_AGE_SECONDS
+            rows[name]=dict(ready=ready,fresh=fresh,age_seconds=round(age,3),last_seen_monotonic=last,seen=int(getattr(device,'seen',0) or 0))
+            if not fresh:missing.append(name)
+        return dict(devices=rows,missing=missing,ready=not missing)
 
     def fail(self, message):
         self.stop_gate()
@@ -382,7 +400,8 @@ class Capture:
     def status(self, state, **kwargs):
         self.state = state
         impedance = self.eeg.impedance_snapshot() if self.eeg else dict(required=False,supported=False,phase='not_selected',can_record=True)
-        atomic_json(self.path/'status.json', dict(state=state,time=time.time(),pid=os.getpid(),recording_active=self.active,samples_seen=sum(d.seen for d in self.cameras+self.emgs+([self.board] if self.board else [])+([self.eeg] if self.eeg else [])),warning_count=len(self.warning_list),last_warning=self.warning_list[-1] if self.warning_list else None,headband_calibration=getattr(self,'headband_calibration_status',None),eeg_impedance=impedance,**kwargs))
+        readiness=self.required_readiness()
+        atomic_json(self.path/'status.json', dict(state=state,time=time.time(),pid=os.getpid(),capture_session=self.path.name,recording_active=self.active,samples_seen=sum(d.seen for d in self.cameras+self.emgs+([self.board] if self.board else [])+([self.eeg] if self.eeg else [])),warning_count=len(self.warning_list),last_warning=self.warning_list[-1] if self.warning_list else None,headband_calibration=getattr(self,'headband_calibration_status',None),eeg_impedance=impedance,required_device_contract_version=(self.required_contract or {}).get('version'),required_devices=(self.required_contract or {}).get('required_devices',[]),required_devices_ready=readiness['ready'],required_devices_missing=readiness['missing'],required_device_readiness=readiness['devices'],**kwargs))
         print(json.dumps(dict(state=state,**kwargs),ensure_ascii=False),flush=True)
 
     def stop_gate(self):
@@ -391,6 +410,7 @@ class Capture:
             self.active=False
             if not self.stop_ns:
                 self.stop_ns,self.stop_wall_ns=time.monotonic_ns(),time.time_ns()
+                self.required_device_stop=self.required_readiness()
                 from screen_privacy import boot_identity,validate_screen_start
                 proof=getattr(self,'screen_privacy_start',None)
                 if proof is None:
@@ -401,8 +421,17 @@ class Capture:
                     worker_pid=os.getpid(),boot_id=boot_identity()))
 
     def request_stop(self):
-        self.stop_gate()
-        self.commands.put('STOP')
+        try:
+            self.stop_gate()
+        except Exception as exc:
+            message='STOP gate could not be persisted: '+str(exc)
+            if message not in self.error_list:self.error_list.append(message)
+            try:self.status('error',errors=self.error_list)
+            except Exception:pass
+        finally:
+            # A storage fault must never prevent device readers from receiving
+            # STOP. The missing gate/receipt keeps the result unqualified.
+            self.commands.put('STOP')
 
     def read_commands(self):
         for line in sys.stdin:
@@ -420,8 +449,9 @@ class Capture:
         status=getattr(self,'headband_calibration_status',None)
         if status is not None:headband_calibration.verify_saved(self.path,status)
 
-    def execute(self, camera_names, with_emg=True, with_board=True, emg_names=None, wrist_names=(), with_eeg=False):
+    def execute(self, camera_names, with_emg=True, with_board=True, emg_names=None, wrist_names=(), with_eeg=False, required_contract=None):
         Gst.init(None)
+        self.required_contract=required_contract or build_contract(CONFIG,mode=CONFIG.get('collection_mode'))
         # No ROS node is needed any more: headband cameras come from camd and
         # the board IMU from /dev/icm20602.
         threading.Thread(target=self.read_commands,daemon=True).start()
@@ -429,6 +459,8 @@ class Capture:
         signal.signal(signal.SIGINT, lambda *a: self.request_stop())
         self.status('preparing')
         try:
+            absent=execution_missing(self.required_contract,camera_names,with_emg,with_board,emg_names,wrist_names,with_eeg)
+            if absent:raise RuntimeError('启动参数绕过必需设备合同：'+','.join(absent))
             self.prepare_headband_calibration(camera_names,with_board)
             self.status('preparing')
             if with_emg:
@@ -468,10 +500,12 @@ class Capture:
                 # for the generic "no data for 3 seconds" timeout.
                 if self.board:self.board.health()
                 devices = self.cameras + self.emgs + ([self.board] if self.board else []) + ([self.eeg] if self.eeg else [])
-                if self.state == 'preparing' and all(d.ready for d in devices):
+                required_status=self.required_readiness()
+                if self.state == 'preparing' and all(d.ready for d in devices) and required_status['ready']:
                     self.status('ready')
                 if self.state == 'preparing' and now > deadline:
-                    raise RuntimeError('no first data: '+','.join(d.name for d in devices if not d.ready))
+                    missing=sorted(set(d.name for d in devices if not d.ready)|set(required_status['missing']))
+                    raise RuntimeError('no first data from required devices: '+','.join(missing))
                 if self.state in ('ready','recording'):
                     for d in devices:
                         if d is self.eeg and self.eeg.intentional_pause(now): continue
@@ -496,6 +530,9 @@ class Capture:
                 if command == 'START':
                     if self.state != 'ready' or self.stop_ns:
                         raise RuntimeError('START before all devices ready')
+                    readiness=self.required_readiness()
+                    if not readiness['ready']:
+                        raise RuntimeError('START blocked: required devices are not fresh/ready: '+','.join(readiness['missing']))
                     self.verify_headband_calibration()
                     if self.eeg and not self.eeg.can_record():
                         raise RuntimeError('START blocked: EEG impedance check/recovery is not confirmed')
@@ -503,11 +540,16 @@ class Capture:
                     with self.gate:
                         if self.state!='ready' or self.stop_ns:
                             raise RuntimeError('START cancelled: STOP was already acknowledged')
+                        readiness=self.required_readiness()
+                        if not readiness['ready']:
+                            raise RuntimeError('START blocked by final freshness gate: '+','.join(readiness['missing']))
                         screen_proof=validate_screen_start(self.path)
                         self.start_wall_ns = time.time_ns()
                         self.start_ns = time.monotonic_ns()
+                        self.required_device_start=readiness
                         start_gate=dict(start_monotonic_ns=self.start_ns,start_unix_ns=self.start_wall_ns,
-                            screen_privacy=screen_proof)
+                            screen_privacy=screen_proof,required_device_contract_version=self.required_contract['version'],
+                            required_devices=self.required_contract['required_devices'],required_device_readiness=readiness['devices'])
                         if self.eeg:
                             start_gate['eeg_impedance']=bind_start(self.path,start_gate,
                                 self.eeg.impedance_snapshot(),CONFIG['eeg'])
@@ -582,6 +624,11 @@ class Capture:
             self.summary.update(start_unix_ns=self.start_wall_ns,start_monotonic_ns=self.start_ns,
                 stop_unix_ns=stop_wall,stop_monotonic_ns=stop_ns,errors=self.error_list,warnings=self.warning_list,
                 headband_calibration=getattr(self,'headband_calibration_status',None),
+                required_device_contract_version=(self.required_contract or {}).get('version'),
+                required_device_contract=self.required_contract,
+                required_devices=(self.required_contract or {}).get('required_devices',[]),
+                required_device_start=self.required_device_start,
+                required_device_stop=self.required_device_stop,
                 shutdown_complete=shutdown_complete,
                 status='error' if self.error_list else ('success' if self.started else 'cancelled'))
             atomic_json(self.path/'capture_summary.json', self.summary)
@@ -602,8 +649,23 @@ if __name__ == '__main__':
     storage_paths.validate_output(Path(args.output))
     capture_lock=(BASE/'runtime'/'capture.lock').open('w')
     fcntl.flock(capture_lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-    selected=json.loads(args.selection.read_text(encoding='utf-8'))['selected'] if args.selection else list(PORTS)+['cam_ros_'+c for c in CAMERAS]+['board_imu']+list(WRIST_CAMERAS)
+    selection=json.loads(args.selection.read_text(encoding='utf-8')) if args.selection else None
+    if selection is not None:
+        contract,errors=validate_frozen(CONFIG,selection)
+        if errors:raise ValueError('Invalid required-device contract: '+'; '.join(errors))
+        selected=selection['selected']
+    else:
+        contract=build_contract(CONFIG,mode=CONFIG.get('collection_mode'))
+        selected=list(PORTS)+['cam_ros_'+c for c in CAMERAS]+['board_imu']+list(WRIST_CAMERAS)
     allowed=set(PORTS)|{'cam_ros_'+c for c in CAMERAS}|{'board_imu'}|set(WRIST_CAMERAS)|({'eeg'} if CONFIG.get('eeg',{}).get('enabled') else set())
     if not selected or not set(selected)<=allowed:raise ValueError('Invalid or empty device selection')
-    sys.exit(Capture(Path(args.output).resolve()).execute([c for c in args.cameras if 'cam_ros_'+c in selected],not args.without_emg,not args.without_board_imu and 'board_imu' in selected,[n for n in PORTS if n in selected],[n for n in WRIST_CAMERAS if n in selected],'eeg' in selected))
+    cameras=[c for c in args.cameras if 'cam_ros_'+c in selected]
+    emg_names=[n for n in PORTS if n in selected]
+    with_emg=not args.without_emg and bool(emg_names)
+    with_board=not args.without_board_imu and 'board_imu' in selected
+    with_eeg='eeg' in selected
+    absent=execution_missing(contract,cameras,with_emg,with_board,emg_names,[n for n in WRIST_CAMERAS if n in selected],with_eeg)
+    if absent:raise ValueError('Recorder flags omit required devices: '+','.join(absent))
+    capture=Capture(Path(args.output).resolve());capture.required_contract=contract
+    sys.exit(capture.execute(cameras,with_emg,with_board,emg_names,[n for n in WRIST_CAMERAS if n in selected],with_eeg,contract))
 

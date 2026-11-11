@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock,patch
 import yaml
 import ledger,launcher,speech_cloud
+from required_capture_fixture import write_session
 
 class LedgerTests(unittest.TestCase):
  def setUp(self):
@@ -16,18 +17,27 @@ class LedgerTests(unittest.TestCase):
   self.session=self.root/'data/run';self.session.mkdir(parents=True)
   self.patches=[patch.object(ledger,'BASE',self.root),patch.object(ledger,'PROJECT',self.root),patch.object(ledger,'LIBRARY',self.lib)]
   for p in self.patches:p.start()
+ def qualified_source(self,path=None):
+  path=self.session if path is None else Path(path)
+  write_session(path,mode='emg',level='WARN')
+  meta=yaml.safe_load((path/'meta.yaml').read_text(encoding='utf-8'))
+  meta['reference_image']='configs/environments/scene/'+self.image.name
+  (path/'meta.yaml').write_text(yaml.safe_dump(meta),encoding='utf-8')
+  return path
  def tearDown(self):
   for p in reversed(self.patches):p.stop()
   self.temp.cleanup()
  def test_success_then_failed_reenters_pool(self):
-  ledger.atomic_yaml(self.session/'meta.yaml',{'status':'success'})
+  self.qualified_source()
   ledger.mark(self.image,self.session,'success');self.assertEqual(ledger.unused(),[])
-  data=ledger.read(self.scene/'used.yaml');self.assertEqual(set(data['used'][self.image.name]),{'session','at'})
+  data=ledger.read(self.scene/'used.yaml');row=data['used'][self.image.name]
+  self.assertEqual(set(row),{'session','at','status','qc_level'});self.assertEqual(row['session'],str(self.session))
+  self.assertEqual((row['status'],row['qc_level']),('success','WARN'))
   ledger.atomic_yaml(self.session/'meta.yaml',{'status':'failed'})
   self.assertEqual(ledger.unused(),[self.image])
   ledger.mark(self.image,self.session,'failed');self.assertNotIn(self.image.name,ledger.read(self.scene/'used.yaml')['used'])
  def test_failed_take_does_not_erase_other_success(self):
-  ledger.mark(self.image,self.session,'success');ledger.mark(self.image,self.root/'different','failed')
+  self.qualified_source();ledger.mark(self.image,self.session,'success');ledger.mark(self.image,self.root/'different','failed')
   self.assertEqual(ledger.unused(),[])
  def test_bad_ledger_is_not_silently_overwritten(self):
   (self.scene/'used.yaml').write_text('used: []')
@@ -68,7 +78,13 @@ class ContinuousTests(unittest.TestCase):
    c.worker=Mock();c.worker.poll.return_value=0;c.worker.returncode=0;c.state='finalizing'
    c.notified_error=False;c.success_count=0;c.quit=False;c.selected_image=None;c.attempted=set()
    c.image=Path('first.png');c.images=[c.image,Path('next.png')];c.voice=Mock();c.qc_voice=Mock();c.reap=Mock();c.state_write=Mock();c.prepare=Mock()
-   (c.path/'capture_summary.json').write_text(json.dumps({'status':'success','qc_level':'WARN'}))
+   write_session(c.path,mode='emg',level='WARN')
+   c.capture_owner_run='test-capture-run';c.capture_owner_released=False;c.camera_registry=Mock()
+   record={'run':c.capture_owner_run,'kind':'capture','phase':'registered'}
+   c.camera_registry.inspect.side_effect=[record,None]
+   c.camera_registry.inspect_evidence.return_value={'witness':{'run':c.capture_owner_run},'errors':[]}
+   c.camera_registry.verify_exited.return_value={'liveness_verified':True,'registry_cleanup_confirmed':True,'group_absent':True}
+   c.worker_status=Mock(return_value={'state':'success','warning_count':0})
    with patch('launcher.ledger.mark') as mark,patch('launcher.image_queue',return_value=[Path('next.png')]):
     c.poll();mark.assert_called_once_with(c.image,c.path,'success')
    self.assertFalse(c.quit);self.assertEqual(c.success_count,1);self.assertEqual(c.images,[Path('next.png')]);c.prepare.assert_not_called()

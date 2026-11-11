@@ -32,6 +32,7 @@ import storage_paths
 from project_paths import BASE, PROJECT, SRC, devices, CODE_BASE, PROFILE, COLLECTION_MODE, COLLECTION_CONTEXT
 from capture_session_state import active_session
 from device_discovery import fingerprint
+from required_device_contract import build_contract, validate_scan
 from scan_process import run_scan, ScanProcessError
 from scan_registry import Registry, RegistryError, spawn_reserved
 from scan_result import decode as decode_scan_result
@@ -49,6 +50,28 @@ def atomic_json(path, value):
     directory_fd=os.open(str(path.parent),os.O_RDONLY)
     try:os.fsync(directory_fd)
     finally:os.close(directory_fd)
+
+
+def _full_capture_qualification_errors(path,summary):
+    """Check frozen-device data and full-QC facts before task completion."""
+    path=Path(path)
+    try:
+        selection=json.loads((path/'device_selection.json').read_text(encoding='utf-8'))
+        if not isinstance(selection,dict):return ['冻结设备选择无效']
+        from required_device_contract import resolve_selection,qualification_errors
+        contract,errors,legacy=resolve_selection(selection.get('device_config'),selection)
+        if errors or contract is None:return ['冻结必需设备合同无效：'+'；'.join(errors or ['缺少合同'])]
+        report=json.loads((path/'qc_report.json').read_text(encoding='utf-8'))
+        if not isinstance(report,dict):return ['完整质检报告无效']
+        failures=list(qualification_errors(path,summary,contract,report,legacy=legacy) or [])
+        from capture_qc_receipt import verify as verify_qc_receipt
+        failures.extend(verify_qc_receipt(path) or [])
+        return list(dict.fromkeys(failures))
+    except (OSError,ValueError,TypeError,KeyError,RecursionError) as error:
+        return ['本机完整质检凭据无法验证：'+str(error)]
+    except ImportError as error:
+        # Fail closed while a partial/old install lacks the shared wrapper.
+        return ['本机完整质检判定不可用：'+str(error)]
 
 
 from cloud_speaker import Speaker, CloudVoiceError
@@ -112,6 +135,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.camera_registry=Registry(CODE_BASE/'runtime')
         self.capture_owner_run=None
         self.capture_owner_released=False
+        self.capture_owner_exit_record=None
+        self.capture_registry_cleanup_pending=False
         self.preview_owner_run=None
         self.wrist_wizard=None
         self.emg_wizard=None
@@ -120,16 +145,40 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.ui_revision=getattr(self,'ui_revision',0)+1
         self.voice.realtime=self.state in ('recording','countdown')
         self.voice.silent=self.state=='recording' or self.quit
-        atomic_json(BASE/'runtime'/'controller.json',dict(pid=os.getpid(),state=self.state,
-            session=active_session(self),image=str(self.image) if self.image else None,
-            review_session=str(getattr(self,'last_review_path',None)) if getattr(self,'last_review_path',None) else None,
-            collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,
-            success_count=self.success_count,selected_image=self.selected_image,selected_devices=getattr(self,'selected_devices',None),
-            wrist_calibration_phase=getattr(getattr(self,'wrist_wizard',None),'phase',None),
-            emg_calibration_phase=getattr(getattr(self,'emg_wizard',None),'phase',None),time=time.time()))
-        if BASE!=CODE_BASE:
-            atomic_json(CODE_BASE/'runtime/controller.json',json.loads((BASE/'runtime/controller.json').read_text()))
-        self.ui_publish()
+        write_error=None;publish_error=None
+        try:
+            atomic_json(BASE/'runtime'/'controller.json',dict(pid=os.getpid(),state=self.state,
+                session=active_session(self),image=str(self.image) if self.image else None,
+                review_session=str(getattr(self,'last_review_path',None)) if getattr(self,'last_review_path',None) else None,
+                collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,
+                success_count=self.success_count,selected_image=self.selected_image,selected_devices=getattr(self,'selected_devices',None),
+                wrist_calibration_phase=getattr(getattr(self,'wrist_wizard',None),'phase',None),
+                emg_calibration_phase=getattr(getattr(self,'emg_wizard',None),'phase',None),time=time.time()))
+            if BASE!=CODE_BASE:
+                atomic_json(CODE_BASE/'runtime/controller.json',json.loads((BASE/'runtime/controller.json').read_text()))
+        except Exception as error:write_error=error
+        finally:
+            try:self.ui_publish(force=bool(getattr(self,'owner_exit_recovered',False)))
+            except Exception as error:publish_error=error
+            if publish_error is not None and getattr(self,'owner_exit_recovered',False):
+                try:
+                    dashboard=getattr(self,'dashboard',None)
+                    if dashboard is not None:
+                        fallback=dict(getattr(dashboard,'snapshot',{}) or {})
+                        fallback.update(state='error',revision=getattr(self,'ui_revision',0),
+                            session=None,worker=dict(state='error',recording_active=False,
+                            errors=list(getattr(self,'last_help',[]))),busy=False,
+                            collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT)
+                        dashboard.publish(fallback);publish_error=None
+                except Exception as error:publish_error=error
+        if write_error is not None:
+            if getattr(self,'owner_exit_recovered',False):
+                self.owner_exit_persist_error=str(write_error)[:200]
+            else:raise write_error
+        if publish_error is not None:
+            if getattr(self,'owner_exit_recovered',False):
+                self.owner_exit_persist_error=str(publish_error)[:200]
+            else:raise publish_error
 
     def switch_collection_mode(self,mode):
         from collection_profiles import provision
@@ -256,7 +305,53 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         prefetch=getattr(self.voice,'prefetch',None)
         if callable(prefetch):prefetch({'task_announcement':task_announcement(self.reference_image_title())},priority='urgent')
 
+    def required_capture_error(self,status=None):
+        contract=getattr(self,'required_device_contract',None) or {}
+        required=set(contract.get('required_devices',()))
+        if contract.get('version')!='required-devices-v1' or not required:return '本段必需设备合同无效，请重新扫描并准备'
+        selected=set(getattr(self,'selected_devices',None) or ())
+        missing=sorted(required-selected)
+        if missing:return '本段未选中全部必需设备：'+','.join(missing)
+        status=status if isinstance(status,dict) else self.worker_status()
+        if status.get('required_device_contract_version')!='required-devices-v1':
+            return '采集进程未提供必需设备实时就绪证明，请重新准备本段'
+        if set(status.get('required_devices') or ())!=required:
+            return '采集进程冻结的必需设备清单与本段配置不一致，请重新准备'
+        if status.get('capture_session')!=getattr(getattr(self,'path',None),'name',None):
+            return '采集进程状态与当前会话不匹配，请重新准备本段'
+        stamp=status.get('time')
+        if type(stamp) not in (int,float) or time.time()-stamp<0 or time.time()-stamp>2.5:
+            return '必需设备实时状态已过期，请等待重新检查后再开始'
+        pid=status.get('pid')
+        try:
+            process=(Path('/proc')/str(pid)/'cmdline').read_bytes()
+            if type(pid) is not int or b'acquisition/capture.py' not in process:return '采集进程在线证明无效，请重新准备本段'
+        except (OSError,TypeError):return '采集进程在线证明无效，请重新准备本段'
+        if status.get('required_devices_ready') is not True:
+            missing=status.get('required_devices_missing') or sorted(required)
+            return '必需设备未保持实时就绪：'+','.join(missing)
+        readiness=status.get('required_device_readiness')
+        if not isinstance(readiness,dict) or set(readiness)!=required or any(
+                not isinstance(readiness.get(name),dict) or readiness[name].get('ready') is not True
+                or readiness[name].get('fresh') is not True for name in required):
+            return '采集进程缺少逐设备实时就绪证明，请重新准备本段'
+        return None
+
+    def required_scan_error(self,config=None):
+        config=config or getattr(self,'web_config',None) or devices()
+        try:contract=build_contract(config,mode=config.get('collection_mode'))
+        except (ValueError,TypeError) as error:return str(error)
+        missing=validate_scan(contract,getattr(self,'last_scan',[]))
+        missing=sorted(set(missing)|(set(contract['required_devices'])-set(getattr(self,'selected_devices',None) or ())))
+        self.required_device_contract=contract;self.required_devices_missing=missing
+        return ('必需设备未全部在线或没有有效数据：'+','.join(missing)) if missing else None
+
     def prepare(self):
+        if getattr(self,'capture_registry_cleanup_pending',False):
+            self.state='failed_wait';self.last_help=['设备退出已确认，但所有权记录清理未确认；为避免重复占用硬件，暂不能开始下一段，请联系维护人员。']
+            try:self.state_write()
+            except OSError:pass
+            return False
         if not self.retry_pending_owner(force=True):
             self.last_help=['上次设备清理尚未确认'];self.state_write();return False
         if (BASE/'runtime/recording_reset_in_progress.json').exists():
@@ -266,6 +361,13 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             return False
         if self.stop_preview() is False:
             self.last_help=['预览设备尚未全部退出'];self.state_write();return False
+        if time.monotonic()-getattr(self,'last_device_scan',0)>20 or not getattr(self,'scan_ok',False):
+            if not self.scan_devices(announce=False,quiet=True):
+                self.state='device_confirm';self.state_write();return False
+        required_error=self.required_scan_error()
+        if required_error:
+            self.state='device_confirm';self.last_help=[required_error+'。请检查后重新扫描。'];self.state_write()
+            self.voice.say(self.last_help[0]);return False
         try:
             self.reference_refresh()
             if self.reference_error:raise ValueError(self.reference_error)
@@ -294,6 +396,11 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             return
         # Validate the exact resolved configuration that will be frozen below.
         resolved=devices()
+        try:
+            self.required_device_contract=build_contract(resolved,self.selected_devices,resolved.get('collection_mode'))
+        except (ValueError,TypeError) as error:
+            self.state='device_confirm';self.last_help=[str(error)+'。请重新扫描并确认设备。'];self.state_write()
+            self.voice.say(self.last_help[0]);return False
         if (set(self.selected_devices or ()).intersection(emg_calibration.SLOTS)
                 and resolved.get('emg_calibration',{}).get('enabled',False)
                 and not resolved.get('emg_calibration_status',{}).get('valid',False)):
@@ -317,9 +424,12 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.path,identity=self.reference_reserve_directory(root);new_path=self.path
             # Freeze resolved devices and the exact task/queue identity for this owner.
             self.session_devices=resolved
-            atomic_json(self.path/'device_selection.json',dict(selected=list(self.selected_devices),device_config=resolved,collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT))
+            device_selection=dict(selected=list(self.selected_devices),device_config=resolved,collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,
+                required_device_contract=self.required_device_contract)
+            atomic_json(self.path/'device_selection.json',device_selection)
             metadata=dict(identity,collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,reference_image=selection['asset']['relative_path'],
                 reference_sha256=selection['asset']['sha256'],reference_selection=selection,
+                required_device_contract=self.required_device_contract,
                 test=bool(self.smoke),stim=False,pygame=False,
                 device_config=resolved,selected_devices=list(self.selected_devices),storage_config=storage_paths.config(),
                 keyboard_flow='Touch workflow: prepare and view reference without time limit, impedance, manual camera check, return to preparation, separate formal start, 5-to-1 countdown, hold 3s to stop, save or retry same task',
@@ -387,6 +497,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if not self.worker or self.worker.poll() is not None or self.worker_status().get('state')!='ready':
             self.voice.say('设备尚未就绪，请先准备本段。')
             return False
+        contract_error=self.required_capture_error(self.worker_status())
+        if contract_error:
+            self.voice.say(contract_error+'。请重新准备设备后再开始。')
+            return False
         if 'eeg' in (self.selected_devices or ()) and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
             self.voice.say('请先结束阻抗检查、确认结果，并等待普通脑电采样恢复。')
             return False
@@ -394,7 +508,11 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if checks is not None and not checks.approved():
             self.voice.say('请先完成全部相机同屏检查，并确认头环和腕部相机方向。')
             return False
-        privacy.arm(str(self.path.resolve()),worker_pid=self.worker_status().get('pid'),adapter_pid=self.worker.pid)
+        self.owner_exit_recovered=False;self.owner_exit_proof=None;self.owner_exit_persist_error=None
+        self.stop_pending=False;self.stop_retry_authorized=False;self.stop_escalation_phase=None
+        self.stop_force_deadline=None
+        privacy.arm(str(self.path.resolve()),worker_pid=self.worker_status().get('pid'),
+                    adapter_pid=self.worker.pid,owner_run=self.capture_owner_run)
         try:
             deadline=time.monotonic()+12
             while not privacy.ready():
@@ -429,6 +547,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if self.worker_status().get('state')!='ready':
             self.voice.say('设备尚未就绪，请等待准备完成后再点击开始采集。')
             return
+        contract_error=self.required_capture_error(self.worker_status())
+        if contract_error:
+            self.voice.say(contract_error+'。本次没有开始采集，请重新准备。')
+            return False
         if fingerprint(devices().get('auto_discovery',{})) != self.usb_fingerprint:
             self.release_prepared();self.scan_devices();return
         interrupt=getattr(self.voice,'interrupt',None)
@@ -477,24 +599,49 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         try:self.camera_registry.verify_owner(self.capture_owner_run,'capture')
         except RegistryError:
             self.last_help=['设备所有权未确认，未开始采集'];self.state_write();return False
-        atomic_json(self.path/'screen_privacy_gate.json',privacy.commit())
-        self.command('START')
+        contract_error=self.required_capture_error(self.worker_status())
+        if contract_error:
+            self.last_help=[contract_error+'。本次没有开始采集，请重新准备。'];self.state='ready';self.state_write();return False
+        try:atomic_json(self.path/'screen_privacy_gate.json',privacy.commit())
+        except Exception as error:
+            if not privacy.committed:raise
+            return self._stop_after_start_failure(error)
+        if privacy.phase!='arming':
+            self.stop_before_prompt();return False
+        try:self.command('START')
+        except (self.OwnerExited,OSError) as error:return self._stop_after_start_failure(error)
         deadline=time.monotonic()+3
         while time.monotonic()<deadline:
             status=self.worker_status()
             if status.get('state')=='recording':
-                privacy.recording()
+                stop_queued=privacy.phase=='stopping'
+                if not stop_queued:privacy.recording()
                 self.recording_since=time.time()
                 self.state='recording'
                 self.state_write()
                 print('RECORDING '+str(self.path),flush=True)
-                if privacy.cancelled:return self.stop_before_prompt()
+                if privacy.cancelled or stop_queued or privacy.phase=='stopping':return self.stop_before_prompt()
                 return
             if status.get('state') in ('error','success') or self.worker.poll() is not None:
+                if status.get('state')=='error' and privacy.committed:
+                    return self._stop_after_start_failure(RuntimeError('采集进程在START确认前报告错误'))
                 self.poll()
                 return
             time.sleep(.05)
-        raise RuntimeError('开始采集确认超时')
+        return self._stop_after_start_failure(RuntimeError('开始采集确认超时'))
+
+    def _stop_after_start_failure(self,error):
+        message='开始采集未获有效确认：'+str(error)+'。已请求本段停止并保留数据，不计为成功。'
+        self.owner_command_error=message;self.keep_requested=False;self.state='error';self.last_help=[message]
+        try:
+            self.stop_before_prompt()
+        except self.OwnerExited as owner_error:
+            self.owner_command_failed(owner_error)
+            return False
+        try:self.state_write()
+        except OSError:pass
+        self.voice.say(message)
+        return False
 
     def finish(self):
         self.keep_requested=True
@@ -558,49 +705,118 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.state='idle';self.exit_code=0;self.state_write()
         self.voice.say('本段已放弃，文件已清理。请手动点击准备本段。')
 
-    def stop_before_prompt(self):
+    def terminate_capture_owner(self,sig):
+        """Signal only the currently registered capture process group."""
+        worker=getattr(self,'worker',None);run=getattr(self,'capture_owner_run',None)
+        privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
+        if worker is None or not run or privacy is None or not privacy.committed:
+            return False
+        try:
+            owner=self.camera_registry.verify_signalable_group(
+                run,'capture',allow_exited_leader=(sig==signal.SIGKILL))
+            proof=privacy.start_proof or {}
+            if (owner.get('run')!=proof.get('owner_run') or owner.get('owner_pid')!=proof.get('controller_pid')
+                    or owner.get('owner_start')!=proof.get('controller_start_ticks')
+                    or owner.get('wrapper_pid')!=worker.pid or owner.get('wrapper_pid')!=proof.get('adapter_pid')
+                    or owner.get('wrapper_start')!=proof.get('adapter_start_ticks')
+                    or owner.get('pgid')!=worker.pid or owner.get('sid')!=worker.pid):
+                raise RegistryError('当前设备进程身份与隐私会话不匹配')
+            os.killpg(owner['pgid'],sig)
+            return True
+        except (RegistryError,OSError,ProcessLookupError,ValueError,TypeError) as error:
+            self.last_help=['未能验证当前设备进程组，未发送结束信号：'+str(error)]
+            return False
+
+    def stop_before_prompt(self,target=None):
         privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
         if privacy is not None:
-            privacy.stopping()
+            privacy.stopping(target,allow_same_session=True)
         interrupt=getattr(self.voice,'interrupt',None)
         if callable(interrupt):interrupt()
         if getattr(self,'stop_pending',False):
-            self.stop_deadline=time.monotonic()+45
-            self.state_write()
             return True
-        if getattr(self,'stop_requested_path',None)!=self.path:
+        if getattr(self,'stop_force_deadline',None) is None:
+            self.stop_force_deadline=time.monotonic()+1800
+        retry_authorized=getattr(self,'stop_retry_authorized',False)
+        if getattr(self,'stop_requested_path',None)!=self.path or retry_authorized:
             try:self.command('STOP')
             except self.OwnerExited as exc:
                 self.owner_command_failed(exc)
                 return False
             self.stop_requested_path=self.path
+            self.stop_retry_authorized=False
+            self.stop_escalation_phase=None
         self.stop_pending=True
         self.stop_deadline=time.monotonic()+45
         self.state_write()
         return True
 
     def poll_stop(self):
-        if not getattr(self,'stop_pending',False):return
         privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
+        stop_pending=getattr(self,'stop_pending',False)
+        if not stop_pending and (privacy is None or not privacy.committed):return
+        if (getattr(self,'worker',None) is not None and self.worker.poll() is not None
+                and not getattr(self,'capture_owner_released',False)):
+            self.owner_finished()
         try:proof=json.loads((self.path/'capture_complete.json').read_text())
         except (OSError,ValueError,TypeError):proof=None
+        if not isinstance(proof,dict):proof=None
         # ui_publish may already have validated this same receipt.
         confirmed=privacy is not None and not privacy.committed
         if proof and privacy is not None and privacy.committed:
             confirmed=privacy.confirm_stopped(proof)
+        if not confirmed and privacy is not None and privacy.committed:
+            try:owner_proof=json.loads((self.path/'owner_group_exit.json').read_text())
+            except (OSError,ValueError,TypeError):owner_proof=getattr(self,'owner_exit_proof',None)
+            if isinstance(owner_proof,dict) and privacy.confirm_owner_exited(owner_proof):
+                confirmed=True;self.owner_exit_recovered=True
         if confirmed:
             self.stop_pending=False
-            if proof and proof.get('summary_status')=='error':
+            self.stop_force_deadline=None
+            if getattr(self,'owner_exit_recovered',False):
+                self.state='error';self.last_help=['采集设备进程组已确认退出，但本段缺少有效的原生收尾证明；数据保留并标记失败，请检查日志后重新准备。']
+                if getattr(self,'owner_exit_persist_error',None):
+                    self.last_help.append('停止恢复诊断未写入磁盘：'+self.owner_exit_persist_error)
+                try:self.state_write()
+                except OSError:self.last_help.append('错误页面状态暂未写入磁盘。')
+                self.voice.say(self.last_help[0])
+            elif proof and proof.get('summary_status')=='error':
                 self.state='error';self.last_help=['采集已停止，但设备或文件收尾发生错误；数据未标记为成功，请查看日志。']
                 self.state_write();self.voice.say(self.last_help[0])
             else:
                 self.state='confirm_stop';self.state_write()
                 self.voice.say('采集已停止。请点击确认保存，或选择重采本段。')
-        elif time.monotonic()>self.stop_deadline:
-            # Keep polling for a late receipt; a retry must not send STOP twice.
-            self.stop_deadline=float('inf')
-            if privacy is not None:privacy.fault('停止收尾尚未确认，请检查设备和文件状态后重试')
+        elif stop_pending and time.monotonic()>self.stop_deadline:
+            if privacy is not None:privacy.fault('停止收尾尚未确认，仍在等待本段原生设备结束')
+            # Forty-five seconds is a warning boundary only. Camera EOS and
+            # ffprobe may legitimately take several minutes; never cut them
+            # off automatically at this point. A deliberate STOP can retry.
+            self.stop_pending=False;self.stop_retry_authorized=True;self.stop_deadline=float('inf')
+            self.stop_escalation_phase='waiting_user_retry'
+            self.last_help=['停止状态尚未确认；设备可能仍在完成文件收尾，数据继续保留。请检查进度后长按 STOP 重试。']
             self.state_write()
+        hard_deadline=getattr(self,'stop_force_deadline',None)
+        if (privacy is not None and privacy.committed and not getattr(self,'owner_exit_recovered',False)
+                and isinstance(hard_deadline,(int,float)) and time.monotonic()>=hard_deadline):
+            phase=getattr(self,'stop_escalation_phase',None)
+            if phase not in ('hard_term','hard_kill','hard_exhausted'):
+                self.stop_escalation_phase='hard_term'
+                if self.terminate_capture_owner(signal.SIGTERM):self.stop_force_deadline=time.monotonic()+2
+                else:
+                    self.stop_escalation_phase='hard_exhausted';self.stop_force_deadline=None
+                    self.last_help=['长时间停止超时；没有向无法验证的设备进程组发送信号。隐私遮挡保持，请联系维护人员。']
+                    self.state_write()
+            elif phase=='hard_term':
+                self.stop_escalation_phase='hard_kill'
+                if self.terminate_capture_owner(signal.SIGKILL):self.stop_force_deadline=time.monotonic()+2
+                else:
+                    self.stop_escalation_phase='hard_exhausted';self.stop_force_deadline=None
+                    self.last_help=['长时间停止超时；设备进程身份已变化，未发送强制结束信号。隐私遮挡保持，请联系维护人员。']
+                    self.state_write()
+            else:
+                self.stop_escalation_phase='hard_exhausted';self.stop_force_deadline=None
+                self.last_help=['已向经过核验的设备进程组发送有界结束信号，但进程组仍未退出。隐私遮挡保持，请联系维护人员。']
+                self.state_write()
 
     def scan_devices(self,announce=True,quiet=False):
         if not self.scan_lock.acquire(False):return False
@@ -612,6 +828,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         finally:self.scan_lock.release()
 
     def _scan_devices(self,announce=True,quiet=False):
+        from required_device_contract import build_contract,validate_scan
         if self.stop_preview() is False:
             self.last_help=['预览设备尚未全部退出'];self.scan_retry_pending=True;self.state_write();return False
         previous_state=self.state
@@ -634,6 +851,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.web_config=devices()
             if fingerprint(self.web_config.get('auto_discovery',{}))!=scanned_fingerprint:
                 raise ValueError('扫描结果发布前设备发生变化')
+            self.required_device_contract=build_contract(self.web_config,mode=self.web_config.get('collection_mode'))
         except (OSError,ValueError,subprocess.TimeoutExpired,ScanProcessError) as exc:
             if isinstance(exc,ScanProcessError) and exc.cleanup_pending:
                 self.remember_pending_owner(exc)
@@ -643,6 +861,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             message='设备扫描未完成：'+reason+'。请检查设备后重新扫描。'
             self.last_help=[message]
             self.scan_ok=False;self.scan_available=[];self.selected_devices=None
+            self.required_devices_missing=list(getattr(self,'required_device_contract',{}).get('required_devices',[]))
             self.scan_retry_pending=True
             # Retain identities for diagnosis, without presenting old readiness
             # as current evidence or permitting a stale device confirmation.
@@ -677,11 +896,17 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.usb_fingerprint=scanned_fingerprint
         atomic_json(BASE/'runtime/devices.json',scan)
         self.scan_available=[item['name'] for item in scan if item['connected']]
-        self.scan_ok=bool(self.scan_available)
+        missing_required=validate_scan(self.required_device_contract,scan)
+        self.required_devices_missing=missing_required
+        self.scan_ok=not missing_required
         connected=[item['label'] for item in scan if item['connected']]
         missing=[item['label'] for item in scan if not item['connected']]
-        self.state=previous_state if not announce and not changed else 'device_confirm'
+        self.state=previous_state if not announce and not changed and self.scan_ok else 'device_confirm'
         if changed:self.selected_devices=None
+        if missing_required:
+            labels={row['name']:row.get('label',row['name']) for row in scan}
+            self.last_help=['必需设备未全部在线或没有有效数据：'+'、'.join(labels.get(name,name) for name in missing_required)+'。请检查后重新扫描。']
+        else:self.last_help=[]
         self.state_write()
         if quiet:return True
         if not announce and not changed:return True
@@ -689,7 +914,12 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if missing:self.voice.say('未收到有效数据：'+'，'.join(missing)+'。请检查连接。')
         if any(x.get('status')=='no_data' and x['name'].startswith('emg') for x in scan):
             self.voice.say('肌电接收器已识别，但未收到有效肌电。请检查臂环电源和连接，程序会自动重试。')
-        self.voice.say('请点击确认设备，或选择重新扫描。仅采集已接入并确认的设备。')
+        if missing_required:
+            labels={row['name']:row.get('label',row['name']) for row in scan}
+            self.voice.say('必需采集设备未全部在线。当前不能确认设备，也不能开始采集。请检查连接后重新扫描。')
+            self.voice.say('暂缺设备：'+'、'.join(labels.get(name,name) for name in missing_required)+'。')
+        else:
+            self.voice.say('必需采集设备均已在线。请点击确认设备，或选择重新扫描。')
         return True
 
     def needs_wrist_calibration(self):
@@ -956,19 +1186,101 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.scan_devices(announce=False)
             if self.keyboard:self.keyboard.discard()
 
+    def _persist_owner_exit_proof(self):
+        record=getattr(self,'capture_owner_exit_record',None)
+        liveness=getattr(self,'capture_owner_exit_liveness',None) or {}
+        privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
+        if not isinstance(record,dict) or privacy is None or not privacy.committed:return True
+        start=privacy.start_proof
+        if not isinstance(start,dict) or not self.path:return False
+        try:normal=json.loads((self.path/'capture_complete.json').read_text())
+        except (OSError,ValueError,TypeError):normal=None
+        if isinstance(normal,dict) and privacy.confirm_stopped(normal):return True
+        path=self.path/'owner_group_exit.json'
+        try:
+            if self.worker is not None and self.worker.poll() is None:return False
+            from scan_registry import group_exists
+            pgid=record.get('pgid')
+            if type(pgid) is not int or group_exists(pgid):return False
+            if (record.get('phase') not in ('registered','terminal') or record.get('kind')!='capture'
+                    or record.get('run')!=getattr(self,'capture_owner_exit_run',None)
+                    or record.get('boot')!=start.get('boot_id')
+                    or record.get('owner_pid')!=start.get('controller_pid')
+                    or record.get('owner_start')!=start.get('controller_start_ticks')
+                    or record.get('wrapper_pid')!=start.get('adapter_pid')
+                    or record.get('wrapper_start')!=start.get('adapter_start_ticks')
+                    or record.get('pgid')!=record.get('wrapper_pid') or record.get('sid')!=record.get('wrapper_pid')
+                    or record.get('run')!=start.get('owner_run')):
+                return False
+            observed=time.monotonic_ns()
+            proof=dict(schema_version=1,policy='capture-owner-group-exit-v1',
+                session_id=str(self.path.resolve()),nonce=start.get('nonce'),
+                privacy_instance=start.get('privacy_instance'),privacy_generation=start.get('privacy_generation'),
+                owner_run=start.get('owner_run'),screen_privacy=start,
+                registry_run=record.get('run'),registry_nonce=record.get('nonce'),registry_kind=record.get('kind'),
+                registry_finish_verified=liveness.get('registry_cleanup_confirmed') is True,
+                registry_liveness_verified=liveness.get('liveness_verified') is True,
+                registry_cleanup_confirmed=liveness.get('registry_cleanup_confirmed') is True,
+                group_absent=True,adapter_reaped=True,
+                boot_id=record.get('boot'),controller_pid=record.get('owner_pid'),
+                controller_start_ticks=record.get('owner_start'),adapter_pid=record.get('wrapper_pid'),
+                adapter_start_ticks=record.get('wrapper_start'),worker_pid=start.get('worker_pid'),
+                worker_start_ticks=start.get('worker_start_ticks'),pgid=record.get('pgid'),sid=record.get('sid'),
+                native_shutdown_confirmed=False,native_qc_success=False,
+                worker_exit_code=self.worker.returncode if self.worker is not None else None,
+                observed_monotonic_ns=observed,recorded_at_unix=time.time())
+            if not privacy.confirm_owner_exited(proof):return False
+            self.owner_exit_recovered=True;self.owner_exit_proof=proof
+            try:atomic_json(path,proof)
+            except (OSError,ValueError,TypeError) as error:
+                # The verified in-memory process-group fact is sufficient to
+                # leave the permanent privacy cover; this diagnostic write is
+                # advisory and never changes the unsuccessful task verdict.
+                self.owner_exit_persist_error=str(error)[:200]
+            return True
+        except (OSError,ValueError,TypeError,RegistryError):return False
+
     def owner_finished(self):
-        if getattr(self,'capture_owner_released',False):return True
+        if getattr(self,'capture_owner_released',False):
+            return self._persist_owner_exit_proof()
         run=getattr(self,'capture_owner_run',None)
+        record=None;witness=None
         try:
             if not run:raise RegistryError('缺少本段设备所有权记录')
+            record=self.camera_registry.inspect()
+            if (not isinstance(record,dict) or record.get('run')!=run or record.get('kind')!='capture'
+                    or (record.get('phase')!='registered'
+                        and not (record.get('phase')=='terminal' and record.get('terminal_reason')=='normal_confirmed'))):
+                raise RegistryError('本段设备所有权记录已变化')
+            evidence=self.camera_registry.inspect_evidence()
+            witness=evidence.get('witness') or record.get('terminal_witness')
+            if evidence.get('errors') or not isinstance(witness,dict):
+                raise RegistryError('本段设备独立见证无法读取')
+            liveness=self.camera_registry.verify_exited(run,'capture')
             self.camera_registry.finish(run)
+            if self.camera_registry.inspect() is not None:
+                raise RegistryError('设备所有权终结状态未清除')
         except (RegistryError,OSError) as exc:
-            message='设备进程尚未全部退出，停止和文件清理未确认：'+str(exc)
-            if getattr(self,'last_help',None)!=[message]:
-                self.last_help=[message];self.state_write()
-            return False
+            try:liveness=self.camera_registry.verify_exited(
+                run,'capture',record if isinstance(record,dict) else None,
+                witness if isinstance(witness,dict) else None)
+            except (RegistryError,OSError) as verify_error:
+                message='设备进程组尚未确认退出，隐私遮挡保持；停止状态检查失败：'+str(verify_error)
+                if getattr(self,'last_help',None)!=[message]:
+                    self.last_help=[message]
+                    try:self.state_write()
+                    except OSError:pass
+                return False
+            self.capture_owner_exit_run=run;self.capture_owner_exit_record=liveness
+            self.capture_owner_exit_liveness=liveness;self.capture_owner_released=True
+            self.owner_exit_persist_error='设备组已退出，但设备所有权记录未能清理：'+str(exc)
+            self.capture_registry_cleanup_pending=True
+            return self._persist_owner_exit_proof()
+        self.capture_owner_exit_run=run;self.capture_owner_exit_record=record
+        self.capture_owner_exit_liveness=dict(liveness_verified=True,registry_cleanup_confirmed=True,group_absent=True)
         self.capture_owner_run=None;self.capture_owner_released=True
-        return True
+        self.capture_registry_cleanup_pending=False
+        return self._persist_owner_exit_proof()
 
     def reap(self):
         self.worker.wait(timeout=2)
@@ -992,9 +1304,15 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if getattr(self,'discard_requested',False):
             self.poll_discard();return
         if self.state=='finalizing' and time.monotonic()>getattr(self,'finalize_deadline',float('inf')) and self.worker.poll() is None:
-            os.killpg(self.worker.pid,signal.SIGKILL)
-            self.worker.wait(timeout=3)
-            atomic_json(self.path/'controller_error.json',dict(error='finalization timed out',at=time.time()))
+            if self.terminate_capture_owner(signal.SIGKILL):
+                try:self.worker.wait(timeout=5)
+                except subprocess.TimeoutExpired:pass
+                try:atomic_json(self.path/'controller_error.json',dict(error='finalization timed out after the verified owner group exceeded its 30-minute bound',at=time.time()))
+                except OSError:pass
+            else:
+                privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
+                if privacy is not None:privacy.fault('文件收尾超过有界等待时间，但设备进程所有权无法确认，未发送强制结束信号')
+                self.last_help=['文件收尾超过有界等待时间；设备进程所有权未能核验，隐私遮挡保持，请联系维护人员。']
         if self.state=='confirm_stop':return  # QC may finish; operator must decide before ledger commit.
         status=self.worker_status()
         state=status.get('state')
@@ -1015,38 +1333,100 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             # A reaped adapter alone is not proof its hardware descendants left.
             if not self.owner_finished():return
             summary_path=self.path/'capture_summary.json'
-            if not summary_path.exists():
-                atomic_json(summary_path,dict(status='error',errors=['worker exited without final summary: exit='+str(self.worker.returncode)],time=time.time()))
-            summary=json.loads(summary_path.read_text())
+            summary_parse_error=None
+            try:
+                summary=json.loads(summary_path.read_text(encoding='utf-8'))
+                if not isinstance(summary,dict):raise ValueError('capture summary is not an object')
+            except (OSError,ValueError,TypeError,UnicodeError) as error:
+                summary_parse_error='worker exited without a readable final summary: '+str(error)
+                if summary_path.exists():
+                    try:
+                        archive=self.path/('capture_summary.invalid.'+str(time.time_ns())+'.bin')
+                        archive.write_bytes(summary_path.read_bytes())
+                    except OSError:pass
+                summary=dict(status='error',errors=[summary_parse_error],time=time.time())
+                try:atomic_json(summary_path,summary)
+                except OSError:self.owner_exit_persist_error='采集摘要损坏且错误摘要未能写入磁盘'
+            owner_exit_recovered=getattr(self,'owner_exit_recovered',False)
+            if owner_exit_recovered:
+                recovery_error='已确认采集进程组退出，但未取得有效原生STOP收尾凭据；本段保留并标记失败。'
+                summary['status']='error';summary['qc_state']='failed'
+                summary['errors']=list(dict.fromkeys(list(summary.get('errors',[]))+[recovery_error]))
+                try:atomic_json(summary_path,summary)
+                except OSError:self.owner_exit_persist_error='停止失败状态未能写入采集摘要'
             owner_error=getattr(self,'owner_command_error',None)
-            pending=summary.get('status')=='pending_qc' and summary.get('storage_durability',{}).get('completed') is True
+            durability=summary.get('storage_durability')
+            pending=(not owner_exit_recovered and summary.get('status')=='pending_qc'
+                     and isinstance(durability,dict) and durability.get('completed') is True)
             ok=(summary.get('status')=='success' or pending) and self.worker.returncode==0 and not owner_error
+            if owner_exit_recovered:ok=False
+            qualification_errors=[]
+            if summary.get('status')=='success':
+                qualification_errors=_full_capture_qualification_errors(self.path,summary)
+                if qualification_errors:
+                    summary['status']='qc_error'
+                    summary['qc_state']='failed'
+                    summary['qualification_errors']=qualification_errors
+                    summary['errors']=list(summary.get('errors',[]))+qualification_errors
+                    summary['errors']=list(dict.fromkeys(summary['errors']))
+                    atomic_json(summary_path,summary)
+                    ok=False
             # Detailed findings remain in the report and web review. Do not
             # postpone ledger commit behind a long queue of spoken warnings.
             retry=getattr(self,'retry_requested',False)
-            outcome='error' if not ok and summary.get('status')!='cancelled' else 'failed' if retry else 'success' if ok else 'interrupted'
+            outcome='error' if owner_exit_recovered or summary_parse_error else 'qc_error' if qualification_errors else 'error' if not ok and summary.get('status')!='cancelled' else 'failed' if retry else 'success' if ok else 'interrupted'
             if pending and ok and not retry:outcome='pending_qc'
             if owner_error:outcome='error'
             if self.quit and not getattr(self,'keep_requested',False):outcome='interrupted'
             meta_path=self.path/'meta.yaml'
-            if meta_path.exists():
-                meta=yaml.safe_load(meta_path.read_text(encoding='utf-8')) or {}
-            else:
-                source=self.path/'meta.json'
-                raw=json.loads(source.read_text(encoding='utf-8')) if source.exists() else {}
-                meta=yaml.safe_load((PROJECT/'configs/meta.yaml').read_text(encoding='utf-8')) or {}
-                meta.update(session_dir=str(self.path),environment=raw.get('reference_image','').replace('configs/environments/','',1),pi=raw)
+            try:
+                if meta_path.exists():
+                    meta=yaml.safe_load(meta_path.read_text(encoding='utf-8')) or {}
+                    if not isinstance(meta,dict):raise ValueError('meta.yaml is not an object')
+                else:
+                    source=self.path/'meta.json'
+                    raw=json.loads(source.read_text(encoding='utf-8')) if source.exists() else {}
+                    meta=yaml.safe_load((PROJECT/'configs/meta.yaml').read_text(encoding='utf-8')) or {}
+                    meta.update(session_dir=str(self.path),environment=raw.get('reference_image','').replace('configs/environments/','',1),pi=raw)
+            except (OSError,ValueError,TypeError,yaml.YAMLError) as error:
+                if not owner_exit_recovered:raise
+                try:
+                    if meta_path.exists():
+                        (self.path/('meta.invalid.'+str(time.time_ns())+'.bin')).write_bytes(meta_path.read_bytes())
+                except OSError:pass
+                meta=dict(session_dir=str(self.path),status='error',retention_state='kept_failed',
+                          reference_state='uncollected',upload_state='excluded',
+                          controller_metadata_error=str(error)[:200])
             meta.update(self.reference_session_metadata())
             meta.update(collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT)
             meta['status']=outcome
-            meta['retention_state']='kept_pending_qc' if outcome=='pending_qc' else 'kept' if outcome=='success' else outcome
-            meta['retained_at_unix']=time.time() if outcome in ('success','pending_qc') else None
+            meta['retention_state']='kept_pending_qc' if outcome=='pending_qc' else 'kept' if outcome=='success' else 'kept_failed' if outcome in ('error','qc_error') else outcome
+            meta['retained_at_unix']=time.time() if outcome in ('success','pending_qc','error','qc_error') else None
             meta['reference_state']='pending_qc' if outcome=='pending_qc' else 'collected' if outcome=='success' else 'uncollected'
             meta['upload_state']='pending_qc' if outcome=='pending_qc' else 'retained_for_upload' if outcome=='success' else 'excluded'
-            ledger.atomic_yaml(meta_path,meta)
+            try:ledger.atomic_yaml(meta_path,meta)
+            except (OSError,ValueError) as error:
+                if not owner_exit_recovered:raise
+                self.last_help.append('错误metadata未能写入磁盘：'+str(error)[:160])
             if retry:
-                atomic_json(self.path/'retry.json',dict(status=outcome,reason='operator requested retry',reference_image=str(self.image),at=time.time()))
-            if not self.smoke:ledger.mark(self.image,self.path,outcome)
+                try:atomic_json(self.path/'retry.json',dict(status=outcome,reason='operator requested retry',reference_image=str(self.image),at=time.time()))
+                except OSError:
+                    if not owner_exit_recovered:raise
+                    self.last_help.append('重采原因未能写入磁盘。')
+            if not self.smoke:
+                try:ledger_result=ledger.mark(self.image,self.path,outcome)
+                except (OSError,ValueError) as error:
+                    if not owner_exit_recovered:raise
+                    ledger_result=False;self.last_help.append('失败台账未能更新：'+str(error)[:160])
+                if outcome in ('success','pending_qc') and ledger_result is False:
+                    reason='完成资格凭据在账本提交时已失效。'
+                    outcome='qc_error';ok=False
+                    summary['status']='qc_error';summary['qc_state']='failed'
+                    summary['errors']=list(dict.fromkeys(list(summary.get('errors',[]))+[reason]))
+                    atomic_json(summary_path,summary)
+                    meta.update(status=outcome,retention_state='kept_failed',reference_state='uncollected',upload_state='excluded')
+                    ledger.atomic_yaml(meta_path,meta)
+                    ledger.mark(self.image,self.path,'qc_error')
             if outcome=='success':
                 self.success_count+=1
                 self.retained_created_ids=getattr(self,'retained_created_ids',set());self.retained_created_ids.add(self.path.name)
@@ -1104,7 +1484,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             else:self.retry_requested=False;self.finish()
             if self.keyboard:self.keyboard.discard()
             return
-        if self.state=='recording' and key=='a':
+        privacy_required=bool(getattr(getattr(self,'dashboard',None),'privacy',None)
+            and self.dashboard.privacy.snapshot().get('required'))
+        if key=='a' and privacy_required and self.state in ('recording','countdown','finalizing','error','failed_wait'):
             result=self.stop_before_prompt()
             if self.keyboard:self.keyboard.discard()
             return result
@@ -1144,7 +1526,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                         return
                     self.state='idle';self.state_write()
                     self.voice.say('已确认本次采集设备。点击准备本段，查看任务参考图像并准备录制。')
-                else:self.voice.say('未检测到任何采集设备。请检查连接后点击重新扫描。')
+                else:self.voice.say((self.last_help[0] if getattr(self,'last_help',[]) else '必需采集设备未全部通过在线检查。请检查连接后点击重新扫描。'))
             elif self.state in ('idle','failed_wait'):
                 self.prepare()
             elif self.state=='exhausted':

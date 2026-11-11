@@ -176,6 +176,12 @@ def apply(request):
     previous=ledger.mark;ledger.mark=guarded_mark
     try:receipt=apply_result(resultdir,path.parent,B)
     finally:ledger.mark=previous
+    # The host's INFO/WARN level is not enough to archive a success. The Pi
+    # application step also rechecks its frozen full-QC/data receipt; if that
+    # local check rejects, make the SSH protocol fail so the service cannot
+    # continue to archive and clean up based on the host's stale level alone.
+    if result.get('level') in ('INFO','WARN') and receipt.get('passed') is not True:
+        raise RuntimeError('Pi rejected the full-QC qualification; original session retained')
     atomic(STATE/'results'/ (identifier+'.json'),dict(receipt,reference=reference,reference_sha256=expected,
          retake_required=not receipt['passed'],server_path=request.get('server_path'),qc_report=load(path/'qc_report.json')))
     return receipt
@@ -331,19 +337,70 @@ def raw_handoff(request):
         if path.exists() and target.exists():raise ValueError('Original handoff name was reused')
         if not previous:
             path=_handoff_session(root,identifier);finalized(path)
+            from required_device_contract import resolve_selection
+            frozen_selection=load(path/'device_selection.json')
+            contract,contract_errors,legacy=resolve_selection(frozen_selection.get('device_config'),frozen_selection)
+            if contract_errors or contract is None or legacy:
+                raise ValueError('QC_HOST_UPGRADE_REQUIRED: 冻结必需设备合同缺失，原件未交接；升级主机协议后重试')
+            meta=load(path/'meta.json')
+            if not isinstance(meta,dict):raise ValueError('QC_HOST_UPGRADE_REQUIRED: 冻结本机metadata无效，原件未交接')
+            pending=load(path/'qc_pending.json')
+            from capture_qc_receipt import verify_input_signature,verify_portable_input_signature,portable_input_signature,verify as verify_qc_receipt
+            if pending:
+                if (not isinstance(pending.get('input_signature'),str)
+                        or not isinstance(pending.get('local_input_signature'),str)
+                        or pending.get('session_id')!=identifier):
+                    raise ValueError('QC_HOST_UPGRADE_REQUIRED: 手动交接缺少原始输入绑定；原件未交接，请升级主机协议后重试')
+                source_input_signature=pending['input_signature'];source_local_input_signature=pending['local_input_signature']
+                request_id=pending.get('request_id');require_marker=False
+                if (not verify_input_signature(path,source_local_input_signature,contract,require_marker=False)
+                        or not verify_portable_input_signature(path,source_input_signature,contract,require_marker=False)):
+                    raise ValueError('QC_HOST_UPGRADE_REQUIRED: 待质检输入已变化；原件未交接，请先复核后重试')
+            else:
+                source_receipt=load(path/'capture_qc_receipt.json')
+                receipt_errors=verify_qc_receipt(path)
+                if receipt_errors or not isinstance(source_receipt.get('input_signature'),str):
+                    raise ValueError('QC_HOST_UPGRADE_REQUIRED: 既有完整质检回执无效；原件未交接，请升级主机协议后重试')
+                source_local_input_signature=source_receipt['input_signature']
+                if not verify_input_signature(path,source_local_input_signature,contract,require_marker=True):
+                    raise ValueError('QC_HOST_UPGRADE_REQUIRED: 既有完整质检输入已变化；原件未交接')
+                source_input_signature=portable_input_signature(path,contract,require_marker=True)
+                request_id=None;require_marker=True
+            expected_ref=meta.get('reference_sha256')
+            if not isinstance(expected_ref,str) or not expected_ref or (pending and pending.get('reference_sha256')!=expected_ref):
+                raise ValueError('QC_HOST_UPGRADE_REQUIRED: 冻结参考身份缺失；原件未交接，请升级主机协议后重试')
+            required_version=contract.get('version')
+            if (receipt.get('qc_protocol_version')!=2
+                    or receipt.get('qc_qualification_protocol')!='required-device-contract-v1'
+                    or receipt.get('input_signature_kind')!='portable-content-sha256-v1'
+                    or receipt.get('input_signature')!=source_input_signature
+                    or receipt.get('local_input_signature')!=source_local_input_signature
+                    or receipt.get('reference_sha256')!=expected_ref
+                    or receipt.get('required_device_contract_version')!=required_version
+                    or not isinstance(receipt.get('qc_request_id'),str)
+                    or not receipt.get('qc_request_id')
+                    or (pending and receipt.get('qc_request_id')!=request_id)):
+                raise ValueError('QC_HOST_UPGRADE_REQUIRED: 主机未证明新版QC输入与资格协议；原件未交接')
+            if not pending:request_id=receipt['qc_request_id']
             actual=source_manifest(path,progress=idle_progress())
             if not same_file_bytes(receipt['manifest'],dict(actual,native_sha256=hashlib.sha256((path/'native_capture_summary.json').read_bytes()).hexdigest())):
                 raise ValueError('Raw tree changed before handoff')
             if hashlib.sha256((path/'native_capture_summary.json').read_bytes()).hexdigest()!=receipt['manifest']['native_sha256']:
                 raise ValueError('Raw capture identity changed')
-            pending=load(path/'qc_pending.json');request_id=receipt.get('qc_request_id')
+            request_id=receipt.get('qc_request_id')
             if pending and pending.get('request_id')!=request_id:raise ValueError('QC request identity changed')
             meta=load(path/'meta.json')
             previous=dict(version=1,purpose=RAW_PURPOSE,state='prepared',session_id=identifier,
                 device_id=identity(),server_id=receipt['server_id'],receipt_signature=signed['signature'],
                 receipt_sha256=sha_value(signed),receipt=signed,trash_path=str(target),source_path=str(path),
                 source_meta=meta,reference_project=str(reference_project),
-                qc_request_id=request_id,native_sha256=receipt['manifest']['native_sha256'],started_at=time.time())
+                qc_request_id=request_id,native_sha256=receipt['manifest']['native_sha256'],
+                frozen_selection=frozen_selection,source_summary=load(path/'capture_summary.json'),
+                start_gate=load(path/'start_gate.json'),stop_gate=load(path/'stop_gate.json'),
+                source_pending=pending,source_input_signature=source_input_signature,
+                source_local_input_signature=source_local_input_signature,qc_require_marker=require_marker,
+                qc_protocol_version=receipt['qc_protocol_version'],
+                qc_qualification_protocol=receipt['qc_qualification_protocol'],started_at=time.time())
             atomic(record,previous)
         if path.exists():
             finalized(path)
@@ -371,6 +428,111 @@ def prepare_handoff_results(request):
         parent.mkdir(parents=True,exist_ok=True)
     return dict(device_id=identity(),session_id=identifier,result_directory=str(RESULTS/identifier),ready=True)
 
+def _handoff_result_qualification(record,envelope,result,resultdir,report):
+    """Require a result tied to the exact handoff inputs and complete report."""
+    from required_device_contract import resolve_selection
+    selection=record.get('frozen_selection');pending=record.get('source_pending') or {}
+    contract,errors,legacy=resolve_selection((selection or {}).get('device_config'),selection)
+    if errors or contract is None or legacy:raise ValueError('QC_HOST_UPGRADE_REQUIRED: handoff device contract is invalid')
+    raw_receipt=record.get('receipt') if isinstance(record.get('receipt'),dict) else {}
+    reference=record.get('source_meta',{}).get('reference_sha256')
+    receipt_sha=envelope.get('qualification_receipt_sha256') if isinstance(envelope,dict) else None
+    result_path=Path(resultdir)/'result.json'
+    result_sha=hashlib.sha256(result_path.read_bytes()).hexdigest() if result_path.is_file() else None
+    if (envelope.get('session_id')!=record.get('session_id')
+            or envelope.get('device_id')!=record.get('device_id')
+            or envelope.get('server_id')!=record.get('server_id')
+            or envelope.get('handoff_receipt_sha256')!=record.get('receipt_sha256')
+            or envelope.get('result_sha256')!=result_sha
+            or not isinstance(envelope.get('server_path'),str)
+            or not Path(envelope['server_path']).is_absolute()
+            or envelope.get('qc_protocol_version')!=2
+            or envelope.get('qc_qualification_protocol')!='required-device-contract-v1'
+            or envelope.get('passed') is not True
+            or not isinstance(receipt_sha,str) or not re.fullmatch(r'[0-9a-f]{64}',receipt_sha)
+            or envelope.get('input_signature')!=record.get('source_input_signature')
+            or envelope.get('local_input_signature')!=record.get('source_local_input_signature')
+            or envelope.get('checked_input_signature')!=result.get('checked_input_signature')
+            or envelope.get('reference_sha256')!=reference
+            or raw_receipt.get('input_signature')!=record.get('source_input_signature')
+            or raw_receipt.get('local_input_signature')!=record.get('source_local_input_signature')
+            or raw_receipt.get('reference_sha256')!=reference
+            or pending.get('request_id')!=record.get('qc_request_id')
+            or result.get('input_signature')!=record.get('source_input_signature')
+            or result.get('local_input_signature')!=record.get('source_local_input_signature')
+            or result.get('request_id')!=record.get('qc_request_id')
+            or result.get('reference_sha256')!=reference
+            or not isinstance(result.get('checked_input_signature'),str)
+            or not re.fullmatch(r'[0-9a-f]{64}',result.get('checked_input_signature',''))):
+        raise ValueError('QC_HOST_UPGRADE_REQUIRED: handoff result is not bound to the committed source inputs')
+    if (result.get('level') not in ('INFO','WARN') or result.get('passed') is not True
+            or report.get('scope','full')!='full' or report.get('level')!=result.get('level')
+            or not isinstance(report.get('session_dir'),str)
+            or Path(report['session_dir']).name!=record.get('session_id')):
+        raise ValueError('QC_HOST_UPGRADE_REQUIRED: handoff full-QC report is incomplete')
+    start=record.get('start_gate');stop=record.get('stop_gate');summary=record.get('source_summary')
+    window=report.get('window')
+    if (not isinstance(start,dict) or not isinstance(stop,dict) or not isinstance(summary,dict)
+            or not isinstance(window,dict) or type(window.get('t0')) not in (int,float)
+            or type(window.get('t1')) not in (int,float)):
+        raise ValueError('QC_HOST_UPGRADE_REQUIRED: handoff START/STOP or report window is missing')
+    t0=summary.get('start_unix_ns');t1=summary.get('stop_unix_ns')
+    if (type(t0) is not int or type(t1) is not int or t1<=t0
+            or abs(window['t0']-t0/1e9)>1e-6 or abs(window['t1']-t1/1e9)>1e-6
+            or start.get('start_unix_ns')!=t0 or stop.get('stop_unix_ns')!=t1
+            or stop.get('recording_active') is not False):
+        raise ValueError('Handoff QC window differs from frozen START/STOP facts')
+    streams=report.get('streams');required=set(contract.get('required_devices',()))
+    if not isinstance(streams,dict) or not required.issubset(streams):
+        raise ValueError('QC_HOST_UPGRADE_REQUIRED: handoff report does not cover all required devices')
+    if any(not isinstance(streams[name],dict) or streams[name].get('level') not in ('INFO','WARN') for name in required):
+        raise ValueError('Handoff required stream QC did not pass')
+    manifest=record.get('receipt',{}).get('manifest',{});files=manifest.get('files',[])
+    by_path={row.get('path'):row for row in files if isinstance(row,dict)}
+    for name in required:
+        detail=summary.get(name)
+        if not isinstance(detail,dict):raise ValueError('Handoff source summary lacks '+name)
+        if name.startswith('cam_ros_') or name.startswith('cam_'):
+            count=detail.get('frames')
+            needed=(name+'/frames.mp4',name+'/timestamps.csv')
+        elif name.startswith('emg_'):
+            count=detail.get('emg_frames')
+            needed=()
+            if not any(path.startswith(name+'/') and (path.endswith('.npz')) for path in by_path):
+                raise ValueError('Handoff manifest lacks '+name+' sample arrays')
+        elif name=='board_imu':
+            count=detail.get('frames');needed=()
+            if not any(name+'/'+candidate in by_path for candidate in ('raw.csv','board_imu.npz')):
+                raise ValueError('Handoff manifest lacks board IMU data')
+        elif name=='eeg':
+            count=(result.get('derived_counts') or {}).get('eeg_samples')
+            needed=()
+            if not isinstance(count,int) or count<=0 or not any(path.startswith(name+'/') and path.endswith('.npz') for path in by_path):
+                raise ValueError('Handoff manifest lacks finalized EEG data')
+        else:raise ValueError('Unknown required device in handoff contract')
+        if not isinstance(count,int) or count<=0:raise ValueError('Handoff required stream has no recorded samples: '+name)
+        for path in needed:
+            if path not in by_path or type(by_path[path].get('bytes')) is not int or by_path[path]['bytes']<=0:
+                raise ValueError('Handoff manifest lacks required data file: '+path)
+    if 'eeg' in required:
+        final=resultdir/'artifacts/eeg/gate_finalization.json'
+        if final.is_symlink() or not final.is_file():raise ValueError('QC_HOST_UPGRADE_REQUIRED: missing EEG STOP finalization proof')
+        proof=load(final);gates=proof.get('gate_sha256') if isinstance(proof,dict) else None
+        if not isinstance(gates,dict):raise ValueError('EEG STOP finalization proof is invalid')
+        start_row=by_path.get('start_gate.json',{});stop_row=by_path.get('stop_gate.json',{})
+        start_sha=gates.get('start');stop_sha=gates.get('stop')
+        if (proof.get('schema_version')!=1 or proof.get('policy')!='whole_sdk_batches_final_controller_gate_v1'
+                or proof.get('start_monotonic_ns')!=start.get('start_monotonic_ns')
+                or proof.get('stop_monotonic_ns')!=stop.get('stop_monotonic_ns')
+                or not isinstance(start_sha,str) or not re.fullmatch(r'[0-9a-f]{64}',start_sha)
+                or not isinstance(stop_sha,str) or not re.fullmatch(r'[0-9a-f]{64}',stop_sha)
+                or start_sha!=start_row.get('sha256') or stop_sha!=stop_row.get('sha256')):
+            raise ValueError('EEG STOP finalization proof is invalid')
+        derived=result.get('derived_counts')
+        if not isinstance(derived,dict) or derived.get('eeg_samples')!=proof.get('kept_samples'):
+            raise ValueError('EEG finalized count differs from QC output')
+    return contract
+
 def _apply_handoff_result(request):
     envelope=verify_signature(request['receipt'],_handoff_key(),RESULT_PURPOSE)
     identifier=envelope.get('session_id');record=load(_handoff_record(identifier));idle()
@@ -383,10 +545,36 @@ def _apply_handoff_result(request):
     if (digest!=envelope.get('result_sha256') or result.get('session_id')!=identifier
             or result.get('request_id')!=record.get('qc_request_id')
             or result.get('native_sha256')!=record.get('native_sha256')
-            or result.get('level') not in ('INFO','WARN','ERROR')):raise ValueError('Frozen result mismatch')
+            or result.get('level') not in ('INFO','WARN','ERROR')):
+        raise ValueError('QC_HOST_UPGRADE_REQUIRED: signed host result identity or checksum mismatch')
+    expected_pass=result.get('level') in ('INFO','WARN')
+    raw_receipt=record.get('receipt') if isinstance(record.get('receipt'),dict) else {}
+    source_meta=record.get('source_meta') if isinstance(record.get('source_meta'),dict) else {}
+    reference_sha=source_meta.get('reference_sha256')
+    qualification_sha=envelope.get('qualification_receipt_sha256')
+    if (type(envelope.get('passed')) is not bool or envelope['passed'] is not expected_pass
+            or result.get('passed') is not expected_pass
+            or envelope.get('qc_protocol_version')!=2
+            or envelope.get('qc_qualification_protocol')!='required-device-contract-v1'
+            or envelope.get('input_signature')!=record.get('source_input_signature')
+            or envelope.get('local_input_signature')!=record.get('source_local_input_signature')
+            or envelope.get('input_signature')!=raw_receipt.get('input_signature')
+            or envelope.get('local_input_signature')!=raw_receipt.get('local_input_signature')
+            or envelope.get('reference_sha256')!=reference_sha
+            or result.get('reference_sha256')!=reference_sha
+            or envelope.get('checked_input_signature')!=result.get('checked_input_signature')
+            or not isinstance(envelope.get('server_path'),str)
+            or not Path(envelope['server_path']).is_absolute()
+            or (expected_pass and (not isinstance(qualification_sha,str)
+                or not re.fullmatch(r'[0-9a-f]{64}',qualification_sha)))
+            or (not expected_pass and qualification_sha is not None)):
+        raise ValueError('QC_HOST_UPGRADE_REQUIRED: signed host result does not bind its qualification to the handoff')
     output=STATE/'results'/(identifier+'.json');previous=load(output)
     if previous:
-        if previous.get('result_sha256')!=digest:raise ValueError('Conflicting post-handoff QC result')
+        if (previous.get('result_sha256')!=digest or previous.get('passed') is not envelope['passed']
+                or previous.get('qualification_receipt_sha256')!=qualification_sha
+                or previous.get('handoff_result_receipt')!=request['receipt']):
+            raise ValueError('Conflicting post-handoff QC result')
         return previous
     artifacts=result.get('artifacts',{})
     if 'qc_report.json' not in artifacts:raise ValueError('QC report missing')
@@ -397,7 +585,13 @@ def _apply_handoff_result(request):
                 or hashlib.sha256(source.read_bytes()).hexdigest()!=sha):raise ValueError('QC artifact changed')
     report=load(resultdir/'artifacts/qc_report.json')
     if report.get('level')!=result['level']:raise ValueError('Result/report level mismatch')
-    meta=record['source_meta'];reference=meta.get('reference_image');retake=result['level']=='ERROR'
+    retake=not expected_pass
+    if expected_pass:
+        qualified_contract=_handoff_result_qualification(record,envelope,result,resultdir,report)
+        if not isinstance(qualified_contract,dict):raise ValueError('QC_HOST_UPGRADE_REQUIRED: handoff qualification is invalid')
+    meta=source_meta;reference=meta.get('reference_image')
+    if expected_pass and (not isinstance(reference,str) or not reference):
+        raise ValueError('QC_HOST_UPGRADE_REQUIRED: successful handoff lacks a frozen reference identity')
     if reference:
         project=Path(record['reference_project']).resolve()
         allowed=[B.parent.resolve(),(B.parent/'profiles/emg').resolve(),(B.parent/'profiles/eeg').resolve()]
@@ -416,7 +610,9 @@ def _apply_handoff_result(request):
             if item is None:item={'session':record['source_path']};attempts.append(item)
             item.update(status='error' if retake else 'success',qc_level=result['level'],server_qc=True,
                 has_data=True,deleted=False,retained=True,data_location='host',pi_original_deleted=True,
-                server_path=envelope.get('server_path'),retake_required=retake)
+                server_path=envelope.get('server_path'),retake_required=retake,
+                result_sha256=digest,qualification_receipt_sha256=qualification_sha,
+                handoff_receipt_sha256=record.get('receipt_sha256'),reference_sha256=reference_sha)
             used=book.setdefault('used',{});owner=used.get(image.name)
             other=isinstance(owner,dict) and owner.get('session')!=record['source_path'] and ledger.valid_used(owner)
             if not other:
@@ -424,12 +620,23 @@ def _apply_handoff_result(request):
                     if isinstance(owner,dict) and owner.get('session')==record['source_path']:used.pop(image.name,None)
                     book.setdefault('failed',{})[image.name]=dict(session=record['source_path'],status='error',retake_required=True)
                 else:
-                    used[image.name]=dict(session=record['source_path'],status='success',qc_level=result['level'],data_location='host')
+                    used[image.name]=dict(session=record['source_path'],status='success',qc_level=result['level'],
+                        data_location='host',server_qc=True,pi_original_deleted=True,retained=True,
+                        server_path=envelope.get('server_path'),result_sha256=digest,
+                        qualification_receipt_sha256=qualification_sha,
+                        handoff_receipt_sha256=record.get('receipt_sha256'),reference_sha256=reference_sha)
                     book.get('failed',{}).pop(image.name,None)
             ledger.atomic_yaml(target,book)
     value=dict(version=1,purpose=RESULT_PURPOSE,session_id=identifier,result_sha256=digest,level=result['level'],
         raw_level=result.get('raw_level'),passed=not retake,retake_required=retake,applied_at=time.time(),
-        server_path=envelope.get('server_path'),data_location='host',pi_original_deleted=True)
+        server_path=envelope.get('server_path'),data_location='host',pi_original_deleted=True,
+        qc_protocol_version=envelope.get('qc_protocol_version'),
+        qc_qualification_protocol=envelope.get('qc_qualification_protocol'),
+        input_signature=envelope.get('input_signature'),local_input_signature=envelope.get('local_input_signature'),
+        checked_input_signature=envelope.get('checked_input_signature'),reference_sha256=reference_sha,
+        qualification_receipt_sha256=qualification_sha,handoff_receipt_sha256=record.get('receipt_sha256'),
+        request_id=result.get('request_id'),native_sha256=result.get('native_sha256'),
+        handoff_result_receipt=request['receipt'])
     atomic(output,value);atomic(project_paths.BASE/'runtime/qc_results_revision.json',dict(at=time.time(),session_id=identifier))
     return value
 

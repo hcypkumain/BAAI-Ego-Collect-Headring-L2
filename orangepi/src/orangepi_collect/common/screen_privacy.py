@@ -49,6 +49,7 @@ class ScreenPrivacy:
         self.error = ''
         self.owner = {}
         self.start_proof = None
+        self.last_stopped_target = None
 
     def display(self, value):
         if not isinstance(value, dict) or not CLIENT_ID.fullmatch(str(value.get('client_id', ''))):
@@ -86,7 +87,7 @@ class ScreenPrivacy:
                 client['ack'] = self.nonce
                 client['ack_at'] = self.clock()
 
-    def arm(self, session, worker_pid=None, adapter_pid=None):
+    def arm(self, session, worker_pid=None, adapter_pid=None, owner_run=None):
         if not isinstance(session, str) or not session:
             raise ValueError('缺少本段标识')
         with self.lock:
@@ -103,8 +104,10 @@ class ScreenPrivacy:
             self.cancelled = False
             self.error = ''
             self.owner={'worker_pid':worker_pid,'worker_start_ticks':process_start_ticks(worker_pid),
-                        'adapter_pid':adapter_pid,'adapter_start_ticks':process_start_ticks(adapter_pid)}
+                        'adapter_pid':adapter_pid,'adapter_start_ticks':process_start_ticks(adapter_pid),
+                        'owner_run':owner_run}
             self.start_proof=None
+            self.last_stopped_target=None
             self.generation += 1
 
     def ready(self):
@@ -123,17 +126,24 @@ class ScreenPrivacy:
             if any(now-v['seen'] <= self.lease and v.get('stop_protocol') != STOP_PROTOCOL for v in self.clients.values()):
                 raise ValueError('页面版本已更新，请刷新所有连接的采集页面后再开始')
 
-    def target_matches(self, target):
+    def target_matches(self, target, allow_same_session=False, allow_stopped=False):
         with self.lock:
-            return (isinstance(target,dict) and set(target)=={'instance','session_id','nonce','generation'}
-                    and target['instance']==self.instance and target['session_id']==self.session
-                    and target['nonce']==self.nonce and type(target['generation']) is int
-                    and target['generation']==self.generation and bool(self.nonce))
+            if (not isinstance(target,dict) or set(target)!={'instance','session_id','nonce','generation'}
+                    or target.get('instance')!=self.instance or type(target.get('generation')) is not int):return False
+            active=(target.get('session_id')==self.session and target.get('nonce')==self.nonce and bool(self.nonce)
+                    and (target['generation']==self.generation or
+                         allow_same_session and 0<=target['generation']<self.generation))
+            if active:return True
+            stopped=self.last_stopped_target
+            return bool(allow_stopped and self.phase=='idle' and isinstance(stopped,dict)
+                and target.get('session_id')==stopped.get('session_id')
+                and target.get('nonce')==stopped.get('nonce')
+                and 0<=target['generation']<=stopped.get('generation',-1))
 
     def cancel_request(self, target):
         with self.lock:
             if not self.target_matches(target):raise ValueError('采集会话已变化，请刷新后重试')
-            if self.phase == 'arming':
+            if self.phase == 'arming' and not self.committed:
                 self.cancelled = True
                 self.generation += 1
                 return True
@@ -167,6 +177,7 @@ class ScreenPrivacy:
                     'boot_id': boot_identity(), 'committed_monotonic_ns': self.committed_ns,
                     'black_confirmed_monotonic_ns': int(max(self.clients[k]['ack_at'] for k in self.cohort)*1e9),
                     'display_ids': sorted(self.cohort), 'settle_seconds': self.settle,
+                    'privacy_instance':self.instance,'privacy_generation':self.generation,
                     'display_acknowledged': True,**self.owner}
             self.start_proof=copy.deepcopy(proof)
             return proof
@@ -177,9 +188,9 @@ class ScreenPrivacy:
                 if self.phase != 'recording':self.generation += 1
                 self.phase = 'recording'
 
-    def stopping(self, target=None):
+    def stopping(self, target=None, allow_same_session=True):
         with self.lock:
-            if target is not None and not self.target_matches(target):
+            if target is not None and not self.target_matches(target,allow_same_session=allow_same_session):
                 raise ValueError('采集会话已变化，请刷新后重试')
             if self.committed:
                 if self.phase != 'stopping':self.generation += 1
@@ -210,12 +221,72 @@ class ScreenPrivacy:
                     or value.get('worker_pid')!=self.start_proof.get('worker_pid')
                     or value.get('boot_id')!=self.start_proof.get('boot_id')):
                 return False
+            self.last_stopped_target={'instance':self.instance,'session_id':self.session,
+                'nonce':self.nonce,'generation':self.generation}
             self.phase = 'idle'
             self.nonce = ''
             self.committed = False
             self.error = ''
             self.cohort.clear()
             self.generation += 1
+            return True
+
+    def confirm_owner_exited(self,value):
+        """Release the privacy cover only after this capture's owned process group is gone.
+
+        This recovery proves that the controller's capture owner exited. It does
+        not claim that the native recorder completed STOP, saved successfully,
+        or passed QC.
+        """
+        with self.lock:
+            start=self.start_proof
+            if (not self.committed or self.phase not in ('arming','recording','stopping','fault')
+                    or not isinstance(start,dict) or not isinstance(value,dict)
+                    or value.get('schema_version')!=1
+                    or value.get('policy')!='capture-owner-group-exit-v1'
+                    or value.get('session_id')!=self.session or value.get('nonce')!=self.nonce
+                    or value.get('privacy_instance')!=self.instance
+                    or value.get('privacy_generation')!=start.get('privacy_generation')
+                    or value.get('screen_privacy')!=start
+                    or value.get('owner_run')!=start.get('owner_run')
+                    or not isinstance(start.get('owner_run'),str) or not start['owner_run']
+                    or value.get('registry_run')!=start.get('owner_run')
+                    or value.get('registry_kind')!='capture'
+                    or (value.get('registry_finish_verified') is not True
+                        and value.get('registry_liveness_verified') is not True)
+                    or type(value.get('registry_cleanup_confirmed')) is not bool
+                    or value.get('group_absent') is not True
+                    or value.get('adapter_reaped') is not True
+                    or value.get('native_shutdown_confirmed') is not False
+                    or value.get('native_qc_success') is not False
+                    or value.get('boot_id')!=start.get('boot_id')
+                    or value.get('boot_id')!=boot_identity()
+                    or value.get('controller_pid')!=start.get('controller_pid')
+                    or value.get('controller_start_ticks')!=start.get('controller_start_ticks')
+                    or value.get('controller_pid')!=os.getpid()
+                    or process_start_ticks(os.getpid())!=value.get('controller_start_ticks')
+                    or value.get('adapter_pid')!=start.get('adapter_pid')
+                    or value.get('adapter_start_ticks')!=start.get('adapter_start_ticks')
+                    or value.get('worker_pid')!=start.get('worker_pid')
+                    or value.get('worker_start_ticks')!=start.get('worker_start_ticks')
+                    or type(value.get('pgid')) is not int or value.get('pgid')!=value.get('adapter_pid')
+                    or value.get('sid')!=value.get('pgid')
+                    or type(value.get('observed_monotonic_ns')) is not int
+                    or value['observed_monotonic_ns']<self.committed_ns
+                    or value['observed_monotonic_ns']>time.monotonic_ns()):
+                return False
+            try:
+                from scan_registry import RegistryError,group_exists,proc_identity
+                if group_exists(value['pgid']):return False
+                for key,start_key in (('adapter_pid','adapter_start_ticks'),('worker_pid','worker_start_ticks')):
+                    identity=proc_identity(value[key])
+                    if identity and identity.get('start')==value[start_key] and identity.get('state') not in ('Z','X'):
+                        return False
+            except (OSError,ValueError,TypeError,RegistryError):return False
+            self.last_stopped_target={'instance':self.instance,'session_id':self.session,
+                'nonce':self.nonce,'generation':self.generation}
+            self.phase='idle';self.nonce='';self.committed=False;self.cancelled=False
+            self.error='';self.cohort.clear();self.owner={};self.generation+=1
             return True
 
     def snapshot(self):

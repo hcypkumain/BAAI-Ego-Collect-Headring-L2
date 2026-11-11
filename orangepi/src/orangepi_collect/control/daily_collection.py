@@ -30,10 +30,10 @@ def day_name(stamp):
     return dt.datetime.fromtimestamp(stamp, CST).date().isoformat()
 
 
-def take_snapshot(store, path, ledger_cache=None):
+def take_snapshot(store, path, ledger_cache=None, metadata=None):
     """Keep small factual audit evidence even when a discarded take is purged."""
     path = Path(path)
-    meta = store.metadata(path) if ledger_cache is None else store.metadata(path, ledger_cache=ledger_cache)
+    meta = metadata if metadata is not None else (store.metadata(path) if ledger_cache is None else store.metadata(path, ledger_cache=ledger_cache))
     summary = load(path / 'capture_summary.json')
     report = load(path / 'qc_report.json')
     start = summary.get('start_unix_ns', 0)
@@ -53,7 +53,8 @@ def take_snapshot(store, path, ledger_cache=None):
     has_data = any(isinstance(v, dict) and any(number(v.get(k)) and v[k] > 0 for k in counts) for v in summary.values())
     if not has_data:
         has_data = any(p.is_file() and not p.is_symlink() and p.stat().st_size > 0 for pattern in ('*/*.npz', '*/*.mp4', '*/*.h264', '*/*.mcap') for p in path.glob(pattern))
-    qualified = bool(meta.get('retained') and meta.get('reference_attempt_succeeded') and
+    qualified = bool(meta.get('qualified') is True and meta.get('retained') and meta.get('reference_attempt_succeeded') and
+                     report.get('scope','full')=='full' and
                      summary.get('status') == 'success' and report.get('level') in ('INFO', 'WARN') and
                      level in ('INFO', 'WARN') and has_data and duration > 0)
     findings = [dict(level=f['level'], check=f['check'] or '未标检查项', stream=f['modality']) for f in qc['findings']]
@@ -155,6 +156,11 @@ class DailyCollection:
                 live.add(identifier)
                 try:
                     signature = [ledger_signature]
+                    # RecordingStore's token includes frozen selection/QC
+                    # evidence plus required-stream filesystem identities.
+                    # Invalidate cached qualification if any proof changes.
+                    metadata=self.store.metadata(path,ledger_cache=self.ledger_cache)
+                    signature.append(('capture_proof',metadata.get('token')))
                     for name in ('meta.yaml', 'meta.json', 'capture_summary.json', 'qc_report.json', 'recording_deleted.json'):
                         source = path / name
                         try:
@@ -166,7 +172,7 @@ class DailyCollection:
                     if cached is not None and cached[0] == signature:
                         row = copy.deepcopy(cached[1])
                     else:
-                        row = take_snapshot(self.store, path, self.ledger_cache)
+                        row = take_snapshot(self.store, path, self.ledger_cache, metadata=metadata)
                         self.file_cache[str(path)] = (signature, copy.deepcopy(row))
                     row['id'] = identifier
                     if marker:

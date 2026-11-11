@@ -96,6 +96,8 @@ class PiTimingEvidence(BaseCheck):
                 out.stats['series'][label]={'available':False,'reason':'registered_series_missing'}
                 continue
             facts=_facts(series.t,out.stats['window'])
+            facts['n_outside_window']=int(series.n_outside)
+            facts['n_total']=int(np.asarray(series.raw).size)
             facts['clock_basis']='original_registered_timestamp_series_seconds'
             facts['window']=out.stats['window']
             out.stats['series'][label]=facts

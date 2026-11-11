@@ -6,6 +6,8 @@ from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(ROOT/'orangepi/src/orangepi_collect/common'))
 from raw_handoff import signed,sha_value,RAW_PURPOSE,RESULT_PURPOSE
+from required_device_contract import build_contract
+from capture_qc_receipt import input_signature,portable_input_signature
 
 @unittest.skipIf(os.name=='nt','fcntl and Pi filesystem protocol are validated on Linux')
 class Tests(unittest.TestCase):
@@ -17,12 +19,48 @@ class Tests(unittest.TestCase):
         (self.base/'private').mkdir();self.key=b'synthetic-custody-test-key'
         (self.base/'private/server_qc_hmac').write_bytes(self.key)
         self.request_id=uuid.uuid4().hex
-        for name,value in {'start_gate.json':{'start_unix_ns':1},'stop_gate.json':{'recording_active':False},
-             'status.json':{'state':'pending_qc','recording_active':False},'meta.json':{},
-             'native_capture_summary.json':{'status':'success','fixture':True},
-             'qc_pending.json':{'request_id':self.request_id}}.items():
-            (self.source/name).write_text(json.dumps(value))
-        (self.source/'raw.bin').write_bytes(b'actual fixture bytes, not a real capture')
+        config={'collection_mode':'emg',
+            'cameras':{name:{'camd':'/dev/camd-'+name} for name in ('left','right','bleft','bright')},
+            'wrist_cameras':{name:{'device':'/dev/'+name} for name in ('cam_left_wrist','cam_right_wrist')},
+            'emg':{name:{'port':'/dev/'+name} for name in ('emg_left','emg_right')},
+            'board_imu':{'device':'/dev/board-imu'}}
+        contract=build_contract(config,mode='emg')
+        selection={'selected':contract['selected_devices'],'device_config':config,'collection_mode':'emg',
+                   'required_device_contract':contract}
+        (self.source/'device_selection.json').write_text(json.dumps(selection))
+        summary={'status':'pending_qc','capture_status':'success','qc_state':'pending',
+                 'qc_level':'PENDING','errors':[],
+                 'start_unix_ns':1_800_000_000_000_000_000,
+                 'stop_unix_ns':1_800_000_010_000_000_000}
+        for name in contract['required_devices']:
+            directory=self.source/name;directory.mkdir()
+            if name.startswith('cam_'):
+                (directory/'frames.mp4').write_bytes(b'fixture-video-'+name.encode())
+                (directory/'timestamps.csv').write_text('timestamp\n1\n')
+                summary[name]={'frames':1}
+            elif name.startswith('emg_'):
+                (directory/(name+'.npz')).write_bytes(b'fixture-array-'+name.encode())
+                summary[name]={'emg_frames':1}
+            else:
+                (directory/'raw.csv').write_text('timestamp\n1\n')
+                summary[name]={'frames':1}
+        native={'status':'success','fixture':True}
+        (self.source/'native_capture_summary.json').write_text(json.dumps(native))
+        reference_sha='a'*64
+        (self.source/'meta.json').write_text(json.dumps({'reference_sha256':reference_sha,'collection_mode':'emg'}))
+        (self.source/'meta.yaml').write_text('status: pending_qc\n')
+        (self.source/'capture_summary.json').write_text(json.dumps(summary))
+        (self.source/'start_gate.json').write_text(json.dumps({'start_unix_ns':summary['start_unix_ns'],
+            'start_monotonic_ns':1_000_000_000}))
+        (self.source/'stop_gate.json').write_text(json.dumps({'stop_unix_ns':summary['stop_unix_ns'],
+            'stop_monotonic_ns':11_000_000_000,'recording_active':False}))
+        (self.source/'status.json').write_text(json.dumps({'state':'pending_qc','recording_active':False}))
+        pending={'version':1,'request_id':self.request_id,'session_id':self.sid,'state':'pending',
+            'native_sha256':hashlib.sha256((self.source/'native_capture_summary.json').read_bytes()).hexdigest(),
+            'reference_sha256':reference_sha,'legacy_source':False}
+        pending['input_signature']=portable_input_signature(self.source,contract,require_marker=False)
+        pending['local_input_signature']=input_signature(self.source,contract,require_marker=False)
+        (self.source/'qc_pending.json').write_text(json.dumps(pending))
         project=types.ModuleType('project_paths');project.BASE=self.base;project.PROJECT=self.base.parent
         ledger=types.ModuleType('ledger');storage=types.ModuleType('storage_paths')
         storage.config=lambda:{'expected_uuid':'TEST'}
@@ -43,7 +81,11 @@ class Tests(unittest.TestCase):
         manifest=module.manifest(self.sid)
         self.receipt=signed(dict(version=1,purpose=RAW_PURPOSE,device_id='cp_0020',server_id='fixture-server',
             session_id=self.sid,transaction_id=uuid.uuid4().hex,manifest=manifest,qc_request_id=self.request_id,
-            host_verified=True,host_fsynced=True,host_path='/host/fixture',host_storage_uuid='HOST-TEST'),self.key)
+            host_verified=True,host_fsynced=True,host_path='/host/fixture',host_storage_uuid='HOST-TEST',
+            qc_protocol_version=2,qc_qualification_protocol='required-device-contract-v1',
+            input_signature=pending['input_signature'],local_input_signature=pending['local_input_signature'],
+            input_signature_kind='portable-content-sha256-v1',reference_sha256=reference_sha,
+            required_device_contract_version=contract['version']),self.key)
     def handoff(self):return self.agent.raw_handoff({'receipt':self.receipt})
     def test_raw_handoff_deletes_only_complete_named_fixture_before_qc(self):
         self.assertFalse((self.source/'qc_applied.json').exists())
@@ -90,11 +132,18 @@ class Tests(unittest.TestCase):
         report=resultdir/'artifacts/qc_report.json';report.write_text(json.dumps({'level':'ERROR','streams':{}}))
         result=dict(version=1,session_id=self.sid,request_id=self.request_id,
             native_sha256=self.receipt['manifest']['native_sha256'],level='ERROR',raw_level='ERROR',
+            passed=False,input_signature=self.receipt['input_signature'],
+            local_input_signature=self.receipt['local_input_signature'],
+            reference_sha256=self.receipt['reference_sha256'],checked_input_signature='b'*64,
             artifacts={'qc_report.json':hashlib.sha256(report.read_bytes()).hexdigest()})
         (resultdir/'result.json').write_text(json.dumps(result))
         envelope=signed(dict(version=1,purpose=RESULT_PURPOSE,device_id='cp_0020',server_id='fixture-server',
             session_id=self.sid,handoff_receipt_sha256=sha_value(self.receipt),
-            result_sha256=hashlib.sha256((resultdir/'result.json').read_bytes()).hexdigest(),server_path='/host/results'),self.key)
+            result_sha256=hashlib.sha256((resultdir/'result.json').read_bytes()).hexdigest(),server_path='/host/results',
+            qc_protocol_version=2,qc_qualification_protocol='required-device-contract-v1',
+            input_signature=self.receipt['input_signature'],local_input_signature=self.receipt['local_input_signature'],
+            checked_input_signature='b'*64,reference_sha256=self.receipt['reference_sha256'],
+            passed=False,qualification_receipt_sha256=None),self.key)
         ack=self.agent.apply_handoff_result({'receipt':envelope});self.assertTrue(ack['retake_required'])
         self.assertFalse(self.source.exists());self.assertEqual(ack,self.agent.apply_handoff_result({'receipt':envelope}))
     def test_legacy_cleanup_rejects_raw_receipt_purpose(self):
