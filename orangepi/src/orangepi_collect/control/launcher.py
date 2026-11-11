@@ -855,10 +855,14 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         except (OSError,ValueError,subprocess.TimeoutExpired,ScanProcessError) as exc:
             if isinstance(exc,ScanProcessError) and exc.cleanup_pending:
                 self.remember_pending_owner(exc)
+            elif isinstance(exc,ScanProcessError) and getattr(exc,'ownership_blocked',False):
+                self.remember_pending_owner(exc)
             reason=('设备扫描超时' if isinstance(exc,subprocess.TimeoutExpired)
                 else '设备扫描结果不是有效 JSON' if isinstance(exc,json.JSONDecodeError) else str(exc))
             print('DEVICE SCAN failed '+repr(exc),flush=True)
-            message='设备扫描未完成：'+reason+'。请检查设备后重新扫描。'
+            if isinstance(exc,ScanProcessError) and getattr(exc,'ownership_blocked',False):
+                message='设备所有权恢复未确认，设备状态未知，已保持采集锁定：'+reason+'。请重试恢复或联系维护人员。'
+            else:message='设备扫描未完成：'+reason+'。请检查设备后重新扫描。'
             self.last_help=[message]
             self.scan_ok=False;self.scan_available=[];self.selected_devices=None
             self.required_devices_missing=list(getattr(self,'required_device_contract',{}).get('required_devices',[]))
@@ -1671,9 +1675,21 @@ if __name__=='__main__':
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:
         sys.exit('Another instance is already running')
+    # A previous boot cannot leave its controller or device process group
+    # alive. Reconcile only the independently witnessed run, while this
+    # controller owns the launcher lock; same-boot owners remain fail-closed.
+    try:
+        recovered=Registry(CODE_BASE/'runtime').reconcile_startup(lock)
+        if recovered and not recovered.get('preserved'):
+            print('STARTUP OWNER RECOVERY '+json.dumps(recovered,ensure_ascii=False),flush=True)
+    except (RegistryError,OSError) as exc:
+        # Keep the service/UI available to report the blocked registry state.
+        # The next reservation still performs strict registry validation.
+        print('STARTUP OWNER RECOVERY BLOCKED '+str(exc),flush=True)
     (BASE/'runtime'/'launcher.pid').write_text(str(os.getpid()))
     try:
         controller=Controller(args.smoke,args.image,args.session_dir,args.console)
+        controller.launcher_lock=lock
     except CloudVoiceError as exc:
         print('CLOUD VOICE SAFETY STOP: '+str(exc),flush=True)
         sys.exit(78)

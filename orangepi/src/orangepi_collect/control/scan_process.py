@@ -8,13 +8,14 @@ from scan_registry import spawn_owned, RegistryError, proc_identity
 
 
 class ScanProcessError(RuntimeError):
-    def __init__(self, message, cleanup_pending=False, pgid=None, run=None, child=None, partial_output=None):
+    def __init__(self, message, cleanup_pending=False, pgid=None, run=None, child=None, partial_output=None, ownership_blocked=False):
         super().__init__(message)
         self.cleanup_pending = cleanup_pending
         self.pgid = pgid
         self.run = run
         self.child = child
         self.partial_output = partial_output
+        self.ownership_blocked = ownership_blocked
 
 
 def group_alive(pgid):
@@ -33,7 +34,11 @@ def run_scan(command, registry, timeout=15, grace=.5, kill_grace=1.0, kind="scan
     with tempfile.TemporaryFile(mode='w+t', encoding='utf-8') as out, tempfile.TemporaryFile(mode='w+t', encoding='utf-8') as err, tempfile.TemporaryFile(mode='w+t', encoding='utf-8') as source:
         if input_text is not None:source.write(input_text);source.seek(0)
         try:child,run = spawn_owned(registry,kind,command,stdin=source,stdout=out,stderr=err,env=env)
-        except (RegistryError,OSError) as exc:raise ScanProcessError(str(exc),True) from exc
+        except (RegistryError,OSError) as exc:
+            # A failed reservation did not start a child. Do not turn a
+            # historical registry barrier into this controller's permanent
+            # pending-owner state (which has no run to retry).
+            raise ScanProcessError(str(exc),False,ownership_blocked=True) from exc
         pgid = child.pid
         owner=registry.inspect()
         if not owner or owner.get('run')!=run:raise ScanProcessError('扫描所有权已变化',True,pgid,run,child)

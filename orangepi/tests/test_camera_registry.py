@@ -2,8 +2,9 @@
 import json,os,pathlib,signal,subprocess,sys,tempfile,time,unittest,ast,types
 from unittest.mock import patch,Mock
 ROOT=pathlib.Path(__file__).resolve().parents[1]/'src/orangepi_collect/common'
-sys.path.insert(0,str(ROOT))
+sys.path[:0]=[str(ROOT),str(ROOT.parent/'control')]
 import scan_registry as r
+import scan_process
 from owner_test_support import OwnerTestSupport
 
 class RegistryTests(unittest.TestCase):
@@ -68,6 +69,12 @@ class RegistryTests(unittest.TestCase):
  def test_write_failure_fails_before_spawn(self):
   with patch.object(self.reg,'_write',side_effect=OSError('disk failed')):
    with self.assertRaises(OSError):r.spawn_owned(self.reg,'scan',[sys.executable,'-c','raise SystemExit(97)'])
+ def test_existing_owner_barrier_is_not_misreported_as_our_pending_child(self):
+  with patch.object(scan_process,'spawn_owned',side_effect=r.RegistryError('historical owner remains')):
+   with self.assertRaises(scan_process.ScanProcessError) as caught:
+    scan_process.run_scan([sys.executable,'-c','pass'],self.reg)
+  self.assertFalse(caught.exception.cleanup_pending);self.assertTrue(caught.exception.ownership_blocked)
+  self.assertIsNone(caught.exception.run);self.assertIsNone(caught.exception.child)
  def test_late_wrong_uuid_registration_rejected(self):
   self.reg.reserve('scan')
   with self.assertRaises(r.RegistryError):self.reg.register('wrong-id')

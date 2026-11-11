@@ -54,6 +54,16 @@ class Tests(unittest.TestCase):
     child=Mock();error=ScanProcessError(kind+' pending',True,123,'same-run',child);c.remember_pending_owner(error)
     self.assertFalse(c.retry_pending_owner(force=True));self.assertEqual(c.pending_camera_owner[0],'same-run')
     self.assertTrue(c.retry_pending_owner(force=True));self.assertFalse(c.scan_cleanup_pending);self.assertEqual(c.camera_registry.finish.call_args.args,('same-run',));self.assertEqual(child.poll.call_count,2)
+ def test_missing_run_retries_startup_reconciliation_instead_of_sticking(self):
+  from scan_registry import RegistryError
+  import web_controls
+  c=web_controls.WebControls();c.camera_registry=Mock();c.launcher_lock=object()
+  c.camera_registry.reconcile_startup.side_effect=[RegistryError('old owner remains'),None]
+  c.remember_pending_owner(ScanProcessError('old owner remains',True,ownership_blocked=True))
+  self.assertTrue(c.owner_reconcile_pending);self.assertIsNone(c.pending_camera_owner[0])
+  self.assertFalse(c.retry_pending_owner(force=True));self.assertTrue(c.scan_cleanup_pending)
+  self.assertTrue(c.retry_pending_owner(force=True));self.assertFalse(c.scan_cleanup_pending)
+  self.assertEqual(c.camera_registry.reconcile_startup.call_count,2)
  def test_capture_late_cleanup_keeps_run_until_released(self):
   from scan_registry import RegistryError
   path=ROOT/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller')

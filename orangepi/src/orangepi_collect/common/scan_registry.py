@@ -346,22 +346,46 @@ class Registry:
             if group_exists(value['pgid']):raise RegistryError('设备进程组尚未退出')
             if terminal:self._remove_active()
             else:self._terminal(value,'normal_confirmed')
-    def _check_reboot_identities(self,witness,record):
-        checks=[(witness.get('owner_pid'),witness.get('owner_start'))]
+    def _check_reboot_identities(self,witness,record,record_authenticated=False):
+        # A different kernel boot proves every process from the witnessed run
+        # is gone. Numeric PID/PGID values may already belong to unrelated
+        # processes in this boot, so never compare, signal, or probe them here.
+        # Keep the durable run/controller tuple well-formed before clearing it.
+        if (not isinstance(witness,dict) or not valid_boot(witness.get('boot'))
+                or witness.get('schema')!=1 or not isinstance(witness.get('run'),str)
+                or not re.fullmatch('[0-9a-f]{32}',witness.get('run',''))
+                or not isinstance(witness.get('nonce'),str) or not witness['nonce']
+                or witness.get('root')!=str(self.root.resolve())
+                or witness.get('kind') not in ('scan','preview','capture','calibration','settings','diagnostic')
+                or type(witness.get('owner_pid')) is not int or witness['owner_pid']<=1
+                or type(witness.get('owner_start')) is not int or witness['owner_start']<=1
+                or not isinstance(witness.get('reserved_sha256'),str)):
+            raise RegistryError('历史控制器身份不完整，无法维护恢复')
+        initial={k:witness[k] for k in ('schema','run','nonce','boot','kind','owner_pid','owner_start')}
+        initial['phase']='reserved'
+        if checksum(initial)!=witness['reserved_sha256']:
+            raise RegistryError('历史控制器预留见证不一致')
+        if record_authenticated:
+            for key in ('schema','run','nonce','boot','kind','owner_pid','owner_start'):
+                if record.get(key)!=witness.get(key):
+                    raise RegistryError('完整性有效的设备记录与预留见证身份不一致')
+            if record.get('phase') not in ('reserved','registered','terminal'):
+                raise RegistryError('完整性有效的设备记录状态无效')
+            if record.get('phase')=='registered' and (
+                    any(type(record.get(k)) is not int or record[k]<=1 for k in ('wrapper_pid','wrapper_start','pgid','sid'))
+                    or record['wrapper_pid']!=record['pgid'] or record['wrapper_pid']!=record['sid']):
+                raise RegistryError('完整性有效的设备进程身份不完整')
         if isinstance(record,dict):
-            checks.extend([(record.get('owner_pid'),record.get('owner_start')),
-                           (record.get('wrapper_pid'),record.get('wrapper_start'))])
-        for pid,start in checks:
-            if pid is None and start is None:continue
-            if type(pid) is not int or pid<=1 or type(start) is not int or start<=1:
-                raise RegistryError('历史进程身份不完整，无法维护恢复')
-            identity=proc_identity(pid)
-            if identity and identity['start']==start and identity['state'] not in ('Z','X'):
-                raise RegistryError('历史记录匹配的进程仍在运行')
-        if isinstance(record,dict) and record.get('pgid') is not None:
-            pgid=record['pgid']
-            if type(pgid) is not int or pgid<=1:raise RegistryError('历史进程组无效')
-            if group_exists(pgid):raise RegistryError('历史进程组仍存在或被复用')
+            for key in ('run','nonce','boot','owner_pid','owner_start'):
+                if key not in record:continue
+                if key in ('run','nonce') and not isinstance(record[key],str):
+                    raise RegistryError('历史记录缺少有效控制器实例')
+                if key=='boot' and not valid_boot(record[key]):
+                    # A damaged record is preserved in the raw audit archive;
+                    # the independently checksummed witness remains authority.
+                    continue
+                if key in ('owner_pid','owner_start') and (type(record[key]) is not int or record[key]<=1):
+                    continue
 
     def _archive_bytes(self,path,data):
         path.parent.mkdir(parents=True,exist_ok=True)
@@ -391,9 +415,12 @@ class Registry:
             receipt_path=self.root/'camera_owner_audit'/(expected_run+'.json')
             receipt=self._read_checked(receipt_path)
             witness=receipt.get('witness');witness_hash=checksum(witness) if isinstance(witness,dict) else None
-            if (receipt.get('schema')!=1 or receipt.get('run')!=expected_run or receipt.get('new_boot')!=current
+            self._check_reboot_identities(witness,None)
+            if (receipt.get('schema')!=1 or receipt.get('run')!=expected_run
+                or not valid_boot(receipt.get('new_boot'))
                 or not witness_hash or receipt.get('witness_sha256')!=witness_hash
-                or witness.get('run')!=expected_run or witness.get('root')!=str(self.root.resolve())):
+                or witness.get('run')!=expected_run or witness.get('root')!=str(self.root.resolve())
+                or receipt.get('old_boot')!=witness.get('boot') or receipt.get('new_boot')==witness.get('boot')):
                 raise RegistryError('审计收据与当前维护不一致')
             if receipt.get('raw_sha256') is not None:
                 try:archive=(self.root/'camera_owner_audit'/(expected_run+'.registry.raw')).read_bytes()
@@ -426,19 +453,23 @@ class Registry:
         if witness['boot']==current:raise RegistryError('没有独立证据证明设备已重启')
         if record is not None and (record.get('run')!=run or record.get('nonce')!=witness.get('nonce')):
             raise RegistryError('设备记录与见证run或nonce不匹配')
+        record_valid=False
         if record is not None:
             payload=dict(record);digest=payload.pop('integrity_sha256',None)
             try:record_valid=isinstance(digest,str) and hmac.compare_digest(digest,checksum(payload))
             except (TypeError,ValueError):record_valid=False
             if record_valid and record.get('witness_sha256')!=witness_hash:
                 raise RegistryError('设备记录与见证摘要不匹配')
-        self._check_reboot_identities(witness,record)
+        self._check_reboot_identities(witness,record,record_valid)
         audit=self.root/'camera_owner_audit';audit.mkdir(parents=True,exist_ok=True)
         raw_hash=hashlib.sha256(raw).hexdigest() if raw is not None else None
         receipt_path=audit/(run+'.json');raw_path=audit/(run+'.registry.raw')
         if receipt_path.exists():
             receipt=self._read_checked(receipt_path)
-            if (receipt.get('run')!=run or receipt.get('new_boot')!=current or receipt.get('witness_sha256')!=witness_hash):
+            if (receipt.get('run')!=run or not valid_boot(receipt.get('new_boot'))
+                    or receipt.get('old_boot')!=witness.get('boot')
+                    or receipt.get('new_boot')==witness.get('boot')
+                    or receipt.get('witness_sha256')!=witness_hash):
                 raise RegistryError('已有审计收据与当前维护不一致')
             # After terminal replacement the original raw bytes necessarily
             # differ. Their digest must still match the immutable archive.
@@ -451,7 +482,8 @@ class Registry:
         else:
             if raw is not None:self._archive_bytes(raw_path,raw)
             receipt=dict(schema=1,run=run,old_boot=witness['boot'],new_boot=current,witness=witness,
-                witness_sha256=witness_hash,raw_sha256=raw_hash,checks='launcher lock held; matching identities and recorded group absent',at_unix=time.time())
+                witness_sha256=witness_hash,raw_sha256=raw_hash,terminal_reason='after_reboot',successful=False,
+                checks='launcher lock held; prior boot identity confirmed',at_unix=time.time())
             self._write_path(receipt_path,receipt)
         # Preserve all parseable identity evidence until terminal cleanup.
         initial=dict(schema=1,run=run,nonce=witness['nonce'],boot=witness['boot'],kind=witness['kind'],
@@ -476,6 +508,53 @@ class Registry:
                     raise RegistryError('维护锁文件已变化')
                 with self.locked():return self._after_reboot_locked(expected_run)
             finally:fcntl.flock(maintenance,fcntl.LOCK_UN)
+
+    def reconcile_startup(self,launcher_lock):
+        """Recover a witnessed prior-boot owner while the controller lock is held.
+
+        ``launcher_lock`` must be the already-held lock file handle from the
+        controller entry point. Same-boot owners are left untouched; a boot
+        change is enough to prove the old controller and device group died.
+        """
+        try:fd=launcher_lock.fileno()
+        except (AttributeError,OSError) as error:raise RegistryError('采集服务启动锁无效') from error
+        try:
+            opened=os.fstat(fd);current=(self.root/'launcher.lock').stat()
+        except OSError as error:raise RegistryError('无法核对采集服务启动锁') from error
+        if (opened.st_dev,opened.st_ino)!=(current.st_dev,current.st_ino):
+            raise RegistryError('采集服务启动锁已变化')
+        with self.locked():
+            if self._legacy_profile_markers():
+                raise RegistryError('其他采集版本存在旧设备所有权记录，需要维护核对')
+            current_boot=boot_id()
+            if not current_boot:raise RegistryError('无法读取当前内核启动身份')
+            if not (self.record.exists() or self.record.is_symlink()
+                    or self.witness.exists() or self.witness.is_symlink()):
+                return None
+            if self.witness.exists() or self.witness.is_symlink():
+                witness=self._witness()
+                run=witness['run'];old_boot=witness['boot']
+            else:
+                try:record=json.loads(self.record.read_text())
+                except (OSError,ValueError,TypeError) as error:
+                    raise RegistryError('原设备记录无法确定启动来源，需要维护恢复') from error
+                if not isinstance(record,dict) or not isinstance(record.get('run'),str):
+                    raise RegistryError('原设备记录无法确定run，需要维护恢复')
+                run=record['run'];old_boot=record.get('boot')
+                embedded=record.get('terminal_witness')
+                if isinstance(embedded,dict) and valid_boot(embedded.get('boot')):
+                    old_boot=embedded['boot']
+                if not valid_boot(old_boot) and record.get('phase')=='terminal':
+                    receipt_path=self.root/'camera_owner_audit'/(run+'.json')
+                    try:receipt=self._read_checked(receipt_path)
+                    except RegistryError:receipt=None
+                    candidate=receipt.get('witness') if isinstance(receipt,dict) else None
+                    if isinstance(candidate,dict):old_boot=candidate.get('boot')
+            if not valid_boot(old_boot):
+                raise RegistryError('无法核对原设备操作的启动身份，需要维护恢复')
+            if old_boot==current_boot:
+                return dict(run=run,boot=old_boot,preserved=True)
+            return self._after_reboot_locked(run)
 
     def reconcile(self):
         with self.locked():return self._reconcile_locked()

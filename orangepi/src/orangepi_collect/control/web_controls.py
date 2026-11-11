@@ -22,8 +22,13 @@ import wrist_camera_settings as wrist_settings
 class WebControls:
     def remember_pending_owner(self,error):
         self.scan_cleanup_pending=True
-        self.pending_camera_owner=(getattr(error,'run',None),getattr(error,'child',None))
-        self.last_help=['设备清理尚未确认：'+str(error)]
+        run=getattr(error,'run',None);child=getattr(error,'child',None)
+        self.pending_camera_owner=(run,child)
+        self.owner_reconcile_pending=not run
+        if run:
+            self.last_help=['设备清理尚未确认：'+str(error)]
+        else:
+            self.last_help=['上次设备所有权恢复尚未确认；设备状态未知，已保持采集锁定。请重试恢复或联系维护人员。']
 
     def retry_pending_owner(self,force=False):
         if not getattr(self,'scan_cleanup_pending',False):return True
@@ -31,12 +36,22 @@ class WebControls:
         if not force and now-getattr(self,'last_owner_retry',0)<1:return False
         self.last_owner_retry=now
         run,child=getattr(self,'pending_camera_owner',(None,None))
-        if not run:return False  # Incomplete reserved ownership needs maintenance.
+        if not run:
+            if not getattr(self,'owner_reconcile_pending',False):return False
+            try:result=self.camera_registry.reconcile_startup(getattr(self,'launcher_lock',None))
+            except (RegistryError,OSError) as error:
+                self.last_help=['设备所有权仍未恢复，保持采集锁定：'+str(error)]
+                return False
+            if result and result.get('preserved'):return False
+            self.owner_reconcile_pending=False
+            self.pending_camera_owner=None;self.scan_cleanup_pending=False
+            self.last_help=[]
+            return True
         try:
             if child is not None:child.poll()
             self.camera_registry.finish(run)
         except (RegistryError,OSError):return False
-        self.pending_camera_owner=None;self.scan_cleanup_pending=False
+        self.pending_camera_owner=None;self.scan_cleanup_pending=False;self.owner_reconcile_pending=False
         self.last_help=[]
         return True
 
