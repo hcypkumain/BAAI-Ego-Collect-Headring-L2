@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from project_paths import BASE, SRC, devices
@@ -406,6 +407,18 @@ class WebControls:
         result=self.recording_store.retain_error(value['session_id'],value['token'])
         self.reference_refresh(force=True);self.state_write();return result
 
+    def shutdown_device(self):
+        if self.state not in SAFE or getattr(self,'worker',None):raise ValueError('请先结束当前准备或采集')
+        if self.dashboard.privacy.snapshot().get('required'):raise ValueError('采集状态未确认停止')
+        # Reply to the page first, then power off; the helper runs as root via
+        # the narrow sudo rule installed by the service installer.
+        threading.Timer(2.0,self._execute_shutdown).start()
+        return {'shutdown':'scheduled'}
+
+    def _execute_shutdown(self):
+        try:subprocess.run(['sudo','-n','/usr/local/lib/headring-power/shutdown'],timeout=30,check=False)
+        except OSError:pass
+
     def dashboard_tick(self):
         reference_tick=getattr(self,'reference_tick',None)
         if callable(reference_tick):reference_tick()
@@ -515,6 +528,8 @@ class WebControls:
                     else:
                         result=subprocess.run(['pactl','set-sink-volume','@DEFAULT_SINK@',str(job['value'])+'%'],env=self.voice.env,capture_output=True,text=True,timeout=3)
                         if result.returncode:raise ValueError('音量调整失败')
+                elif action=='shutdown':
+                    self.shutdown_device()
                 else:
                     key={'confirm_devices':'a','prepare':'a','measure':'a','start':'a','stop':'a','keep':'a',
                         'retry':'b','restart_calibration':'b','repeat':'b'}[action]

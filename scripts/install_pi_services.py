@@ -25,6 +25,8 @@ def plan(root,include_vendor,include_lan_time=False):
     result.append((root/'services/usb-phone-link/usb_data_host.py',Path('/usr/local/sbin/headring-usb-data-host'),False))
     result.append((root/'orangepi/scripts/usb_tasks_mount_readonly.py',Path('/usr/local/lib/collector-usb-task-import/mount-readonly'),False))
     result.append((root/'deployment/sudoers/collector-usb-task-import',Path('/etc/sudoers.d/collector-usb-task-import'),False))
+    result.append((root/'orangepi/scripts/headring_power_shutdown.sh',Path('/usr/local/lib/headring-power/shutdown'),False))
+    result.append((root/'deployment/sudoers/headring-power-shutdown',Path('/etc/sudoers.d/headring-power-shutdown'),False))
     units=['collector-usb-task-mount.service','collector-usb-task-mount.timer','camd.service','embodied-pi-collect.service','embodied-pi-diagnostics.service','pi-phone-media.service','usb-phone-link.service','headring-usb-data-host.service']
     if include_lan_time:
         units+=['headring-lan-time.service','headring-lan-time-refresh.service','headring-lan-time-refresh.timer']
@@ -160,7 +162,8 @@ def main():
     host_module=importlib.util.module_from_spec(spec);spec.loader.exec_module(host_module)
     allowed,reason=host_module.CaptureGuard(root/'orangepi').allowed()
     if not allowed:parser.error('Finish capture/initialization and use the active station root before installing: '+reason)
-    subprocess.run(['/usr/sbin/visudo','-cf',str(root/'deployment/sudoers/collector-usb-task-import')],check=True,timeout=10)
+    for name in ('collector-usb-task-import','headring-power-shutdown'):
+        subprocess.run(['/usr/sbin/visudo','-cf',str(root/'deployment/sudoers'/name)],check=True,timeout=10)
     conflicting=unsafe_typec_rules(planned={name:root/'deployment/udev'/name for name in ('61-usbdevice.rules','83-typec.rules')})
     if conflicting:parser.error('Other USB role-changing udev rules require review: '+', '.join(conflicting))
     preflight_targets(operations)
