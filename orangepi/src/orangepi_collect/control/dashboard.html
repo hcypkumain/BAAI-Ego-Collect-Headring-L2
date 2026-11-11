@@ -786,7 +786,18 @@ $('#set-eeg-filter').onclick=()=>{const value=$('#eeg-filter').value;settingsDra
 $('#wrist-fps-policy').onchange=()=>{wristPolicyDirty=true;};
 $('#set-wrist-fps-policy').onclick=()=>act('wrist_camera_settings',JSON.parse($('#wrist-fps-policy').value));
 $('#connect').onclick=()=>{token=$('#access-token').value.trim();poll()};$('#access-token').onkeydown=e=>{if(e.key==='Enter')$('#connect').click()};
-$$('#settings-card [data-action]').forEach(b=>{if(b.dataset.action==='shutdown')b.onclick=()=>{if(!confirm('关闭设备电源会断开所有连接，关机后需要手动按电源键重新开机。确定继续吗？'))return;if(!confirm('再次确认：现在立即关闭设备电源吗？'))return;act('shutdown').then(ok=>{if(ok)toast('关机指令已发送，设备将在几秒后关闭。')})}else b.onclick=()=>act(b.dataset.action)});$('#volume').oninput=e=>{settingsDraft.chooseVolume(Number(e.target.value));$('#volume-label').textContent=e.target.value+'%';$('#volume-readback').textContent='新值尚未应用到头环。';};$('#set-volume').onclick=()=>{const value=Number($('#volume').value);settingsDraft.submitVolume(value,status||{});act('volume',value);};
+$$('#settings-card [data-action]').forEach(b=>{
+ if(b.dataset.action==='shutdown'){
+  b.onclick=()=>{
+   if(!confirm('关闭设备电源会断开所有连接，关机后需要手动按电源键重新开机。确定继续吗？'))return;
+   if(!confirm('再次确认：现在立即关闭设备电源吗？'))return;
+   act('shutdown').then(ok=>{if(ok)toast('关机指令已发送，设备将在几秒后关闭。')});
+  };
+ }else{
+  b.onclick=()=>act(b.dataset.action);
+ }
+});
+$('#volume').oninput=e=>{settingsDraft.chooseVolume(Number(e.target.value));$('#volume-label').textContent=e.target.value+'%';$('#volume-readback').textContent='新值尚未应用到头环。';};$('#set-volume').onclick=()=>{const value=Number($('#volume').value);settingsDraft.submitVolume(value,status||{});act('volume',value);};
 // On phones move settings below the data so every adjustment remains available.
 const media=matchMedia('(max-width:760px)');function layout(){if(/^\/(?:phone\/?)?$/.test(location.pathname))return;const card=$('#settings-card');if(media.matches){$('main').append(card);card.classList.add('mobile-settings');card.style.marginTop='18px'}else{$('.side').append(card);card.classList.remove('mobile-settings');card.style.marginTop=''}}media.addEventListener('change',layout);layout();
 
