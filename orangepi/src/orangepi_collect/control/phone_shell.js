@@ -95,6 +95,10 @@
   live.innerHTML='<div id="phone-camera-tabs" role="group" aria-label="相机选择"></div><select id="phone-camera" hidden aria-label="预览相机"></select><div id="phone-live-stage"><img id="phone-live-image" hidden alt="当前相机实时预览"><p id="phone-live-empty">选择一路相机查看最新画面</p></div><div class="phone-preview-toolbar"><span id="phone-live-stats" role="status">等待相机画面</span><label>画质 <select id="phone-live-rate" aria-label="预览画质"><option value="fast">清晰流畅</option><option value="balanced">高清</option><option value="source">原图细节</option></select></label><button id="phone-wrist-mode">腕部模式</button></div>';
   pages.preview.append(live);
   const cameraNames={cam_left_wrist:'腕部候选 A',cam_right_wrist:'腕部候选 B',cam_ros_left:'头环前左',cam_ros_right:'头环前右',cam_ros_bleft:'头环后左',cam_ros_bright:'头环后右'},cameraButtons={};
+  // Match phone_http.preview_allowed: scanning is not a capture session, but
+  // it temporarily owns the devices and must not receive preview requests.
+  const previewStates=new Set(['device_confirm','idle','failed_wait','exhausted','confirm_stop','ready',
+   'wrist_choose','wrist_manual','wrist_baseline','wrist_left','wrist_right','wrist_restore','emg_manual','emg_pairing']);
   for(const [id,label] of Object.entries(cameraNames)){const opt=document.createElement('option');opt.value=id;opt.textContent=label;$('phone-camera').append(opt);const b=button(label,()=>selectCamera(id));b.dataset.camera=id;cameraButtons[id]=b;$('phone-camera-tabs').append(b);}
   $('phone-camera').value='cam_ros_left';
   pages.results.innerHTML='<section class="card phone-result-card"><h3 id="phone-result-badge">本次结果摘要</h3><div id="phone-result-text">等待 Pi 返回录制结果</div><div id="phone-result-history"></div></section>';
@@ -151,7 +155,7 @@
    liveEpoch++;pendingFrame=null;clearTimeout(liveTimer);liveTimer=null;liveController?.abort();liveController=null;frameId='';
    if(clear){$('phone-live-image').hidden=true;$('phone-live-image').removeAttribute('src');if(liveURL)URL.revokeObjectURL(liveURL);liveURL='';$('phone-live-empty').textContent='等待相机画面';$('phone-live-empty').hidden=false;$('phone-live-stage').classList.remove('phone-live-stale');}
   }
-  function active(){return pageId==='preview'&&!auxOpen&&!settingsOpen&&safe();}
+  function active(){return pageId==='preview'&&!auxOpen&&!settingsOpen&&safe()&&previewStates.has(snapshot?.state);}
   function schedule(delay=0){clearTimeout(liveTimer);liveTimer=null;if(active())liveTimer=setTimeout(()=>{liveTimer=null;readFrame();},delay);}
   async function paintLive(){
    if(painting)return;painting=true;
@@ -341,14 +345,22 @@
     fit?.update(value);
     if(!auxOpen&&!settingsOpen&&state!==lastState){
      const guide=state.startsWith('wrist_')||['emg_manual','emg_pairing','preparing','ready'].includes(state);
-     if(state==='device_confirm')navigate('overview');else if(guide||state==='confirm_stop')navigate('workflow');
+     // A background no-data retry returns scanning -> device_confirm without
+     // an operator navigation. Keep the chosen camera/tab across that pause.
+     if(state==='device_confirm'&&pageId!=='preview')navigate('overview');else if(guide||state==='confirm_stop')navigate('workflow');
     }
     lastState=state;updateWorkflow();document.querySelectorAll('[data-action=prepare]').forEach(b=>text(b,global.piPrepareLabel(value)));
     const liveNames=Object.keys(cameraNames).filter(name=>value.previews?.[name]?.live);if(!selectedByUser&&liveNames.length&&!liveNames.includes(currentCamera))selectCamera(liveNames[0],false);
     for(const [id,b] of Object.entries(cameraButtons)){
      const label=(value.devices||[]).find(d=>d.name===id)?.label||cameraNames[id];text(b,label);const pressed=String(id===currentCamera);if(b.getAttribute('aria-pressed')!==pressed)b.setAttribute('aria-pressed',pressed);
     }
-    connections?.update(value);headphones?.update();diagnostics?.update();syncWrists();if(active()){if(liveURL&&performance.now()-lastPresentedAt>2500)$('phone-live-stage').classList.add('phone-live-stale');if(!liveController&&liveTimer===null)schedule();}else if(liveController)stopLive();
+    connections?.update(value);headphones?.update();diagnostics?.update();syncWrists();if(active()){if(liveURL&&performance.now()-lastPresentedAt>2500)$('phone-live-stage').classList.add('phone-live-stale');if(!liveController&&liveTimer===null)schedule();}else{
+     if(liveController||liveTimer!==null||liveURL||pendingFrame)stopLive();
+     if(pageId==='preview'&&!auxOpen&&!settingsOpen&&value.state==='scanning'){
+      text($('phone-live-empty'),'正在扫描设备，完成后自动恢复当前相机预览');
+      text($('phone-live-stats'),'设备扫描中 · 预览暂时暂停');
+     }
+    }
    }
   };
  };
