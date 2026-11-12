@@ -2,8 +2,9 @@ import fcntl, json, os, threading, time, uuid, shutil
 from pathlib import Path
 import metrics, operations, broker_client, imports
 class Jobs:
-    def __init__(self,state,config):
-        self.state=Path(state); self.config=config
+    def __init__(self,state,config,*,registry):
+        operations.require_config(config,registry)
+        self.registry=registry;self.state=Path(state); self.config=json.loads(json.dumps(config))
         self.lockfile=open(self.state/'owner.lock','a+'); os.chmod(self.state/'owner.lock',0o600)
         try: fcntl.flock(self.lockfile,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except OSError:
@@ -33,6 +34,7 @@ class Jobs:
         with os.fdopen(fd,'w') as out: json.dump(data,out,ensure_ascii=False)
         os.replace(tmp,self.state/'jobs.json')
     def refresh(self,device,kind="refresh"):
+        operations.require_config(self.config,self.registry)
         if kind not in ("refresh","check","plan","audit"): raise ValueError("invalid job")
         if device not in self.config['devices']: raise ValueError('invalid device')
         if not self.guard.acquire(False): raise RuntimeError('已有任务正在执行')
@@ -109,6 +111,7 @@ class Jobs:
                 finally: self.guard.release()
         threading.Thread(target=run,daemon=True).start(); return jid
     def apply(self,device,digest,typed,registry):
+        operations.require_config(self.config,self.registry)
         import re
         if device not in self.config['devices'] or typed!=device or registry!=operations.REGISTRY or not re.fullmatch(r'[a-f0-9]{64}',digest or ''): raise ValueError('invalid request')
         plan=(self.cache.get(device,{}) or {}).get('review_plan') or {}
@@ -143,6 +146,7 @@ class Jobs:
                 finally:self.guard.release()
         threading.Thread(target=run,daemon=True).start();return jid
     def usb_read(self,device,kind,scan_id=None,ids=None):
+        operations.require_config(self.config,self.registry)
         if device not in self.config['devices'] or kind not in ('usb_scan','usb_preview'):raise ValueError('invalid request')
         if not self.guard.acquire(False):raise RuntimeError('job busy')
         jid=uuid.uuid4().hex;self.jobs[jid]={'id':jid,'device':device,'kind':kind,'status':'running'}
@@ -165,6 +169,7 @@ class Jobs:
                 finally:self.guard.release()
         threading.Thread(target=run,daemon=True).start();return jid
     def import_apply(self,device,digest,typed,mode,keep):
+        operations.require_config(self.config,self.registry)
         import re
         if device not in self.config['devices'] or typed!=device or keep is not True or mode not in ('emg','eeg') or not isinstance(digest,str) or not re.fullmatch(r'[a-f0-9]{64}',digest):raise ValueError('invalid request')
         row=self.cache.get(device,{}) or {};plan=row.get('import_plan') or {};context=row.get('profile_context') or {}

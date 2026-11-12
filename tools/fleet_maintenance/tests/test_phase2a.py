@@ -3,14 +3,15 @@ from pathlib import Path
 from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-import broker,broker_client,jobs,operations,online,fleet,web
+import broker,broker_client,jobs,operations,online,fleet,web,web_config
+from host.qc.tests.governance_fixtures import sample_registry
 
 class Phase2Tests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.path=Path(self.tmp.name)
-  self.config={'devices':{'cp_0014':'192.168.20.111'},'ssh_config':'unused'};self.digest='a'*64
+  self.registry=sample_registry(('cp_0014',));self.config=web_config.setup(registry=self.registry,selected=['cp_0014'],config={'ssh_config':'unused'});self.digest='a'*64
  def instance(self,executor=None,ttl=10):
-  return broker.Broker(self.path,self.config,{'cp_0014':self.digest},ttl,b'never-log-secret',executor or (lambda *a:{'status':'succeeded'}))
+  return broker.Broker(self.path,self.config,{'cp_0014':self.digest},ttl,b'never-log-secret',executor or (lambda *a,**kw:{'status':'succeeded'}),registry=self.registry)
  def server(self,inst):
   thread=threading.Thread(target=broker.serve,args=(self.path,inst),daemon=True);thread.start()
   for _ in range(100):
@@ -30,11 +31,11 @@ class Phase2Tests(unittest.TestCase):
   self.assertEqual(b.handle({**request,'plan_hash':'b'*64},os.getuid())['error'],'locked_or_out_of_scope')
   b.deadline=time.monotonic()-1;self.assertFalse(b.status()['unlocked']);self.assertNotIn('never-log-secret',json.dumps(b.status()));b.clear();self.assertFalse(any(b.secret))
  def test_real_socket_fake_http_job_end_to_end(self):
-  def fake(state,config,device,digest,factory,progress):
+  def fake(state,config,device,digest,factory,progress,*,registry):
    progress('preflight');progress('applying');progress('verifying');return {'status':'succeeded','code':'verified','components':'root_transaction_verified'}
   b=self.instance(fake);self.server(b)
-  owner=jobs.Jobs(self.path,self.config);self.addCleanup(owner.lockfile.close)
-  owner.cache['cp_0014']={'address':'192.168.20.111','review_plan':{'plan_sha256':self.digest,'address':'192.168.20.111','created_at':time.time()}}
+  owner=jobs.Jobs(self.path,self.config,registry=self.registry);self.addCleanup(owner.lockfile.close)
+  owner.cache['cp_0014']={'address':'192.0.2.1','review_plan':{'plan_sha256':self.digest,'address':'192.0.2.1','created_at':time.time()}}
   srv=ThreadingHTTPServer(('127.0.0.1',0),web.Handler);srv.host='127.0.0.1:%d'%srv.server_port;srv.csrf='csrf';srv.jobs=owner
   threading.Thread(target=srv.serve_forever,daemon=True).start();self.addCleanup(srv.server_close);self.addCleanup(srv.shutdown)
   body=json.dumps({'device':'cp_0014','typed_device':'cp_0014','plan_hash':self.digest,'registry_entry':operations.REGISTRY})
@@ -47,9 +48,9 @@ class Phase2Tests(unittest.TestCase):
    self.assertEqual(owner.jobs[jid]['status'],'succeeded');self.assertEqual(owner.jobs[jid]['events'],['queued','preflight','applying','verifying','succeeded'])
   for path in self.path.glob('*.json'): self.assertNotIn('never-log-secret',path.read_text())
  def test_actual_operation_fake_ssh_socket_path(self):
-  plan={'device':'cp_0014','commit':fleet.PIN,'unknown_approved':False};(self.path/'plans').mkdir();(self.path/'plans'/(self.digest+'.json')).write_text('{}')
-  b=self.instance(operations.execute);self.server(b);owner=jobs.Jobs(self.path,self.config);self.addCleanup(owner.lockfile.close)
-  owner.cache['cp_0014']={'address':'192.168.20.111','review_plan':{'plan_sha256':self.digest,'address':'192.168.20.111','created_at':time.time()}}
+  plan=fleet.bind_registry_plan({'device':'cp_0014','commit':fleet.PIN,'unknown_approved':False},registry=self.registry,device='cp_0014');(self.path/'plans').mkdir();(self.path/'plans'/(self.digest+'.json')).write_text('{}')
+  b=self.instance(operations.execute);self.server(b);owner=jobs.Jobs(self.path,self.config,registry=self.registry);self.addCleanup(owner.lockfile.close)
+  owner.cache['cp_0014']={'address':'192.0.2.1','review_plan':{'plan_sha256':self.digest,'address':'192.0.2.1','created_at':time.time()}}
   live={'files':{},'component_timer':{}}
   with patch.object(broker.web_config,'setup',return_value=self.config),patch.object(online,'load_plan',return_value=plan),patch.object(fleet,'build',return_value={}),patch.object(online,'read_live',return_value=live),patch.object(online,'matches'),patch.object(online,'component_diff',return_value=[]),patch.object(online,'stage_and_apply',return_value='fixture-receipt') as stage,patch.object(online,'verify',return_value={'deploy_ready':True}) as verify,patch.object(broker,'AuthSSH',return_value=object()):
    jid=owner.apply('cp_0014',self.digest,'cp_0014',operations.REGISTRY)
@@ -62,6 +63,7 @@ class Phase2Tests(unittest.TestCase):
   code=self.path/'code.tar';code.write_bytes(b'fake-code');components=self.path/'components.tar';components.write_bytes(b'fake-components')
   bundle={'bundle':str(code),'bundle_sha256':fleet.sha(code.read_bytes()),'component_bundle':str(components),'component_bundle_sha256':fleet.sha(components.read_bytes()),'manifest_sha256':fleet.MANIFEST_SHA256}
   plan={'device':'cp_0014','commit':fleet.PIN,'unknown_approved':False,'baseline':[],'tool_sha256':fleet.sha(online.TOOL.read_bytes()),'component_tool_sha256':fleet.sha(online.COMPONENT_TOOL.read_bytes()),'component_bundle_sha256':bundle['component_bundle_sha256'],'component_manifest_sha256':'b'*64}
+  plan=fleet.bind_registry_plan(plan,registry=self.registry,device='cp_0014')
   calls=[]
   class FakeSSH:
    def __init__(self,*args,**kwargs): pass
@@ -70,8 +72,8 @@ class Phase2Tests(unittest.TestCase):
     calls.append((command,data,interactive))
     if command.startswith('umask 077; mktemp'):return b'/home/orangepi/.headring-stage-AbCd1234\n'
     return b''
-  b=self.instance(operations.execute);self.server(b);owner=jobs.Jobs(self.path,self.config);self.addCleanup(owner.lockfile.close)
-  owner.cache['cp_0014']={'address':'192.168.20.111','review_plan':{'plan_sha256':self.digest,'address':'192.168.20.111','created_at':time.time()}}
+  b=self.instance(operations.execute);self.server(b);owner=jobs.Jobs(self.path,self.config,registry=self.registry);self.addCleanup(owner.lockfile.close)
+  owner.cache['cp_0014']={'address':'192.0.2.1','review_plan':{'plan_sha256':self.digest,'address':'192.0.2.1','created_at':time.time()}}
   live={'files':{},'component_timer':{}}
   with patch.object(broker.web_config,'setup',return_value=self.config),patch.object(online,'load_plan',return_value=plan),patch.object(fleet,'build',return_value=bundle),patch.object(online,'read_live',return_value=live),patch.object(online,'matches'),patch.object(online,'component_diff',return_value=[]),patch.object(online,'verify',return_value={'deploy_ready':True}),patch.object(broker,'AuthSSH',FakeSSH):
    jid=owner.apply('cp_0014',self.digest,'cp_0014',operations.REGISTRY)
@@ -80,10 +82,10 @@ class Phase2Tests(unittest.TestCase):
     time.sleep(.01)
    self.assertEqual(owner.jobs[jid]['status'],'succeeded');self.assertEqual(sum(x[2] for x in calls),1);self.assertTrue(any('remote_components.py' in x[0] and x[2] for x in calls));self.assertEqual(sum(x[1] is not None for x in calls),7)
  def test_partial_failure_not_green(self):
-  def fake(state,config,device,digest,factory,progress):
+  def fake(state,config,device,digest,factory,progress,*,registry):
    progress('preflight');progress('applying');raise operations.PartialFailure('component failed')
-  b=self.instance(fake);self.server(b);owner=jobs.Jobs(self.path,self.config);self.addCleanup(owner.lockfile.close)
-  owner.cache['cp_0014']={'address':'192.168.20.111','review_plan':{'plan_sha256':self.digest,'address':'192.168.20.111','created_at':time.time()}}
+  b=self.instance(fake);self.server(b);owner=jobs.Jobs(self.path,self.config,registry=self.registry);self.addCleanup(owner.lockfile.close)
+  owner.cache['cp_0014']={'address':'192.0.2.1','review_plan':{'plan_sha256':self.digest,'address':'192.0.2.1','created_at':time.time()}}
   with patch.object(broker.web_config,'setup',return_value=self.config):
    jid=owner.apply('cp_0014',self.digest,'cp_0014',operations.REGISTRY)
    for _ in range(200):
@@ -91,15 +93,15 @@ class Phase2Tests(unittest.TestCase):
     time.sleep(.01)
    self.assertEqual(owner.jobs[jid]['status'],'partial_failed');self.assertFalse(b.allowed())
  def test_http_locked_423(self):
-  owner=jobs.Jobs(self.path,self.config);self.addCleanup(owner.lockfile.close)
-  owner.cache['cp_0014']={'address':'192.168.20.111','review_plan':{'plan_sha256':self.digest,'address':'192.168.20.111','created_at':time.time()}}
+  owner=jobs.Jobs(self.path,self.config,registry=self.registry);self.addCleanup(owner.lockfile.close)
+  owner.cache['cp_0014']={'address':'192.0.2.1','review_plan':{'plan_sha256':self.digest,'address':'192.0.2.1','created_at':time.time()}}
   srv=ThreadingHTTPServer(('127.0.0.1',0),web.Handler);srv.host='127.0.0.1:%d'%srv.server_port;srv.csrf='t';srv.jobs=owner
   threading.Thread(target=srv.serve_forever,daemon=True).start();self.addCleanup(srv.server_close);self.addCleanup(srv.shutdown)
   body=json.dumps({'device':'cp_0014','typed_device':'cp_0014','plan_hash':self.digest,'registry_entry':operations.REGISTRY})
   c=http.client.HTTPConnection('127.0.0.1',srv.server_port);c.request('POST','/api/operations/apply',body,{'Origin':'http://'+srv.host,'X-CSRF-Token':'t','Content-Type':'application/json'});self.assertEqual(c.getresponse().status,423);c.close()
  def test_expiry_during_preflight_blocks_apply(self):
   called=[]
-  def fake(state,config,device,digest,factory,progress):
+  def fake(state,config,device,digest,factory,progress,*,registry):
    progress('preflight'); b.deadline=time.monotonic()-1;progress('applying');called.append('root')
   b=self.instance(fake)
   req={'operation':'apply_plan','device':'cp_0014','plan_hash':self.digest,'registry_entry':operations.REGISTRY}
@@ -115,24 +117,24 @@ class Phase2Tests(unittest.TestCase):
   with self.assertRaises(OSError):broker.serve(self.path,b)
   self.assertEqual(path.read_text(),'foreign')
  def test_reconcile_on_restart(self):
-  (self.path/'jobs.json').write_text(json.dumps({'x':{'kind':'apply','status':'applying'}}));o=jobs.Jobs(self.path,self.config)
+  (self.path/'jobs.json').write_text(json.dumps({'x':{'kind':'apply','status':'applying'}}));o=jobs.Jobs(self.path,self.config,registry=self.registry)
   try:self.assertEqual(o.jobs['x']['status'],'interrupted_reconcile')
   finally:o.lockfile.close()
  def test_fixed_operation_drift_never_stages_and_partial(self):
-  plan={'device':'cp_0014','commit':fleet.PIN,'unknown_approved':False};(self.path/'plans').mkdir();(self.path/'plans'/(self.digest+'.json')).write_text('{}')
+  plan=fleet.bind_registry_plan({'device':'cp_0014','commit':fleet.PIN,'unknown_approved':False},registry=self.registry,device='cp_0014');(self.path/'plans').mkdir();(self.path/'plans'/(self.digest+'.json')).write_text('{}')
   manifest=json.loads((fleet.RESOURCES/'manifest.json').read_text());live={'files':{},'component_timer':{}}
   common=[patch.object(online,'load_plan',return_value=plan),patch.object(fleet,'build',return_value={}),patch.object(online,'read_live',return_value=live),patch.object(online,'component_diff',return_value=[])]
   for p in common:p.start();self.addCleanup(p.stop)
   with patch.object(online,'matches',side_effect=online.Failure('drift')),patch.object(online,'stage_and_apply') as stage:
-   with self.assertRaises(online.Failure):operations.execute(self.path,self.config,'cp_0014',self.digest,lambda *a:object())
+   with self.assertRaises(online.Failure):operations.execute(self.path,self.config,'cp_0014',self.digest,lambda *a:object(),registry=self.registry)
    stage.assert_not_called()
   with patch.object(online,'matches'),patch.object(online,'stage_and_apply',side_effect=online.Failure('component failure')):
-   with self.assertRaises(operations.PartialFailure):operations.execute(self.path,self.config,'cp_0014',self.digest,lambda *a:object())
+   with self.assertRaises(operations.PartialFailure):operations.execute(self.path,self.config,'cp_0014',self.digest,lambda *a:object(),registry=self.registry)
  def test_skip_current_no_restart(self):
-  plan={'device':'cp_0014','commit':fleet.PIN,'unknown_approved':False};(self.path/'plans').mkdir();(self.path/'plans'/(self.digest+'.json')).write_text('{}')
+  plan=fleet.bind_registry_plan({'device':'cp_0014','commit':fleet.PIN,'unknown_approved':False},registry=self.registry,device='cp_0014');(self.path/'plans').mkdir();(self.path/'plans'/(self.digest+'.json')).write_text('{}')
   manifest=json.loads((fleet.RESOURCES/'manifest.json').read_text());live={'files':{x['path']:{'sha256':x['sha256']} for x in manifest['files']},'component_timer':{'is-enabled':'enabled','is-active':'active'}}
   with patch.object(online,'load_plan',return_value=plan),patch.object(fleet,'build',return_value={}),patch.object(online,'read_live',return_value=live),patch.object(online,'component_diff',return_value=[{'status':'same'}]*5),patch.object(online,'matches'),patch.object(online,'stage_and_apply') as stage:
-   r=operations.execute(self.path,self.config,'cp_0014',self.digest,lambda *a:object());self.assertEqual(r['status'],'skipped_current');stage.assert_not_called()
+   r=operations.execute(self.path,self.config,'cp_0014',self.digest,lambda *a:object(),registry=self.registry);self.assertEqual(r['status'],'skipped_current');stage.assert_not_called()
 if __name__=='__main__':unittest.main()
 
 class AuthTransportTests(unittest.TestCase):

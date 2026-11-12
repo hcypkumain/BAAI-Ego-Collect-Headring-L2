@@ -9,6 +9,8 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+from dataclasses import asdict
+from host.qc.tests.governance_fixtures import sample_registry
 
 BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
@@ -28,7 +30,9 @@ def fixture():
 
 class FakeSSH:
     instances=[]
-    def __init__(self,*args): self.calls=[]; self.__class__.instances.append(self)
+    def __init__(self,*args):
+        self.calls=[]; self.__class__.instances.append(self)
+        self.argv=['ssh','-F',str(args[0]),args[1]] if args else ['ssh','cp_0014']
     def require_tty(self): pass
     def run(self, command, data=None, interactive=False):
         self.calls.append((command,data,interactive))
@@ -36,6 +40,12 @@ class FakeSSH:
         return b''
 
 class OnlineTests(unittest.TestCase):
+    def setUp(self):
+        temp=tempfile.TemporaryDirectory();self.addCleanup(temp.cleanup)
+        self.registry=sample_registry(('cp_0014',));self.registry_path=Path(temp.name)/'registry.json'
+        self.registry_path.write_text(json.dumps({'schema_version':1,'devices':[asdict(d) for d in self.registry.devices]}))
+        patcher=mock.patch.object(online,'config_for',return_value={'user':'fixture','hostkeyalias':'test-key-cp_0014'})
+        patcher.start();self.addCleanup(patcher.stop)
     def test_embedded_production_preflight_compiles(self):
         import importlib.util
         spec=importlib.util.spec_from_file_location('real_preflight',online.PREFLIGHT)
@@ -135,24 +145,25 @@ class OnlineTests(unittest.TestCase):
             bundle={'manifest_sha256':'m','bundle':str(pkg),'bundle_sha256':fleet.sha(pkg.read_bytes())}
             def build(_): return dict(bundle)
             def read(_ssh,_manifest): return copy.deepcopy(live)
-            with mock.patch.object(fleet,'build',side_effect=build), mock.patch.object(fleet.json,'loads',return_value=manifest), \
+            resources=state/'resources';resources.mkdir();(resources/'manifest.json').write_text(json.dumps(manifest))
+            with mock.patch.object(fleet,'build',side_effect=build), mock.patch.object(fleet,'RESOURCES',resources), \
                  mock.patch.object(online,'SSH',FakeSSH), mock.patch.object(online,'read_live',side_effect=read), \
                  mock.patch.object(online,'stage_and_apply',return_value='/var/backups/example') as apply, \
                  mock.patch.object(online,'stage_components_verify',return_value='/var/backups/verify'), \
                  mock.patch.object(online,'load_plan') as load:
                 # Avoid patching global json.loads when reading stored plan by constructing it directly.
-                load.return_value=online.prepare_plan(live,manifest,'cp_0014',bundle)
+                load.return_value=fleet.bind_registry_plan(online.prepare_plan(live,manifest,'cp_0014',bundle),registry=self.registry,device='cp_0014')
                 out=io.StringIO()
                 with contextlib.redirect_stdout(out):
-                    rc=fleet.main(['--targets','cp0014','--address','cp0014=192.0.2.4','--state-dir',tmp])
+                    rc=fleet.main(['--registry',str(self.registry_path),'--targets','cp_0014','--address','cp_0014=192.0.2.1','--state-dir',tmp])
                 self.assertEqual(rc,0); self.assertIn('plan_ready',out.getvalue()); apply.assert_not_called()
                 out=io.StringIO()
                 with contextlib.redirect_stdout(out):
-                    rc=fleet.main(['--targets','cp0014','--state-dir',tmp,'--apply','--accepted-plan','a'*64])
+                    rc=fleet.main(['--registry',str(self.registry_path),'--targets','cp_0014','--state-dir',tmp,'--apply','--accepted-plan','a'*64])
                 self.assertEqual(rc,3); self.assertIn('code_verified',out.getvalue()); self.assertIn('needs_system_components',out.getvalue())
                 apply.assert_called_once()
                 with contextlib.redirect_stdout(io.StringIO()):
-                    rc=fleet.main(['--targets','cp0014','--state-dir',tmp,'--verify','--accepted-plan','a'*64])
+                    rc=fleet.main(['--registry',str(self.registry_path),'--targets','cp_0014','--state-dir',tmp,'--verify','--accepted-plan','a'*64])
                 self.assertEqual(rc,3)
 
     def test_verify_rejects_bad_installed_hash(self):
@@ -187,11 +198,12 @@ class OnlineTests(unittest.TestCase):
             bundle={'manifest_sha256':'m','bundle':str(pkg),'bundle_sha256':fleet.sha(pkg.read_bytes()),
                     'component_bundle':str(usb),'component_bundle_sha256':fleet.sha(usb.read_bytes()),
                     'component_manifest_sha256':'b'*64,'components':components}
-            plan=online.prepare_plan(live,manifest,'cp_0014',bundle)
-            with mock.patch.object(fleet,'build',return_value=bundle), mock.patch.object(fleet.json,'loads',return_value=manifest), \
+            plan=fleet.bind_registry_plan(online.prepare_plan(live,manifest,'cp_0014',bundle),registry=self.registry,device='cp_0014')
+            resources=root/'resources';resources.mkdir();(resources/'manifest.json').write_text(json.dumps(manifest))
+            with mock.patch.object(fleet,'build',return_value=bundle), mock.patch.object(fleet,'RESOURCES',resources), \
                  mock.patch.object(online,'SSH',FakeSSH), mock.patch.object(online,'read_live',side_effect=lambda *_:copy.deepcopy(live)), \
                  mock.patch.object(online,'load_plan',return_value=plan), contextlib.redirect_stdout(io.StringIO()) as out:
-                rc=fleet.main(['--targets','cp0014','--state-dir',tmp,'--apply','--accepted-plan','a'*64])
+                rc=fleet.main(['--registry',str(self.registry_path),'--targets','cp_0014','--state-dir',tmp,'--apply','--accepted-plan','a'*64])
             self.assertEqual(rc,0); self.assertIn('all_ready',out.getvalue())
             calls=FakeSSH.instances[-1].calls; commands=[x[0] for x in calls if x[2]]
             self.assertEqual(len(commands),1); self.assertIn('remote_transaction.py',commands[0]); self.assertIn('remote_components.py',commands[0]); self.assertIn('--verify',commands[0])

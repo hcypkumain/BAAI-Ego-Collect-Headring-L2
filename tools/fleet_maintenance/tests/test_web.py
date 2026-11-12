@@ -3,14 +3,16 @@ from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
-import web, jobs, metrics
+import web, jobs, metrics,web_config
+from host.qc.tests.governance_fixtures import sample_registry
 from http.server import ThreadingHTTPServer
 
 class WebTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
-        self.config={'devices':{'cp_0014':'192.168.20.111'}}
-        self.owner=jobs.Jobs(self.temp.name,self.config)
+        self.registry=sample_registry(('cp_0014',))
+        self.config=web_config.setup(registry=self.registry,selected=['cp_0014'],config={'ssh_config':'synthetic'})
+        self.owner=jobs.Jobs(self.temp.name,self.config,registry=self.registry)
         self.addCleanup(self.owner.lockfile.close)
         self.server=ThreadingHTTPServer(('127.0.0.1',0),web.Handler)
         self.server.host='127.0.0.1:%d'%self.server.server_port; self.server.csrf='test-token'; self.server.jobs=self.owner
@@ -32,7 +34,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.req('POST','/api/refresh',{**h,'X-CSRF-Token':'bad'},'{}')[0],403)
         self.assertEqual(self.req('POST','/api/refresh',h,'{"device":"cp_9999"}')[0],400)
     def test_owner_flock(self):
-        with self.assertRaises(BlockingIOError): jobs.Jobs(self.temp.name,self.config)
+        with self.assertRaises(BlockingIOError): jobs.Jobs(self.temp.name,self.config,registry=self.registry)
     def test_identity_mismatch_does_not_replace_data(self):
         self.owner.cache['cp_0014']={'identity':'cp_0014','history_cache':{'saved':3}}
         with patch.object(metrics,'collect',return_value={'identity_mismatch':True,'checked_at':1}):

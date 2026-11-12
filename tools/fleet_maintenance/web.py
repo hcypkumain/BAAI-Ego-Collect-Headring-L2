@@ -1,8 +1,11 @@
 """Local fleet dashboard with terminal-unlocked reviewed operations."""
-import json, secrets, sys, re
+import argparse,json, secrets, sys, re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
+if __name__=='__main__':
+    for root in (Path(__file__).resolve().parents[2],Path(__file__).resolve().parent):
+        sys.path.insert(0,str(root))
 import web_config, jobs, fleet, operations, broker_client
 
 class Handler(BaseHTTPRequestHandler):
@@ -75,11 +78,16 @@ class Handler(BaseHTTPRequestHandler):
         except RuntimeError: return self.send(409,{'error':'job busy'})
         self.send(202,{'job':jid})
 
-def main():
-    config=web_config.setup()
-    try: owner=jobs.Jobs(web_config.STATE,config)
+def main(argv=None):
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--registry',required=True,type=Path);parser.add_argument('--targets',required=True,nargs='+',type=fleet.target)
+    parser.add_argument('--transport-config',required=True,type=Path);parser.add_argument('--state-dir',type=Path,default=web_config.STATE)
+    parser.add_argument('--port',type=int,default=0);args=parser.parse_args(argv)
+    registry,config=operations.load_inputs(args.registry,args.targets,args.transport_config)
+    args.state_dir.mkdir(parents=True,exist_ok=True,mode=0o700)
+    try: owner=jobs.Jobs(args.state_dir,config,registry=registry)
     except BlockingIOError: sys.exit('UI already running for this user')
-    port=int(sys.argv[1]) if len(sys.argv)>1 else 0
+    port=args.port
     if not 0<=port<=65535: sys.exit('invalid port')
     server=ThreadingHTTPServer(('127.0.0.1',port),Handler)
     server.host='127.0.0.1:%d'%server.server_port; server.jobs=owner; server.csrf=secrets.token_urlsafe(32)

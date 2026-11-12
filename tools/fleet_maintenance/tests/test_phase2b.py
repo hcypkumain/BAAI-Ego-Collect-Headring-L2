@@ -3,7 +3,11 @@ from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-import zip_preview,imports,broker,operations
+import zip_preview,imports,broker,operations,web_config
+from host.qc.tests.governance_fixtures import sample_registry
+TEST_REGISTRY=sample_registry(('cp_0014',))
+def fixture_config():
+ return web_config.setup(registry=TEST_REGISTRY,selected=['cp_0014'],config={'ssh_config':'synthetic'})
 
 def png():
  b=io.BytesIO();Image.new('RGB',(5,6),(50,70,80)).save(b,format='PNG');return b.getvalue()
@@ -49,7 +53,7 @@ class ZipTests(unittest.TestCase):
     with self.assertRaises(ValueError):imports.preview(state,{'devices':{'cp_0014':'192.168.20.111'}},'cp_0014',sid,['b'*32])
     remote.assert_not_called()
  def test_broker_operation_scope_separation(self):
-  cfg={'devices':{'cp_0014':'192.168.20.111'}};b=broker.Broker('/tmp',cfg,{'cp_0014':'a'*64},30,b'',operation='import_tasks')
+  cfg=fixture_config();b=broker.Broker('/tmp',cfg,{'cp_0014':'a'*64},30,b'',operation='import_tasks',registry=TEST_REGISTRY)
   r=b.handle({'operation':'apply_plan','device':'cp_0014','plan_hash':'a'*64,'registry_entry':operations.REGISTRY},os.getuid())
   self.assertEqual(r['error'],'invalid_request');b.clear()
 if __name__=='__main__':unittest.main()
@@ -88,7 +92,7 @@ class FakeControllerTests(unittest.TestCase):
     with patch.object(sys,'stdin',io.StringIO(json.dumps(payload))),contextlib.redirect_stdout(output):ns['main']()
     return [json.loads(x) for x in output.getvalue().splitlines()]
    with patch.dict(ns,{'Path':fake_path,'mount_roots':lambda:[usb],'snapshot':lambda *args:'f'*64}),patch('urllib.request.urlopen',side_effect=fake_http),patch('subprocess.run',return_value=Service()),patch('time.sleep',return_value=None):
-    config={'devices':{'cp_0014':'192.168.20.111'}}
+    config=fixture_config()
     def fake_remote(config,device,payload,**kw):
      lines=call(payload)
      for line in lines[:-1]:
@@ -96,14 +100,14 @@ class FakeControllerTests(unittest.TestCase):
      return lines[-1]
     with patch.object(imports,'remote',side_effect=fake_remote),patch.object(broker.web_config,'setup',return_value=config):
      scan=imports.scan(top/'local',config,'cp_0014');preview=imports.preview(top/'local',config,'cp_0014',sid,[zipid]);self.assertEqual(preview['new_unique'],1);self.assertEqual(posted,['scan'])
-     instance=broker.Broker(top/'local',config,{'cp_0014':preview['plan_sha256']},60,b'',imports.execute,operation='import_tasks')
+     instance=broker.Broker(top/'local',config,{'cp_0014':preview['plan_sha256']},60,b'',imports.execute,operation='import_tasks',registry=TEST_REGISTRY)
      req={'operation':'import_tasks','device':'cp_0014','plan_hash':preview['plan_sha256'],'registry_entry':imports.REGISTRY}
      apply=instance.handle(req,os.getuid())['result'];self.assertEqual(apply['status'],'succeeded');self.assertTrue(apply['protected_unchanged']);self.assertEqual(len(posted),2);self.assertEqual(posted[-1]['action'],'usb_task_import')
      instance.clear()
 
 class ImportFlowTests(unittest.TestCase):
  def test_plan_broker_fixed_operation_and_one_shot(self):
-  cfg={'devices':{'cp_0014':'192.168.20.111'},'ssh_config':'fake'};sid='a'*32;zipid='b'*32;calls=[]
+  cfg=fixture_config();sid='a'*32;zipid='b'*32;calls=[]
   def fake_remote(config,device,payload,**kw):
    calls.append(payload['op'])
    if payload['op']=='scan':return {'status':'ok','mode':'emg','context':'emg:5','scan':{'scan_id':sid,'catalog_revision':4,'files':[{'id':zipid,'relative_path':'task.zip','name':'task.zip','size_bytes':100}]}}
@@ -112,7 +116,7 @@ class ImportFlowTests(unittest.TestCase):
    return {'status':'succeeded','revision':5,'verified_unique':1,'old_lists_preserved':True,'protected_unchanged':True}
   with tempfile.TemporaryDirectory() as t,patch.object(imports,'remote',side_effect=fake_remote),patch.object(broker.web_config,'setup',return_value=cfg):
    scan=imports.scan(t,cfg,'cp_0014');plan=imports.preview(t,cfg,'cp_0014',scan['scan_id'],[zipid]);self.assertEqual(calls,['scan','preview'])
-   b=broker.Broker(t,cfg,{'cp_0014':plan['plan_sha256']},60,b'',imports.execute,operation='import_tasks')
+   b=broker.Broker(t,cfg,{'cp_0014':plan['plan_sha256']},60,b'',imports.execute,operation='import_tasks',registry=TEST_REGISTRY)
    req={'operation':'import_tasks','device':'cp_0014','plan_hash':plan['plan_sha256'],'registry_entry':imports.REGISTRY}
    events=[];result=b.handle(req,os.getuid(),events.append)
    self.assertEqual(result['result']['status'],'succeeded');self.assertEqual(calls,['scan','preview','apply']);self.assertEqual([x['event'] for x in events],['preflight','applying'])
@@ -122,11 +126,11 @@ class ImportFlowTests(unittest.TestCase):
 class GuardTests(unittest.TestCase):
  def test_inactive_mode_blocked_and_no_broker_call(self):
   import jobs,broker_client
-  cfg={'devices':{'cp_0014':'192.168.20.111'}}
+  cfg=fixture_config()
   with tempfile.TemporaryDirectory() as t:
-   owner=jobs.Jobs(t,cfg)
+   owner=jobs.Jobs(t,cfg,registry=TEST_REGISTRY)
    try:
-    owner.cache['cp_0014']={'profile_context':{'active_mode':'emg','generation':5},'import_plan':{'plan_sha256':'a'*64,'address':'192.168.20.111','mode':'eeg','context':'eeg:5','created_at':time.time()}}
+    owner.cache['cp_0014']={'profile_context':{'active_mode':'emg','generation':5},'import_plan':{'plan_sha256':'a'*64,'address':'192.0.2.1','mode':'eeg','context':'eeg:5','created_at':time.time()}}
     with patch.object(broker_client,'status') as status:
      with self.assertRaises(ValueError):owner.import_apply('cp_0014','a'*64,'cp_0014','eeg',True)
      status.assert_not_called()
@@ -153,7 +157,7 @@ class GuardTests(unittest.TestCase):
   import http.client,threading,web,jobs
   from http.server import ThreadingHTTPServer
   with tempfile.TemporaryDirectory() as t:
-   owner=jobs.Jobs(t,{'devices':{}});srv=ThreadingHTTPServer(('127.0.0.1',0),web.Handler);srv.jobs=owner;srv.csrf='t';srv.host='127.0.0.1:%d'%srv.server_port
+   owner=jobs.Jobs(t,fixture_config(),registry=TEST_REGISTRY);srv=ThreadingHTTPServer(('127.0.0.1',0),web.Handler);srv.jobs=owner;srv.csrf='t';srv.host='127.0.0.1:%d'%srv.server_port
    thread=threading.Thread(target=srv.serve_forever,daemon=True);thread.start()
    try:
     h={'Host':srv.host,'Origin':'http://'+srv.host,'X-CSRF-Token':'t','Content-Type':'application/json','Content-Length':str(4*1024**3)}
@@ -164,7 +168,7 @@ class GuardTests(unittest.TestCase):
 class SocketImportTests(unittest.TestCase):
  def test_import_broker_unix_socket_real_plan_with_fake_remote(self):
   import broker_client,threading,socket
-  cfg={'devices':{'cp_0014':'192.168.20.111'}};sid='a'*32;zipid='b'*32;calls=[]
+  cfg=fixture_config();sid='a'*32;zipid='b'*32;calls=[]
   def fake_remote(config,device,payload,**kw):
    calls.append(payload['op'])
    if payload['op']=='scan':return {'status':'ok','mode':'emg','context':'emg:5','scan':{'scan_id':sid,'catalog_revision':4,'files':[{'id':zipid,'relative_path':'task.zip','name':'task.zip','size_bytes':100}]}}
@@ -173,7 +177,7 @@ class SocketImportTests(unittest.TestCase):
    return {'status':'succeeded','revision':5,'verified_unique':1,'old_lists_preserved':True,'protected_unchanged':True}
   with tempfile.TemporaryDirectory() as t,patch.object(imports,'remote',side_effect=fake_remote),patch.object(broker.web_config,'setup',return_value=cfg):
    scan=imports.scan(t,cfg,'cp_0014');plan=imports.preview(t,cfg,'cp_0014',sid,[zipid])
-   b=broker.Broker(t,cfg,{'cp_0014':plan['plan_sha256']},60,b'',imports.execute,operation='import_tasks');thread=threading.Thread(target=broker.serve,args=(t,b),daemon=True);thread.start()
+   b=broker.Broker(t,cfg,{'cp_0014':plan['plan_sha256']},60,b'',imports.execute,operation='import_tasks',registry=TEST_REGISTRY);thread=threading.Thread(target=broker.serve,args=(t,b),daemon=True);thread.start()
    try:
     for _ in range(100):
      if (Path(t)/'broker.sock').exists():break
@@ -198,13 +202,13 @@ class HTTPImportTests(unittest.TestCase):
  def test_http_confirmed_import_via_unix_broker(self):
   import http.client,threading,socket,jobs,web
   from http.server import ThreadingHTTPServer
-  cfg={'devices':{'cp_0014':'192.168.20.111'}};sid='a'*32;zid='b'*32;digest='c'*64
+  cfg=fixture_config();sid='a'*32;zid='b'*32;digest='c'*64
   scan={'scan_id':sid,'mode':'emg','context':'emg:5','revision':2,'files':[{'id':zid,'name':'a.zip','size_bytes':100}]}
   plan={'plan_sha256':digest,'device':'cp_0014','address':cfg['devices']['cp_0014'],'mode':'emg','context':'emg:5','created_at':time.time()}
   def execute(state,config,device,hash_value,progress):progress('preflight');progress('applying');progress('verifying');return {'status':'succeeded','revision':3,'protected_unchanged':True}
   with tempfile.TemporaryDirectory() as t,patch.object(imports,'scan',return_value=scan),patch.object(imports,'preview',return_value=plan),patch.object(broker.web_config,'setup',return_value=cfg):
-   owner=jobs.Jobs(t,cfg);owner.cache['cp_0014']={'profile_context':{'active_mode':'emg','generation':5}}
-   b=broker.Broker(t,cfg,{'cp_0014':digest},60,b'',execute,operation='import_tasks');bt=threading.Thread(target=broker.serve,args=(t,b),daemon=True);bt.start()
+   owner=jobs.Jobs(t,cfg,registry=TEST_REGISTRY);owner.cache['cp_0014']={'profile_context':{'active_mode':'emg','generation':5}}
+   b=broker.Broker(t,cfg,{'cp_0014':digest},60,b'',execute,operation='import_tasks',registry=TEST_REGISTRY);bt=threading.Thread(target=broker.serve,args=(t,b),daemon=True);bt.start()
    for _ in range(100):
     if (Path(t)/'broker.sock').exists():break
     time.sleep(.01)

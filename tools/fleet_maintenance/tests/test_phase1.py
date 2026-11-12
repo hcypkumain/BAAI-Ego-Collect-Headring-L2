@@ -3,7 +3,8 @@ from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-import metrics,jobs
+import metrics,jobs,web_config
+from host.qc.tests.governance_fixtures import sample_registry
 import importlib.util
 spec=importlib.util.spec_from_file_location('phase_probe',ROOT/'resources/metrics_probe.py');probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
 class PhaseTests(unittest.TestCase):
@@ -21,7 +22,8 @@ class PhaseTests(unittest.TestCase):
  def test_cache_backup_and_interrupted_jobs(self):
   with tempfile.TemporaryDirectory() as t:
    p=Path(t);(p/'cache.json').write_text('{"cp_0014":{"online":true}}');(p/'jobs.json').write_text('{"abc":{"status":"running"}}')
-   owner=jobs.Jobs(p,{'devices':{}})
+   registry=sample_registry(('cp_0014',))
+   owner=jobs.Jobs(p,web_config.setup(registry=registry,selected=['cp_0014'],config={'ssh_config':'synthetic'}),registry=registry)
    try:
     self.assertEqual(owner.jobs['abc']['status'],'interrupted');self.assertTrue((p/'cache-v1-backup.json').exists());self.assertFalse(owner.cache['cp_0014']['online'])
    finally:owner.lockfile.close()

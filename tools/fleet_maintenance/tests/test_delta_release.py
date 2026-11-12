@@ -3,11 +3,17 @@ from unittest.mock import patch
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]))
 import delta_release as d
 import fleet, online
+from dataclasses import asdict
+from host.qc.tests.governance_fixtures import sample_registry
 
 class DeltaReleaseTests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup);self.state=pathlib.Path(self.tmp.name)
   self.manifest,self.stable,_,_=d.registered()
+  self.registry=sample_registry(('cp_0022',));self.registry_path=self.state/'registry.json'
+  self.registry_path.write_text(json.dumps({'schema_version':1,'devices':[asdict(x) for x in self.registry.devices]}))
+  patcher=patch.object(online,'config_for',return_value={'user':'fixture','hostkeyalias':'test-key-cp_0022'})
+  patcher.start();self.addCleanup(patcher.stop)
  def live(self,after=False):
   overlay={x['path']:x['sha256'] for x in self.manifest['files']}
   return {'device_id':'cp_0022','project':online.PROJECT,'errors':[],
@@ -37,20 +43,22 @@ class DeltaReleaseTests(unittest.TestCase):
   with self.assertRaises(online.Failure):online.prepare_plan(live,self.stable,'cp_0022',{'manifest_sha256':fleet.MANIFEST_SHA256},True)
  def test_cached_known_host_and_failed_override_never_saved(self):
   output=io.StringIO()
-  with patch.object(online,'config_for',return_value={'hostname':'192.168.20.107'}), \
-       patch.object(online,'SSH') as ssh, patch.object(online,'read_live',side_effect=online.Failure('offline')), contextlib.redirect_stdout(output):
-   code=fleet.main(['--release','eeg-impedance-advisory','--targets','cp_0022','--address','cp_0022=192.168.20.199','--state-dir',str(self.state)])
-  self.assertEqual(code,2);self.assertEqual(json.loads((self.state/'inventory.json').read_text())['cp_0022']['address'],'192.168.20.107')
-  self.assertEqual(ssh.call_count,1);self.assertEqual(ssh.call_args.args[1:3],('cp_0022','192.168.20.199'))
+  with patch.object(online,'SSH') as ssh, patch.object(online,'read_live',side_effect=online.Failure('offline')), contextlib.redirect_stdout(output),contextlib.redirect_stderr(io.StringIO()):
+   with self.assertRaises(SystemExit) as failure:
+    fleet.main(['--registry',str(self.registry_path),'--release','eeg-impedance-advisory','--targets','cp_0022','--address','cp_0022=192.0.2.199','--state-dir',str(self.state)])
+  self.assertEqual(failure.exception.code,2);self.assertFalse((self.state/'inventory.json').exists())
+  self.assertFalse((self.state/'observations.json').exists());ssh.assert_not_called()
+  self.assertEqual(self.registry.devices[0].address,'192.0.2.1')
   self.assertNotIn('password',output.getvalue().lower())
  def test_offline_plan_no_network_and_only_selected(self):
   with patch.object(online,'SSH',side_effect=AssertionError('network forbidden')),contextlib.redirect_stdout(io.StringIO()):
-   self.assertEqual(fleet.main(['--release',d.RELEASE,'--offline-plan','--targets','cp_0022','--state-dir',str(self.state)]),0)
+    self.assertEqual(fleet.main(['--registry',str(self.registry_path),'--release',d.RELEASE,'--offline-plan','--targets','cp_0022','--state-dir',str(self.state)]),0)
  def test_fake_plan_apply_and_already_installed_skip(self):
   before=self.live();after=self.live(True);ssh=unittest.mock.Mock();profile_before={'source':online.PROJECT+'/orangepi/src','policy':'strict','explicit_policy':None}
   profile_after=dict(profile_before,policy='advisory'); out=io.StringIO()
-  cli=['--release',d.RELEASE,'--targets','cp_0022','--state-dir',str(self.state)]
-  with patch.object(online,'config_for',return_value={'hostname':'192.168.20.107'}),patch.object(online,'SSH',return_value=ssh), \
+  cli=['--registry',str(self.registry_path),'--release',d.RELEASE,'--targets','cp_0022','--state-dir',str(self.state)]
+  ssh.argv=['ssh','-F','synthetic','test-cp_0022']
+  with patch.object(online,'SSH',return_value=ssh), \
        patch.object(online,'read_live',side_effect=[before,before,after,after,after]), \
        patch.object(d,'read_profile',side_effect=[profile_before,profile_before,profile_after,profile_after,profile_after]), \
        patch.object(d,'stage_apply',return_value={'status':'applied'}) as apply,contextlib.redirect_stdout(out):
@@ -73,12 +81,13 @@ class DeltaReleaseTests(unittest.TestCase):
     return b''
    def require_tty(self):pass
   ssh=FakeSSH();_,_,bundle,bootstrap=d.registered()
-  result=d.stage_apply(ssh,'cp_0022',bundle,bootstrap)
+  plan=fleet.bind_registry_plan({'device':'cp_0022'},registry=self.registry,device='cp_0022')
+  result=d.stage_apply(ssh,'cp_0022',bundle,bootstrap,registry=self.registry,plan=plan)
   self.assertEqual(result['status'],'applied');self.assertEqual(ssh.commands[1][1],bundle)
   command=ssh.commands[-1][0];self.assertTrue(ssh.commands[-1][2]);self.assertNotIn('\n',command)
   self.assertIn(d.MANIFEST_SHA,command);self.assertNotIn('password',command.lower())
   online.sudo_stdin_command(command)
-  ssh=FakeSSH();path=self.state/'commands.json';self.assertEqual(d.stage_apply(ssh,'cp_0022',bundle,bootstrap,path)['status'],'staged_not_applied')
+  ssh=FakeSSH();path=self.state/'commands.json';self.assertEqual(d.stage_apply(ssh,'cp_0022',bundle,bootstrap,path,registry=self.registry,plan=plan)['status'],'staged_not_applied')
   handoff=json.loads(path.read_text());self.assertIn('-T',handoff['dry_run_argv']);self.assertIn('-T',handoff['apply_argv'])
   self.assertFalse(any(c[2] for c in ssh.commands))
 

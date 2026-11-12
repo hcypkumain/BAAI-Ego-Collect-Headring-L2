@@ -20,9 +20,9 @@ transaction = load('transaction', BASE/'resources/remote_transaction.py')
 
 class FleetTests(unittest.TestCase):
     def test_target_and_address_validation(self):
-        self.assertEqual(fleet.target('cp0014'), 'cp_0014')
-        self.assertEqual(fleet.address('cp0018=192.168.20.9'), ('cp_0018', '192.168.20.9'))
-        for value in ('cp001', 'cp0014;id', '../cp0014'):
+        self.assertEqual(fleet.target('cp_0014'), 'cp_0014')
+        self.assertEqual(fleet.address('cp_0018=192.0.2.9'), ('cp_0018', '192.0.2.9'))
+        for value in ('cp0014', 'cp001', 'cp0014;id', '../cp0014'):
             with self.assertRaises(Exception): fleet.target(value)
 
     def test_identity_and_busy_gates(self):
