@@ -18,6 +18,7 @@ from reference_catalog import valid_id, MAX_REVISION
 from reference_library_http import handle_reference_request
 from reference_access import handle_reference_access
 from phone_http import handle_phone_request
+from snapshot_http import snapshot_get
 
 class DashboardHTTPServer(ThreadingHTTPServer):
     # Six preview requests plus polling can exceed TCPServer's default queue of 5.
@@ -229,6 +230,7 @@ class Dashboard:
                 try:return len(supplied)<=511 and hmac.compare_digest(supplied,owner.token)
                 except (TypeError,UnicodeError):return False
             def do_GET(self):
+                if snapshot_get(self,getattr(owner,'snapshot_publisher',None),self.authorized):return
                 if handle_phone_request(self,owner,'GET'):return
                 if handle_reference_access(self,owner):return
                 if handle_reference_request(self,owner,'GET'):return
@@ -347,6 +349,13 @@ class Dashboard:
         startup_status.live()
 
     def publish(self,value):
+        publisher=getattr(self,'snapshot_publisher',None)
+        if publisher is not None:
+            # Only explicit cached ACK fields; no status getter, paths or probes.
+            evidence={'mode':value.get('collection_mode','unknown')}
+            active=(value.get('worker') or {}).get('recording_active')
+            if type(active) is bool:evidence['recording_active']=active
+            publisher.publish(evidence,origin_instance=publisher.controller_instance)
         value=dict(value);root=value.pop('review_session',None)
         self.demands.state(dict(value,display_blocked=self.privacy.snapshot()['required']))
         with self.lock:self.snapshot=copy.deepcopy(value);self.review_root=root

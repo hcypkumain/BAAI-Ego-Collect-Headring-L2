@@ -14,6 +14,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.valid_host(): return self.send(403,{'error':'host'})
         path=urlsplit(self.path).path
+        if path=='/api/v1/fleet':
+            # Explicit in-process injection only. No URL configuration or SSRF.
+            if '?' in self.path:return self.send(400,{'error':'INVALID_REQUEST'})
+            provider=getattr(self.server,'fleet_read_model',None)
+            if provider is None:return self.send(503,{'error':'SNAPSHOT_UNAVAILABLE'})
+            return self.send(200,provider.snapshot())
+        if path=='/fleet-v1.js':
+            return self.send(200,(Path(__file__).resolve().parents[2]/'host/qc/fleet-v1.js').read_bytes(),'text/javascript; charset=utf-8')
         match=re.fullmatch(r'/api/assets/([a-f0-9]{64})',path)
         if match:
             key=match.group(1)

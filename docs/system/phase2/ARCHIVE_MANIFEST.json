@@ -1,0 +1,82 @@
+[
+  {
+    "source": "phase2/ARCHITECTURE.md",
+    "sha256": "e2b0ec740988845a4d4128c4ff26331d504ff1e0ce5f5062cd8acee535a0e053",
+    "destination": "docs/system/phase2/ARCHITECTURE.md"
+  },
+  {
+    "source": "phase2/CONTRACTS.md",
+    "sha256": "6639d2c3adef6f9bd37b04c5d2db6f16029b1ceb1c44414a2c3d15243ff85a54",
+    "destination": "docs/system/phase2/CONTRACTS.md"
+  },
+  {
+    "source": "phase2/DECISIONS.md",
+    "sha256": "df2638a1642b552c811c4a9fab42e528fb4810a14c98249e5eb6e787af1a34e7",
+    "destination": "docs/system/phase2/DECISIONS.md"
+  },
+  {
+    "source": "phase2/EVIDENCE.json",
+    "sha256": "fe5a2040e57ef99b670d26e94fc42809a813d2db2c6768d94a4b49030bbb69c2",
+    "destination": "docs/system/phase2/EVIDENCE.json"
+  },
+  {
+    "source": "phase2/MIGRATION.md",
+    "sha256": "f38dcc6a39a9be85edd883487f447053d8da0bb9f3758927e416bea36435bb4b",
+    "destination": "docs/system/phase2/MIGRATION.md"
+  },
+  {
+    "source": "phase2/README.md",
+    "sha256": "7223cc6fd4e3115942b17b68cde158ed4f0169fb092e0227d47f8d9393b3a749",
+    "destination": "docs/system/phase2/README.md"
+  },
+  {
+    "source": "phase2/fixtures/README.md",
+    "sha256": "8d837117949dbf40c9308cabe5814f1f7b25169b4d0cab3b896153417bf45188",
+    "destination": "contracts/v1/fixtures/README.md"
+  },
+  {
+    "source": "phase2/fixtures/cases.json",
+    "sha256": "7a728fc1e220b520cb2d1d5453cba75bbb9c337ca13085317b10f6791b747439",
+    "destination": "contracts/v1/fixtures/cases.json"
+  },
+  {
+    "source": "phase2/fixtures/command.json",
+    "sha256": "90483a5b393eed24284467a6b0a17f7aaac7c94f18aa61efa93c493c3c56a470",
+    "destination": "contracts/v1/fixtures/command.json"
+  },
+  {
+    "source": "phase2/fixtures/device.json",
+    "sha256": "c8e46543bc7dab2e88947d56f3db68e2f168f15b40c17d68133d84a8b1b71115",
+    "destination": "contracts/v1/fixtures/device.json"
+  },
+  {
+    "source": "phase2/fixtures/host.json",
+    "sha256": "4a55fa671ccbdb7e8eb9ae93a84aca9e08dcd24433a7ad56d159abcbe528f1cb",
+    "destination": "contracts/v1/fixtures/host.json"
+  },
+  {
+    "source": "phase2/schemas/command-receipt-v1.schema.json",
+    "sha256": "80ab2e4efe3d12e4106b4ee0413d9e3d39ec78626c77d2ee1b322162d5222098",
+    "destination": "contracts/v1/schemas/command-receipt-v1.schema.json"
+  },
+  {
+    "source": "phase2/schemas/common-v1.schema.json",
+    "sha256": "e3560734d933008a47d18e7be4e118a30048127aa8763feac5c87091e0f8af2c",
+    "destination": "contracts/v1/schemas/common-v1.schema.json"
+  },
+  {
+    "source": "phase2/schemas/device-snapshot-v1.schema.json",
+    "sha256": "b4abc6c6be4c37424af33c74abdf0f28426a154e947c5eb7e261065baf26cf35",
+    "destination": "contracts/v1/schemas/device-snapshot-v1.schema.json"
+  },
+  {
+    "source": "phase2/schemas/host-fleet-v1.schema.json",
+    "sha256": "7f2e5e126bce390739a68678cdbbdc5bb16a40a442c4d572f73084e1cefc085e",
+    "destination": "contracts/v1/schemas/host-fleet-v1.schema.json"
+  },
+  {
+    "source": "phase2/validate_examples.py",
+    "sha256": "d8e4111487b9b3e3302698d16318b648c34502a8b922b985bc0a568ad5532ef2",
+    "destination": "contracts/v1/validate_examples.py"
+  }
+]

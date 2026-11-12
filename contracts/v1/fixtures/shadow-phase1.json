@@ -1,0 +1,13 @@
+{
+  "fixture_class": "redacted phase1 summary plus explicitly synthetic legacy inferences, not a status capture",
+  "evidence": "private phase1 AUDIT.md corrections, inherited 2026-11-12 point-in-time only",
+  "devices": [
+    {"device_id":"cp_0014","mode":"unknown","recording_active":null,"clock_trusted":null},
+    {"device_id":"cp_0015","mode":"eeg","recording_active":null,"clock_trusted":false,"clock_gap":"approximately_55h","left_calibration_valid":false,"right_calibration_valid":false,"task_block_grouping_present":false},
+    {"device_id":"cp_0018","mode":"unknown","recording_active":null,"clock_trusted":null},
+    {"device_id":"cp_0020","mode":"unknown","recording_active":null,"clock_trusted":null},
+    {"device_id":"cp_0022","mode":"unknown","recording_active":null,"clock_trusted":null}
+  ],
+  "synthetic_legacy_inferences": {"cp_0015":{"recording_active":false,"block_size":5,"runtime_equals_source":true,"device_today_is_trusted_host_today":true}},
+  "synthetic_ledger_case": {"scope":"explicit list revision and existing rule; no grouping file","WARN_accepted_by_existing_rule":true,"completed":4,"total":10,"pending":2,"reserved":1,"remaining":3}
+}

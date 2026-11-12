@@ -1,0 +1,15 @@
+{
+ "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://headring.invalid/contracts/command-receipt-v1.schema.json",
+ "type":"object","additionalProperties":false,"required":["schema_version","request_id","intent_sha256","correlation_id","device_id","boot_id","controller_instance","session_id","command","target_request_id","state","execution","effect","revision","accepted_at","updated_at","deadline_mono_ms","proof","error"],
+ "properties":{
+  "schema_version":{"const":"1.0"},"request_id":{"$ref":"common-v1.schema.json#/$defs/uuid"},"intent_sha256":{"$ref":"common-v1.schema.json#/$defs/hash"},"correlation_id":{"$ref":"common-v1.schema.json#/$defs/uuid"},"device_id":{"type":"string","pattern":"^cp_[0-9]{4}$"},"boot_id":{"$ref":"common-v1.schema.json#/$defs/uuid"},"controller_instance":{"$ref":"common-v1.schema.json#/$defs/uuid"},"session_id":{"$ref":"common-v1.schema.json#/$defs/id"},"command":{"enum":["START","STOP","CANCEL"]},"target_request_id":{"$ref":"common-v1.schema.json#/$defs/nullableUuid"},"state":{"enum":["accepted","executing","succeeded","rejected","cancelled","failed","unknown"]},"execution":{"enum":["not_started","running","completed","unknown"]},"effect":{"enum":["not_checked","verified","contradicted","unknown"]},"revision":{"type":"integer","minimum":0},"accepted_at":{"anyOf":[{"$ref":"common-v1.schema.json#/$defs/time"},{"type":"null"}]},"updated_at":{"$ref":"common-v1.schema.json#/$defs/time"},"deadline_mono_ms":{"$ref":"common-v1.schema.json#/$defs/count"},
+  "proof":{"anyOf":[{"type":"null"},{"type":"object","additionalProperties":false,"required":["kind","boot_id","controller_instance","session_id","owner_run","resource_generation","ledger_revision","observed_mono_ms","privacy_stop_confirmed"],"properties":{"kind":{"enum":["capture_started","capture_stopped","never_started"]},"boot_id":{"$ref":"common-v1.schema.json#/$defs/uuid"},"controller_instance":{"$ref":"common-v1.schema.json#/$defs/uuid"},"session_id":{"$ref":"common-v1.schema.json#/$defs/id"},"owner_run":{"$ref":"common-v1.schema.json#/$defs/id"},"resource_generation":{"type":"integer","minimum":0},"ledger_revision":{"type":"integer","minimum":0},"observed_mono_ms":{"type":"integer","minimum":0},"privacy_stop_confirmed":{"type":["boolean","null"]}}}]},
+  "error":{"anyOf":[{"$ref":"common-v1.schema.json#/$defs/error"},{"type":"null"}]}
+ },
+ "allOf":[
+  {"if":{"properties":{"state":{"const":"succeeded"}}},"then":{"properties":{"effect":{"const":"verified"},"execution":{"const":"completed"},"proof":{"type":"object"},"error":{"type":"null"}}}},
+  {"if":{"properties":{"state":{"const":"cancelled"}}},"then":{"properties":{"effect":{"const":"verified"},"execution":{"const":"not_started"},"proof":{"type":"object","properties":{"kind":{"const":"never_started"}}}}}},
+  {"if":{"properties":{"state":{"const":"rejected"}}},"then":{"properties":{"execution":{"const":"not_started"},"effect":{"const":"not_checked"},"error":{"type":"object"}}}},
+  {"if":{"properties":{"command":{"const":"CANCEL"}}},"then":{"properties":{"target_request_id":{"type":"string"}}},"else":{"properties":{"target_request_id":{"type":"null"}}}}
+ ]
+}

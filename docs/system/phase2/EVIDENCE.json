@@ -1,0 +1,37 @@
+{
+ "schema_version":"1.0",
+ "document_status":"phase2_design_not_implemented",
+ "date":"2026-11-12",
+ "paths":{"R":"repository","C":"R/orangepi/src/orangepi_collect/control","Q":"existing QC source (logical root)","P1":"private phase1 audit (not archived)","PHONE":"private phone study (not archived)"},
+ "anchors":[
+  {"id":"A01","class":"verified_source","path":"C/dashboard.py","lines":"226-262","finding":"existing auth can be disabled; display-state with client_id registers; status touches demands even cameras=0"},
+  {"id":"A02","class":"verified_source","path":"C/dashboard.py","lines":"173,351-352","finding":"existing cached snapshot and update path are publisher integration points; do not reuse status getter"},
+  {"id":"A03","class":"verified_source","path":"C/launcher.py","lines":"491,514-515,646,710-718,821","finding":"begin/privacy owner binding, finish and scan ownership exist; no complete deadlock proof"},
+  {"id":"A04","class":"verified_source","path":"Q/fleet_monitor/server.py","lines":"123-169,188-251,316-360,368-371","finding":"existing aggregation; normal SSH/status path differs from fault-hold; GET touches; source binds 0.0.0.0; effective runtime auth boundary not verified"},
+  {"id":"A05","class":"verified_source","path":"Q/fleet_monitor/agent.py","lines":"82-111,145-169,175-204","finding":"normalization can infer recording; TodayIndex scans raw by wallclock day; normal status demand side effects"},
+  {"id":"A06","class":"verified_source","path":"Q/fleet_monitor/history.py","lines":"29-59,69-97","finding":"own writable projection SQLite, readonly upstream connections; nonempty merge and saved/standardized true stickiness unsuitable as unified authoritative state"},
+  {"id":"A07","class":"verified_source","path":"R/tools/fleet_maintenance/web.py","lines":"25-34,38-68,70-78","finding":"workbench own job cache and maintenance POST APIs; loopback bind; v1 should consume fleet model"},
+  {"id":"A08","class":"verified_source","path":"Q/service.py","lines":"500-506","finding":"fault hold imports Documents recovery dashboard and avoids receiver/scanner/workers"},
+  {"id":"A09","class":"verified_source","path":"Q/receiver.html","lines":"44,69","finding":"actual fleet UI consumes summary; not Q/index.html"},
+  {"id":"A10","class":"verified_source","path":"C/usb_task_import.py","lines":"54-68,71-92,95-148","finding":"catalog/preferences recovery hashes, mount helper and fallback lacking ro verification, file fingerprint and ZIP constraints"},
+  {"id":"A11","class":"inherited_phase1_source_audit","path":"P1/AUDIT.md","lines":"71-84,102-106","finding":"receiver/retention provenance and mode=ro snapshot of 437 sessions; not rerun against DB"},
+  {"id":"A12","class":"inherited_live_point_in_time","path":"P1/SOL_CP15_LIVE.json","lines":"1-71","base":"f5d03b7b5fb197eb76e78610a0bce672e5cc4853","overlay_manifest_sha256":"36d8059918ce370f7928cc7cd3207e2ac1d26471b3e8dcdef74b98b7888cd62a","finding":"cp15 236 expected source files match f5+36d805; clock approximately 55h behind; role calibration invalid; task policy absent; not runtime or hardware certification"},
+  {"id":"A13","class":"inherited_live_point_in_time","path":"P1/SOL_HOST_LIVE.json","lines":"1-51","finding":"QC readonly and fleet recovery user services active; system processing services inactive; 40177 loopback; alternate 12TB mount seen"},
+  {"id":"A14","class":"inherited_live_point_in_time","path":"PHONE/README.md","lines":"28-35","finding":"phone-link actual v6 differs from repo v8.1; 236 collector hash excludes independent phone service"},
+  {"id":"A15","class":"verified_feature_document","git":"3c9541244a7801bc247d68df73012260f3999e9f","path":"R/docs/phone-usb-tether.md","method":"git show commit:path, no checkout","finding":"offline candidate; focused 33 Python/12 UI evidence reported; not rerun here; no hardware/deployment acceptance"},
+  {"id":"A16","class":"verified_local_status","path":"R","method":"rtk git status --short --branch","finding":"backup/fleet-workbench-impedance-20261112; untracked tools/task_block_size_wip/ preserved"}
+ ],
+ "unknowns":[
+  {"id":"U01","topic":"cp14/18/20/22 current runtime and storage/role","owner":"device release","resolution":"phase5 registered-device readonly window","blocks":"per-device rollout; not phase3 fixtures"},
+  {"id":"U02","topic":"cp15 clock source, calibration, full owner lock graph","owner":"controller/hardware","resolution":"4B model tests plus 5A/B window","blocks":"hardware acceptance"},
+  {"id":"U03","topic":"4TB/12TB identity relationship and independent raw copies","owner":"storage/receiver","resolution":"5E explicit volume/restoration window","blocks":"retention/deletion"},
+  {"id":"U04","topic":"cloud live objects, signed receipt instances and recoverability","owner":"cloud/data chain","resolution":"offline receipt inspection plus scoped 5F window","blocks":"cloud confirmed claim and retention"},
+  {"id":"U05","topic":"effective host/device auth, TLS, monitor exposure and sudo/helper installation","owner":"security/release","resolution":"4E manifest and explicit authentication migration; 5A/D verification","blocks":"production exposure/import"},
+  {"id":"U06","topic":"phone OEM/tether/DHCP/NM connected routes/Wake Lock/STOP","owner":"phone/network","resolution":"5C single-phone window","blocks":"tether acceptance"},
+  {"id":"U07","topic":"manual active-list scope and future completion policy changes","owner":"user policy + task maintainer","resolution":"preserve existing traceable completion rules and ledger, including WARN; only truly unknown scope or policy fields are null; new policy requires separate approval","blocks":"only affected unknown plan fields"}
+ ],
+ "design_targets":["single fleet read-model","pure snapshot GET","bounded causal command journal","unique hardware owner and lock order","context lineage and independent custody/cloud receipts","component BOM and transactional release"],
+ "scope":{"runtime_source_modified":false,"config_modified":false,"devices_contacted":false,"production_services_contacted":false,"database_access":false,"network_changes":false,"deploy":false,"commit":false,"push":false,"subagents_spawned":false},
+ "validation":{"method":"python3 validate_examples.py; pre-existing jsonschema and referencing used, offline registry only; no dependency installation","json_syntax":"9 JSON files passed","schemas":4,"fixture_expectations":25,"fixture_result":"PASS","production_tests":false},
+ "rtk":{"purpose":"compact local git status only; critical evidence via direct source reads/git show","savings":"not measured"}
+}

@@ -1,0 +1,18 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://headring.invalid/contracts/common-v1.schema.json",
+  "$defs":{
+    "id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9][A-Za-z0-9_.:-]*$"},
+    "nullableId":{"anyOf":[{"$ref":"#/$defs/id"},{"type":"null"}]},
+    "uuid":{"type":"string","format":"uuid"},
+    "nullableUuid":{"anyOf":[{"$ref":"#/$defs/uuid"},{"type":"null"}]},
+    "hash":{"type":"string","pattern":"^[0-9a-f]{64}$"},
+    "nullableHash":{"anyOf":[{"$ref":"#/$defs/hash"},{"type":"null"}]},
+    "count":{"type":["integer","null"],"minimum":0},
+    "reason":{"type":["string","null"],"pattern":"^[A-Z][A-Z0-9_]*$","maxLength":64},
+    "time":{"type":"object","additionalProperties":false,"required":["utc","utc_trusted","monotonic_ms"],"properties":{"utc":{"type":["string","null"],"format":"date-time"},"utc_trusted":{"type":["boolean","null"]},"monotonic_ms":{"$ref":"#/$defs/count"}}},
+    "sample":{"type":"object","additionalProperties":false,"required":["source","boot_id","sampled_mono_ms","age_ms","stale_after_ms","quality","reason"],"properties":{"source":{"enum":["controller","worker","device_ledger","resource_sampler","role_registry","release_manifest","phone_observer","host_receiver","legacy_adapter"]},"boot_id":{"$ref":"#/$defs/nullableUuid"},"sampled_mono_ms":{"$ref":"#/$defs/count"},"age_ms":{"$ref":"#/$defs/count"},"stale_after_ms":{"type":"integer","minimum":1},"quality":{"enum":["known","unknown","stale","error"]},"reason":{"$ref":"#/$defs/reason"}}},
+    "context":{"type":"object","additionalProperties":false,"required":["session_id","task_group_id","ref_id","asset_sha256","list_id","list_revision","task_policy_id","task_policy_version","profile_id","profile_epoch"],"properties":{"session_id":{"$ref":"#/$defs/nullableId"},"task_group_id":{"$ref":"#/$defs/nullableId"},"ref_id":{"$ref":"#/$defs/nullableId"},"asset_sha256":{"$ref":"#/$defs/nullableHash"},"list_id":{"$ref":"#/$defs/nullableId"},"list_revision":{"$ref":"#/$defs/nullableId"},"task_policy_id":{"$ref":"#/$defs/nullableId"},"task_policy_version":{"$ref":"#/$defs/nullableId"},"profile_id":{"$ref":"#/$defs/nullableId"},"profile_epoch":{"$ref":"#/$defs/count"}}},
+    "error":{"type":"object","additionalProperties":false,"required":["code","message","retryable","retry_after_ms","correlation_id"],"properties":{"code":{"enum":["AUTH_REQUIRED","FORBIDDEN","INVALID_REQUEST","IDENTITY_MISMATCH","INSTANCE_CHANGED","SESSION_MISMATCH","REVISION_CONFLICT","IDEMPOTENCY_CONFLICT","TOO_LATE","CAPACITY_EXCEEDED","JOURNAL_UNAVAILABLE","OWNER_BUSY","OWNER_UNKNOWN","EFFECT_TIMEOUT","PRIVACY_NOT_READY","ROLE_PROOF_INVALID","MEASUREMENT_STALE","POLICY_UNKNOWN","USB_READONLY_UNVERIFIED","STORAGE_UNAVAILABLE","MANIFEST_CONFLICT","SNAPSHOT_UNAVAILABLE","RECEIPT_EXPIRED","NOT_FOUND"]},"message":{"type":"string","maxLength":256},"retryable":{"type":"boolean"},"retry_after_ms":{"$ref":"#/$defs/count"},"correlation_id":{"$ref":"#/$defs/uuid"}}}
+  }
+}

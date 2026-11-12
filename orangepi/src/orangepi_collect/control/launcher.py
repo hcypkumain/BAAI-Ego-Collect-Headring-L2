@@ -99,7 +99,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
     class OwnerExited(RuntimeError):
         """The current worker can no longer receive control commands."""
 
-    def __init__(self,smoke=0,selected_image=None,session_dir=None,console=False):
+    def __init__(self,smoke=0,selected_image=None,session_dir=None,console=False,snapshot_publisher=None):
+        # Explicit offline injection only. Production remains disabled until 4A.
+        self.snapshot_publisher=snapshot_publisher
         explicit_image=selected_image is not None
         self.console=console
         self.selected_devices=None
@@ -140,6 +142,17 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.preview_owner_run=None
         self.wrist_wizard=None
         self.emg_wizard=None
+
+    def start_dashboard(self):
+        super().start_dashboard()
+        dashboard=getattr(self,'dashboard',None)
+        publisher=getattr(self,'snapshot_publisher',None)
+        if dashboard is not None and publisher is not None:
+            # Reuse the boot identity already read at Dashboard startup; no
+            # additional proc/status/hardware IO for the observation path.
+            boot_id=getattr(dashboard,'boot_id',None)
+            publisher.reset(publisher.device_id,boot_id or publisher.boot_id)
+            dashboard.snapshot_publisher=publisher if boot_id is not None else None
 
     def state_write(self):
         self.ui_revision=getattr(self,'ui_revision',0)+1

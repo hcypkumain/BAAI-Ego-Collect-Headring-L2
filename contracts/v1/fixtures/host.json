@@ -1,0 +1,8 @@
+{
+ "schema_version":"1.0","host_id":"qc-host-1","host_instance":"33333333-3333-4333-8333-333333333333","revision":1,
+ "time":{"utc":"2026-11-12T12:00:00Z","utc_trusted":true,"monotonic_ms":100000},
+ "devices":[{"device_id":"cp_0015","identity_verified":null,"connectivity":"unknown","last_seen_utc":null,"last_seen_age_ms":null,"reason":"NOT_OBSERVED","snapshot":null}],
+ "pipeline":{"source":"host_receiver_projection","observed_at":null,"age_ms":null,"quality":"unknown","receiver_pending":null,"qc_pending":null,"normalized_pending":null,"cloud_pending":null,"failed_attempts":null,"cloud_receipt_verified":null,"cloud_live_verified_at":null,"day_basis":"unknown","reason":"NOT_OBSERVED"},
+ "storage":{"volume_id":"designated-volume","state":"missing","disk_available_bytes":null,"age_ms":0,"independent_copy_verified":null,"reason":"MOUNT_MISSING"},
+ "policy":{"read_only":true,"device_deletion_authorized":false,"host_deletion_authorized":false}
+}

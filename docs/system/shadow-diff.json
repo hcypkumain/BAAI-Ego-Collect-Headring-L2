@@ -1,0 +1,15 @@
+[
+  {"device_id":"cp_0014","field":"mode","classification":"legacy_missing_unknown","reason":"NOT_OBSERVED"},
+  {"device_id":"cp_0015","field":"mode","classification":"known_consistent","reason":null},
+  {"device_id":"cp_0015","field":"clock_trusted","classification":"known_consistent","reason":"DEVICE_CLOCK_APPROX_55H_BEHIND"},
+  {"device_id":"cp_0015","field":"roles.calibration_valid","classification":"known_consistent","reason":"ROLE_PROOF_INVALID"},
+  {"device_id":"cp_0015","field":"recording_active","classification":"legacy_inference_discarded","reason":"WORKER_ACK_ABSENT"},
+  {"device_id":"cp_0015","field":"block_size","classification":"legacy_inference_discarded","reason":"GROUP_POLICY_ABSENT_NOT_LEDGER_ABSENT"},
+  {"device_id":"cp_0015","field":"version.runtime","classification":"legacy_inference_discarded","reason":"SOURCE_NOT_RUNTIME"},
+  {"device_id":"cp_0015","field":"trusted_today","classification":"conflict","reason":"UNTRUSTED_DEVICE_CLOCK"},
+  {"device_id":"cp_0015","field":"plan_progress","classification":"legacy_missing_unknown","reason":"SCOPE_NOT_EXPORTED"},
+  {"device_id":"cp_0018","field":"mode","classification":"legacy_missing_unknown","reason":"NOT_OBSERVED"},
+  {"device_id":"cp_0020","field":"mode","classification":"legacy_missing_unknown","reason":"NOT_OBSERVED"},
+  {"device_id":"cp_0022","field":"mode","classification":"legacy_missing_unknown","reason":"NOT_OBSERVED"},
+  {"device_id":"synthetic-only","field":"WARN_accepted_ledger_completed","classification":"known_consistent","reason":"EXISTING_RULE_UNCHANGED"}
+]

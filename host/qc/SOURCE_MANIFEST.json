@@ -1,0 +1,41 @@
+{
+  "source_root": "Q (existing QC runtime source; archive only, not a deployment)",
+  "files": [
+    {
+      "source": "Q/fleet_monitor/server.py",
+      "sha256_before": "1356fc8d9dd1ed0e0e4046eda5c6c3513acda22150909c0d69c964354281cd18",
+      "bytes": 26613,
+      "destination": "host/qc/fleet_monitor/server.py"
+    },
+    {
+      "source": "Q/fleet_monitor/agent.py",
+      "sha256_before": "de1e53d179cf9aea1c4603bef095bdc5dcc25863daf8b0cf365244b1e11b775e",
+      "bytes": 11535,
+      "destination": "host/qc/fleet_monitor/agent.py"
+    },
+    {
+      "source": "Q/fleet_monitor/history.py",
+      "sha256_before": "10cac80d389223599b834699549bedceb41461a437901203debe4f633568550c",
+      "bytes": 18475,
+      "destination": "host/qc/fleet_monitor/history.py"
+    },
+    {
+      "source": "Q/fleet_monitor/recovery_history.py",
+      "sha256_before": "ae062db6da85ed85457eb0b42b38eac8005ddaf6039831e5b97b8e3516abfa27",
+      "bytes": 21096,
+      "destination": "host/qc/fleet_monitor/recovery_history.py"
+    },
+    {
+      "source": "Q/fleet_monitor/thumbnail.py",
+      "sha256_before": "3b44bf9801d2d3263a9b7672029be81d42310a507c8acea3e6616420a0ec19a6",
+      "bytes": 2385,
+      "destination": "host/qc/fleet_monitor/thumbnail.py"
+    },
+    {
+      "source": "Q/receiver.html",
+      "sha256_before": "e20b07128b18cc82d05059ebf9882000ea8c0fefb8b82085d71219fede50a2ab",
+      "bytes": 48283,
+      "destination": "host/qc/receiver.html"
+    }
+  ]
+}
