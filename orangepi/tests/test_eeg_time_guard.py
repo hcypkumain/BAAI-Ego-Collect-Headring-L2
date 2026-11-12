@@ -15,7 +15,8 @@ class EegTimeGuard(unittest.TestCase):
     with self.subTest(active=active,pending=pending):
      (session/'status.json').write_text(json.dumps({'eeg_impedance':{'active':active,'pending':pending}}))
      with patch.object(module.urllib.request,'urlopen',side_effect=lambda *a,**k:io.StringIO(json.dumps(display))):allowed,reason=module.safe_to_step()
-     self.assertEqual(allowed,not(active or pending))
+     self.assertFalse(allowed)
      if active or pending:self.assertEqual(reason,'eeg_impedance_measurement_active')
+     else:self.assertEqual(reason,'application_ui_active')
 
 if __name__=='__main__':unittest.main()

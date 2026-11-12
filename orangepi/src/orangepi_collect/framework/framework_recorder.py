@@ -282,6 +282,8 @@ class PiBundleRecorder(BaseRecorder):
         return result
 
 if __name__=='__main__':
+    from acquisition_time_lock import acquire
+    acquire()
     from scan_registry import require_member
     require_member()
     ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--wait-for-save',action='store_true');args=ap.parse_args()

@@ -1,0 +1,176 @@
+--- a/orangepi/src/orangepi_collect/common/impedance_quality.py
++++ b/orangepi/src/orangepi_collect/common/impedance_quality.py
+@@ -25,7 +25,14 @@
+ 
+ 
+ def quality_allows_recording(state):
+-    return acceptance_policy(state) == ADVISORY or assess_impedance(state).get('passed') is True
++    policy = acceptance_policy(state)
++    quality = assess_impedance(state)
++    if quality['passed']:
++        return True
++    return (policy == ADVISORY
++            and quality['reason'] == 'channels_not_passed'
++            and quality['expected_count'] > 0
++            and quality['valid_count'] == quality['expected_count'])
+ 
+ 
+ def _number(value):
+--- a/orangepi/src/orangepi_collect/common/eeg_settings.py
++++ b/orangepi/src/orangepi_collect/common/eeg_settings.py
+@@ -13,7 +13,8 @@
+ }
+ DEFAULT = dict(label='OmniBCI 脑电 · 8 个有效通道', port='/dev/omnibci-unconnected',
+                serial='F8:5B:1B:F4:27:44', enabled=True, sample_rate_hz=250,
+-               labels=LAYOUT, disabled_channels=[], filter_preset='general', chunk_seconds=2)
++               labels=LAYOUT, disabled_channels=[], filter_preset='general', chunk_seconds=2,
++               impedance_acceptance_policy='advisory')
+ 
+ 
+ def validate(item):
+--- a/orangepi/src/orangepi_collect/common/impedance_record.py
++++ b/orangepi/src/orangepi_collect/common/impedance_record.py
+@@ -8,7 +8,7 @@
+ import time
+ from impedance_estimator import ALGORITHM, SDK_REFERENCE, NORMAL_RECOVERY_MAX_SAMPLES
+ from impedance_quality import (POLICY, THRESHOLD_KOHM, assess_impedance, quality_matches,
+-    acceptance_policy, ACCEPTANCE_KEY, ADVISORY)
++    acceptance_policy, quality_allows_recording, ACCEPTANCE_KEY, ADVISORY)
+ 
+ SCHEMA_VERSION = 1
+ MAX_RECORD_BYTES = 65536
+@@ -269,6 +269,8 @@
+         quality = assess_impedance(value, expected_mask=frontend['enabled_mask'])
+         if not quality_matches(declared_quality, quality):
+             raise ImpedanceRecordError('impedance project policy evidence is missing or inconsistent; repeat measurement')
++        if require_project_quality and not quality_allows_recording(value):
++            raise ImpedanceRecordError('impedance measurement incomplete or invalid; repeat measurement')
+         if not advisory and quality['passed'] is not True:
+             raise ImpedanceRecordError('impedance not passed: every enabled channel must be valid and below 60 kOhm')
+     if expected_state is not None:
+--- a/orangepi/src/orangepi_collect/control/dashboard.html
++++ b/orangepi/src/orangepi_collect/control/dashboard.html
+@@ -581,14 +581,16 @@
+   return {channel,item,enabled,state,style,text};
+  });
+  const complete=qKnown&&q.expected_count===expected.length&&q.valid_count===expected.length&&q.passed_count===expected.length
+-  &&passed===expected.length&&!stale&&phase==='completed'&&value.loff_off_confirmed===true&&value.frontend_restored===true&&value.normal_frame_confirmed===true;
++   &&passed===expected.length&&!stale&&phase==='completed'&&value.active===false&&value.pending===false&&!value.error&&value.loff_off_confirmed===true&&value.frontend_restored===true&&value.normal_frame_confirmed===true;
+  const accepted=complete&&q.passed===true&&q.state==='pass';
+  let label='等待判定',style='impedance-disabled';
+  if(accepted){label='通过 · '+passed+'/'+expected.length;style='impedance-good'}
+  else if(qKnown&&(q.state==='fail'||q.state==='pass'||stale)){label='不通过 · '+passed+'/'+expected.length;style='impedance-high'}
+  else if(qKnown&&q.state==='pending'){label=(phase==='restoring'||phase==='resuming'?'等待设备恢复':'检测中')+' · '+passed+'/'+expected.length;style='impedance-watch'}
+  else if(qKnown&&q.state==='unavailable')label='未检测';
+- const recovered=phase==='completed'&&!value.active&&!value.pending&&!value.error&&value.window_ready===true
++  const recovered=qKnown&&q.window_ready===true&&q.expected_count===expected.length&&q.valid_count===expected.length
++   &&channels.filter(c=>c.enabled&&c.item.enabled===true&&c.item.reason==='ok'&&typeof c.item.value_kohm==='number'&&Number.isFinite(c.item.value_kohm)&&c.item.value_kohm>=0&&c.item.stale!==true).length===expected.length&&!stale
++   &&phase==='completed'&&value.active===false&&value.pending===false&&!value.error&&value.window_ready===true
+   &&value.loff_off_confirmed===true&&value.frontend_restored===true&&value.normal_frame_confirmed===true;
+  if(advisory&&phase==='completed'){label='检测已结束 · 阻抗仅作参考';style='impedance-watch'}
+  return {accepted,canContinue:accepted||advisory&&recovered,advisory,label,style,channels,stale};
+@@ -605,7 +607,7 @@
+  for(const button of $$('[data-impedance-action="impedance_review"]'))button.textContent=verdict.advisory?'确认结果，继续':'确认通过结果，继续';
+  let note=value.message||value.error||({unavailable:'阻抗检查暂不可用。',not_selected:'本段未选择脑电设备。',awaiting_prepare:'请先准备本段，设备就绪后开始阻抗检查。',initializing:'正在准备本段并连接脑电设备。',interrupted:'上次准备已中断，请重新准备。',not_checked:'开始检查后调整电极接触，全部启用通道低于 60 kΩ 才能通过。',starting:'正在确认检测配置。',measuring:'调整电极接触并观察逐通道结果，等待完整检测窗口。',restoring:'正在关闭检测并恢复原配置。',resuming:'正在等待恢复后的普通脑电数据。',completed:verdict.accepted?(value.can_record?'阻抗已通过并确认，可开始正式录制。':'阻抗已通过，请确认结果后继续。'):'阻抗尚未通过，请调整不通过通道并重新检测。',fault:'检测或设备恢复未确认，请处理错误。'})[phase]||'等待设备状态';
+  if(verdict.advisory&&phase==='not_checked')note='开始检查并记录阻抗；当前版本不按 60 kΩ 拦截采集。';
+- if(verdict.advisory&&phase==='completed'&&!value.error)note=value.can_record?'阻抗结果已记录，普通脑电采样已恢复，可以继续。':'阻抗结果仅作参考，确认结果后继续查看参考图。';
++  if(verdict.advisory&&phase==='completed'&&!value.error)note=!verdict.canContinue?'缺少完整有效读数，请重新检测。':value.can_record?'阻抗结果已记录，普通脑电采样已恢复，可以继续。':'阻抗结果仅作参考，确认结果后继续查看参考图。';
+  if(verdict.stale)note='检测数据已过期，请等待新的完整有效检测窗口。';
+  $('#impedance-note').textContent=note;$('#impedance-note').classList.toggle('error',!!value.error||verdict.stale||!verdict.advisory&&value.quality?.state==='fail');
+  if(s.state==='ready'&&value.required===true&&!value.can_record){$('#step-title').textContent='采集前阻抗检查';$('#instruction').textContent=note}
+--- a/orangepi/src/orangepi_collect/framework/eeg_qc.py
++++ b/orangepi/src/orangepi_collect/framework/eeg_qc.py
+@@ -268,10 +268,15 @@
+             impedance_values_kohm={c['label']:c['value_kohm'] for c in enabled},
+             impedance_review_to_start_seconds=(gate['start_monotonic_ns']-
+                 proof['reviewed_monotonic_ns'])/1e9,
+-            impedance_quality_policy='operator review; no automatic high-impedance threshold')
++            impedance_quality_policy=preflight.get('impedance_acceptance_policy', 'strict'),
++            impedance_quality=preflight.get('quality'),
++            impedance_quality_passed=(preflight.get('quality') or {}).get('passed'))
+         if missing:
+             out.findings.append(self.finding('WARN', '部分启用脑电通道的阻抗无有效读数；已保留原因及人工确认',
+                 field='impedance_preflight.json', detail={'channels':missing}))
++        if isinstance(preflight.get('quality'), dict) and preflight['quality'].get('passed') is False:
++            out.findings.append(self.finding('WARN', '脑电阻抗质量未通过；已保留真实测量结果',
++                field='impedance_preflight.json', detail={'quality':preflight['quality']}))
+         out.findings.append(self.finding('INFO', '已核对本段开始前保存的阻抗检测、人工确认与前端恢复证据',
+             field='impedance_used.json', detail={'measurement_epoch':proof['measurement_epoch'],
+                 'method':preflight['method'], 'units':'kOhm'}))
+--- a/orangepi/tests/test_impedance_advisory.py
++++ b/orangepi/tests/test_impedance_advisory.py
+@@ -5,7 +5,7 @@
+ import sys
+ import tempfile
+ import unittest
+-from unittest.mock import Mock
++from unittest.mock import Mock, patch
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'src/orangepi_collect/common'))
+ import project_paths
+@@ -52,6 +52,25 @@
+         wrong=copy.deepcopy(value);wrong['disabled_channels']=[1]
+         with self.assertRaises(ValueError):validate(wrong)
+ 
++    def test_real_profile_loader_default_and_explicit_policy(self):
++        import os
++        with tempfile.TemporaryDirectory() as root:
++            base=Path(root); (base/'configs').mkdir()
++            with patch.object(project_paths,'BASE',base), patch.object(project_paths,'COLLECTION_MODE','eeg'), \
++                 patch('device_discovery.discover',side_effect=lambda v,b:v), \
++                 patch('wrist_calibration.apply',side_effect=lambda v,b:v), \
++                 patch('emg_calibration.apply',side_effect=lambda v,b:v), \
++                 patch('wrist_camera_settings.apply',side_effect=lambda v,b:v), \
++                 patch.dict(os.environ,{},clear=True):
++                for text,expected in (('eeg: {}\n','advisory'),('eeg:\n  impedance_acceptance_policy: strict\n','strict')):
++                    (base/'configs/devices.yaml').write_text(text)
++                    self.assertEqual(project_paths.devices()['eeg']['impedance_acceptance_policy'],expected)
++
++    def test_review_persist_failure_revokes_gate(self):
++        state,_=fixture(reviewed=False);owner=self.owner(state);owner._save.side_effect=RuntimeError('disk error')
++        with self.assertRaises(RuntimeError):owner.handle(dict(command='IMPEDANCE_REVIEW'))
++        self.assertFalse(owner.state['reviewed']);self.assertFalse(owner.state['can_record'])
++
+     def test_old_impedance_evidence_cannot_authorize_new_eight_channel_start(self):
+         state,frontend=fixture();frontend['enabled_mask']=254
+         state['expected_channel_mask']=254
+@@ -126,13 +145,32 @@
+                 self.assertEqual(persisted['quality']['passed'],value<60)
+                 self.assertEqual(persisted['channels'][1]['value_kohm'],value)
+ 
+-    def test_failed_or_missing_readings_are_retained_as_advisory(self):
+-        state,frontend=fixture()
+-        for row in state['channels']:row.update(value_kohm=None,reason='adc_saturated',accepted_samples=0)
+-        with tempfile.TemporaryDirectory() as root:
+-            persisted,gate=self.bind(root,state,frontend)
+-            self.assertFalse(persisted['quality']['passed']);self.assertEqual(persisted['valid_channel_count'],0)
+-            self.assertEqual(record.validate_start_binding(root,gate,config())['impedance_acceptance_policy'],'advisory')
++    def test_missing_readings_never_authorize_new_start(self):
++        for count in (1, 8):
++            state,frontend=fixture()
++            for row in state['channels'][:count]:row.update(value_kohm=None,reason='adc_saturated',accepted_samples=0)
++            self.assertFalse(quality.quality_allows_recording(state))
++            with tempfile.TemporaryDirectory() as root:
++                persisted=self.save(root,state,frontend)
++                with self.assertRaises(record.ImpedanceRecordError):
++                    record.validate_preflight(root,persisted,config())
++                historical=record._validate_preflight(root,persisted,config(),require_project_quality=False)
++                self.assertEqual(historical['impedance_acceptance_policy'],'advisory')
++
++    def test_qc_warns_high_and_errors_for_tampered_proof(self):
++        from types import SimpleNamespace
++        from eeg_qc import OmniEegImpedance
++        with tempfile.TemporaryDirectory() as root:
++            state,frontend=fixture(270.);persisted,gate=self.bind(root,state,frontend)
++            eeg=Path(root)/'eeg'
++            record.atomic_record(eeg/'metadata.json',dict(config=config(),frontend_config=frontend))
++            check=OmniEegImpedance(); result=check.run(SimpleNamespace(dir=eeg))
++            self.assertEqual(result.level,'WARN')
++            self.assertFalse(result.stats['impedance_quality_passed'])
++            self.assertEqual(result.stats['impedance_values_kohm'][LAYOUT[0]],270.)
++            persisted['channels'][0]['value_kohm']=42.
++            record.atomic_record(eeg/'impedance_preflight.json',persisted)
++            self.assertEqual(check.run(SimpleNamespace(dir=eeg)).level,'ERROR')
+ 
+     def test_record_cannot_silently_change_the_configured_policy(self):
+         state,frontend=fixture()

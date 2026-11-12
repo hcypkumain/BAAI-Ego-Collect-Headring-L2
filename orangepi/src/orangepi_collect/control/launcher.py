@@ -1669,6 +1669,8 @@ if __name__=='__main__':
         except BrokenPipeError:
             sys.stdout.close()
         sys.exit(0)
+    from acquisition_time_lock import acquire as acquire_clock_guard
+    acquire_clock_guard()  # held while controller/UI and its device owners run
     (BASE/'runtime').mkdir(exist_ok=True)
     lock=(CODE_BASE/'runtime'/'launcher.lock').open('w')
     try:

@@ -261,6 +261,8 @@ def run_preview(config):
 
 
 if __name__=='__main__':
+    from acquisition_time_lock import acquire
+    acquire()
     from scan_registry import require_member
     require_member()
     run_preview(json.load(sys.stdin))

@@ -223,6 +223,8 @@ def probe_rows(jobs, timeout=10.0, per_device=8.0):
 
 
 if __name__=='__main__':
+    from acquisition_time_lock import acquire
+    acquire()
     from scan_registry import require_member
     owner=require_member()
     if sys.argv[1:]==['--one']:

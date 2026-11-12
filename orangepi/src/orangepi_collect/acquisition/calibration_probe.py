@@ -58,6 +58,8 @@ def measure(config, seconds=1.8):
 
 
 if __name__ == '__main__':
+    from acquisition_time_lock import acquire
+    acquire()
     from scan_registry import require_member
     require_member()
     # Remain a group anchor during bounded cleanup escalation.

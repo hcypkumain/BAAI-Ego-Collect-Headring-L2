@@ -92,6 +92,8 @@ def measure(config, seconds=3.0):
 
 
 if __name__ == '__main__':
+    from acquisition_time_lock import acquire
+    acquire()
     from scan_registry import require_member
     require_member()
     try:

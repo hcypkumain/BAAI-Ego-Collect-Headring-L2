@@ -66,3 +66,10 @@
 **/*.pyc
 # Capture profiles contain station settings, private runtime and reference data.
 /profiles/
+
+# Fleet workbench local state, imported archives and cached originals.
+/tools/fleet_maintenance/.cache/
+/tools/fleet_maintenance/cache/
+/tools/fleet_maintenance/localstate/
+/tools/fleet_maintenance/state/
+/tools/fleet_maintenance/uploads/

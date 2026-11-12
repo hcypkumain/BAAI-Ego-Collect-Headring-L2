@@ -75,6 +75,10 @@ class IsolatedHeadbandPreviewSource:
 
 def child_main(args):
     sys.path.insert(0,args.source_root)
+    # The encoder may survive its parent briefly: hold its own host lock until
+    # process exit, before it touches camd or initializes the pipeline.
+    from orangepi_collect.common.acquisition_time_lock import acquire
+    acquire()
     # The child must not outlive the preview owner, even after a parent crash.
     import ctypes
     libc=ctypes.CDLL(None,use_errno=True)

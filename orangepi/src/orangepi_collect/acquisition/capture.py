@@ -636,6 +636,8 @@ class Capture:
         return 1 if self.error_list else 0
 
 if __name__ == '__main__':
+    from acquisition_time_lock import acquire
+    acquire()
     from scan_registry import require_member
     require_member()
     p=argparse.ArgumentParser()

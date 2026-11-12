@@ -32,6 +32,7 @@ WantedBy=multi-user.target
  for name in ['camd','embodied-pi-collect']:files['/etc/systemd/system/'+name+'.service.d/90-lan-time.conf']='[Unit]\nWants=headring-lan-time.service\nAfter=headring-lan-time.service\n'
  print(json.dumps({'server':args.server,'policy':'continue_capture_when_unavailable','targets':list(files)+['/etc/chrony/chrony.conf'],'apply':args.apply}))
  if not args.apply:return
+ parser.error('Automatic LAN-time migration is disabled until old collector and old time services can be quiesced together; use a controlled maintenance window')
  if os.name!='posix' or os.geteuid()!=0:parser.error('--apply requires Linux root')
  chrony=pathlib.Path('/etc/chrony/chrony.conf')
  text=chrony.read_text();text=re.sub(r'\n# BEGIN HEADRING_LAN_TIME\n.*?# END HEADRING_LAN_TIME\n?','\n',text,flags=re.S)

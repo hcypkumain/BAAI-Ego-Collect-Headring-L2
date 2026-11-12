@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><meta name="theme-color" content="#006e78"><meta name="apple-mobile-web-app-capable" content="yes"><link rel="manifest" href="/app.webmanifest"><link rel="icon" href="/phone-icon.svg"><script src="/dashboard-settings.js"></script><script src="/signal-quality.js?v=20261102.1"></script><script src="/waveform-plot.js?v=20261102.1"></script><script src="/phone-transport.js?v=20261028.7"></script><script src="/phone-connections.js?v=20261028.5"></script><script src="/phone-recording.js?v=20261103.1"></script><script src="/phone-capture.js?v=20261030.1"></script><script src="/phone-diagnostics.js?v=20261029.1"></script><script src="/phone-headphones.js?v=20261102.2"></script><script src="/phone-shell.js?v=20261103.1"></script><script src="/reference-bundles.js?v=20261102.1"></script><script src="/phone-references.js?v=20261103.1"></script><script src="/phone-uploads.js?v=20261102.1"></script><script src="/phone-recordings.js?v=20261102.1"></script><script src="/phone-app.js?v=20261103.1"></script><title>Orange Pi · 采集台</title>
+<style>
+:root{--bg:#edf2f5;--ink:#192e3a;--muted:#687d89;--line:#d9e3e9;--accent:#006e78;--mint:#dcefeb;--red:#c44339;--amber:#936321}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}button,input{font:inherit}button{cursor:pointer;border:1px solid var(--line);border-radius:10px;background:white;color:var(--ink);padding:10px 14px;transition:.15s}button:hover:enabled{border-color:var(--accent);background:#eff8f7}button:disabled{opacity:.42;cursor:default}button.primary{background:var(--accent);color:white;border-color:var(--accent);font-weight:650}button.danger{background:var(--red);color:white;border-color:var(--red)}header{padding:18px 30px;border-bottom:1px solid var(--line);background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px}.brand{display:flex;align-items:center;gap:12px}.mark{width:36px;height:36px;background:var(--accent);color:#fff;border-radius:11px;display:grid;place-items:center;font-size:20px;font-weight:700}h1{font-size:17px;letter-spacing:.03em;margin:0}small,.muted{color:var(--muted)}.pill{display:inline-flex;align-items:center;gap:7px;padding:5px 11px;background:var(--mint);color:var(--accent);border-radius:20px;font-size:12px}.dot{width:7px;height:7px;background:currentColor;border-radius:50%}main{max-width:1560px;margin:auto;padding:24px 30px 40px}.hero{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;gap:18px}h2{margin:0 0 5px;font-size:27px;font-weight:660}h3{font-size:15px;margin:0}.hero p{margin:0;color:var(--muted)}.metrics{display:flex;gap:26px}.metric b{font-size:24px;display:block;line-height:1.3}.metric small{font-size:11px}.flow{display:grid;grid-template-columns:repeat(6,1fr);padding:0;list-style:none;margin:0 0 20px;gap:5px}.flow li{border-top:3px solid var(--line);padding:10px 8px 0;color:var(--muted);font-size:12px}.flow li.active{border-color:var(--accent);color:var(--accent);font-weight:650}.flow li.past{border-color:#80aaa9}.workspace{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;align-items:start}.stack{display:grid;gap:18px}.card{background:white;border:1px solid var(--line);border-radius:15px;overflow:hidden}.card-head{padding:15px 18px;display:flex;justify-content:space-between;align-items:center;gap:10px}.card-head p{margin:2px 0 0;color:var(--muted);font-size:12px}.cameras{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 16px 16px}.camera{min-width:0}.camera-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:0 0 7px;font-size:12px}.live-tag{color:var(--muted);font-size:11px}.live-tag.live{color:var(--accent)}.view{aspect-ratio:4/3;background:#172933;border-radius:9px;position:relative;overflow:hidden;display:grid;place-items:center;color:#9cb0ba}.view img{height:100%;width:100%;object-fit:contain;position:absolute}.view .placeholder{padding:20px;text-align:center;font-size:12px}.view.stale img{opacity:.2}.view.live .placeholder{display:none}.camera-foot{font-size:10px;color:var(--muted);margin-top:6px;word-break:break-all}.step-card{border-top:4px solid var(--accent)}.step-body{padding:0 18px 18px}.step-body p{margin:7px 0 14px}.step-no{font-size:11px;letter-spacing:.1em;color:var(--accent);font-weight:700}.actions{display:grid;gap:9px}.actions button{width:100%;min-height:43px}.hint{font-size:11px;margin-top:14px;color:var(--muted)}.signal-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 18px 16px}.signal-head{display:flex;justify-content:space-between;font-size:12px;margin:0 0 8px}.signal canvas{width:100%;height:216px;display:block;background:#f6f9fa;border-radius:9px}.signal-meta{font-size:10px;color:var(--muted);margin-top:6px}.reference{padding:0 18px 18px}.reference img{width:100%;height:152px;object-fit:contain;background:#f1f4f5;border-radius:9px}.reference p{font-size:12px;margin:8px 0 0}.settings{padding:0 18px 18px;display:grid;gap:10px}.settings .row{display:flex;align-items:center;gap:10px}.settings .row button{flex-shrink:0;white-space:nowrap}.settings input[type=range]{width:100%;accent-color:var(--accent)}details{padding:0 18px 14px}summary{cursor:pointer;color:var(--muted);font-size:12px}table{border-collapse:collapse;width:100%;font-size:12px;margin:12px 0}td,th{text-align:left;border-bottom:1px solid var(--line);padding:8px 4px}th{font-weight:500;color:var(--muted)}.notice{padding:12px 16px;background:#fff2dc;color:var(--amber);border:1px solid #ecd8b7;border-radius:10px;margin-bottom:16px}.error{color:var(--red)}.hidden{display:none!important}#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#192e3a;color:white;padding:12px 20px;border-radius:11px;box-shadow:0 6px 30px #0002;z-index:20;max-width:90%}#login{position:fixed;inset:0;background:#edf2f5ed;z-index:30;display:grid;place-items:center}.login-card{max-width:400px;padding:30px;margin:20px;background:white;border:1px solid var(--line);border-radius:18px}.login-card input{width:100%;padding:11px;border:1px solid var(--line);border-radius:9px;margin:14px 0}.login-card button{width:100%}.head-cameras .cameras{grid-template-columns:repeat(4,1fr);padding:12px 0 0}.help{font-size:11px;padding:0 18px 18px;color:var(--muted)}.footer{margin-top:18px;font-size:11px;color:var(--muted)}#voice{font-size:12px;color:var(--muted);border-left:2px solid var(--line);padding-left:10px;max-height:120px;overflow:auto}.recording h2{color:var(--red)}.recording .flow li.active{border-color:var(--red);color:var(--red)}
+@media(max-width:1000px){main{padding:18px}.workspace{grid-template-columns:minmax(0,1fr) 280px}.metrics{gap:15px}.head-cameras .cameras{grid-template-columns:repeat(2,1fr)}}@media(max-width:760px){header{padding:14px 18px}.workspace{grid-template-columns:1fr}.side{grid-row:1}.side .reference-card,.side .settings-card{display:none}.hero{align-items:flex-start}.metric b{font-size:18px}.metrics{gap:12px}.flow li{font-size:10px;padding-left:2px}.hero h2{font-size:22px}.signal-grid{grid-template-columns:1fr}.cameras{gap:8px;padding:0 10px 10px}.camera-top{font-size:11px}.head-cameras .cameras{grid-template-columns:1fr 1fr}.mobile-settings{display:block!important}.step-body{padding-bottom:14px}}@media(min-width:761px){.mobile-settings{display:none!important}}
+.review-body{padding:0 18px 18px}.review-controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.review-controls select{max-width:100%;padding:10px;border:1px solid var(--line);border-radius:9px;font:inherit}.review-body video{display:block;width:100%;max-height:480px;background:#172933;border-radius:9px;margin-top:12px}.review-body details{padding:10px 0 0}.review-body li{margin:5px 0}.progress-line{margin-top:10px;font-size:12px;color:var(--muted)}
+.wrist-methods{padding:0 18px 14px;display:flex;gap:9px;flex-wrap:wrap}.wrist-methods button[aria-pressed=true],.wrist-role-buttons button[aria-pressed=true]{background:var(--mint);border-color:var(--accent);color:var(--accent);font-weight:650}.wrist-role-buttons{display:flex;gap:7px;margin-top:9px}.wrist-role-buttons button{flex:1;padding:9px 8px;min-height:42px}.wrist-role-label{font-size:12px;color:var(--accent);margin-top:6px;min-height:19px}.wrist-assignment{padding:0 18px 18px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.wrist-assignment p{margin:0}.wrist-assignment small{display:block;margin-top:3px}#confirm-wrist{min-height:43px}#wrist-manual-help{padding:0 18px 12px;margin:0;color:var(--muted);font-size:12px}@media(max-width:480px){.wrist-role-buttons{flex-direction:column}.wrist-methods button{flex:1}.wrist-assignment{align-items:stretch}.wrist-assignment button{width:100%}}
+.emg-role-buttons{display:flex;gap:8px;margin-top:10px}.emg-role-buttons button{flex:1;min-height:44px;padding:10px 8px}.emg-role-buttons button[aria-pressed=true]{background:var(--mint);border-color:var(--accent);color:var(--accent);font-weight:650}.emg-role-label{min-height:20px;margin-top:7px;font-size:12px;color:var(--accent)}.emg-assignment{padding:0 18px 18px;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.emg-assignment p{margin:0}.emg-assignment small{display:block;margin-top:4px}#confirm-emg{min-height:44px}#emg-manual-help{padding:0 18px 14px;margin:0;color:var(--muted);font-size:12px}.signal-meta{word-break:break-word}@media(max-width:480px){.emg-role-buttons{flex-direction:column}.emg-assignment{align-items:stretch}.emg-assignment button{width:100%}}
+.impedance-panel{border-top:1px solid var(--line);padding:16px 18px}.impedance-heading{display:flex;justify-content:space-between;align-items:center;gap:12px}.impedance-buttons{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}.impedance-panel table{margin:9px 0}.impedance-good{color:#176d53}.impedance-watch{color:var(--amber)}.impedance-high{color:var(--red)}.impedance-panel p{margin:6px 0}.impedance-panel td:nth-child(2){font-variant-numeric:tabular-nums}.impedance-disabled{color:var(--muted)}
+
+html{background:#000;overflow:hidden}html.privacy-open{background:var(--bg);overflow:auto}
+#privacy-cover{position:fixed;inset:0;z-index:2147483646;display:grid;place-items:center;background:#000;color:#8b8b8b;font-size:22px;line-height:1;cursor:none;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;outline:none}
+body.mode-transition #privacy-cover{background:#132932;color:#e8f4f5;cursor:default}
+#privacy-cover[hidden]{display:none!important}#privacy-cover:focus{outline:none}
+body.privacy-locked{overflow:hidden;background:#000!important}body.privacy-locked,body.privacy-locked *{cursor:none!important}
+body.privacy-locked>:not(#privacy-cover),body.privacy-locked>:not(#privacy-cover) *{visibility:hidden!important}
+body.privacy-login #login,body.privacy-login #login *{visibility:visible!important;cursor:auto!important}body.privacy-login #login{z-index:2147483647;overflow:auto;place-items:start center;padding:20px 0}
+#impedance-verdict{font-size:17px;font-weight:650}#impedance-policy{font-size:11px}
+</style><link rel="stylesheet" href="/phone-app.css?v=20261103.1"></head><body>
+<header><div class="brand"><div class="mark">π</div><div><h1>Orange Pi <span class="muted">/</span> 采集台</h1><small>设备 · 标定 · 录制</small></div></div><span class="pill" id="connection"><i class="dot"></i><span>正在连接</span></span></header>
+<main><div class="hero"><div><h2 id="title">连接采集程序</h2><p id="subtitle">实时状态来自 Orange Pi</p></div><div class="metrics"><div class="metric"><b id="elapsed">00:00</b><small>本段录制时长</small></div><div class="metric"><b id="saved">0</b><small>本次程序已保存</small></div><div class="metric"><b id="disk">—</b><small>存储剩余 GB</small></div></div></div>
+<ol class="flow" id="flow"><li>01 连接设备</li><li>02 确认设备左右</li><li>03 准备任务</li><li>04 录制中</li><li>05 确认保存</li><li>06 保存与检验</li></ol>
+<div id="system-notice" class="notice hidden"></div>
+<div id="notice" class="notice hidden"></div>
+<div class="workspace"><section class="stack"><div class="card"><div class="card-head"><div><h3>腕部相机</h3><p id="wrist-note">预览不会保存为录制数据</p></div><span class="pill" id="calibration">等待检查</span></div><div class="wrist-methods hidden" id="wrist-methods" role="group" aria-label="腕部相机标定方式"><button data-action="wrist_method" data-method="manual" aria-pressed="false">看画面选择左右</button><button data-action="wrist_method" data-method="occlusion" aria-pressed="false">遮挡镜头标定</button></div><p id="wrist-manual-help" class="hidden">可轻微移动实际左腕，辨认对应画面；选择一侧后，另一路自动设为相反侧。</p><div class="cameras" id="wrists"></div><div class="wrist-assignment hidden" id="wrist-assignment"><div><p id="wrist-selection" aria-live="polite">请选择实际左腕或右腕对应的画面。</p><small id="wrist-selection-hint">选择后点击确认才会保存。</small></div><button class="primary" data-action="assign_wrist_roles" id="confirm-wrist" disabled>确认左右</button></div><details class="head-cameras"><summary>查看头环前后相机</summary><div class="cameras" id="heads"></div></details></div>
+<div class="card hidden" id="review-card"><div class="card-head"><div><h3>录制回看</h3><p id="review-session"></p></div><span class="pill" id="review-quality"></span></div><div class="review-body"><p id="review-note" class="muted"></p><div class="review-controls"><select id="review-camera" aria-label="选择回看相机"></select><button id="review-play">回看所选录像</button></div><video id="review-video" class="hidden" controls playsinline preload="none" muted></video><p id="review-playback" class="muted" aria-live="polite"></p><details id="review-details"><summary id="review-summary">质量检查详情</summary><ul id="review-findings"></ul></details></div></div>
+<div class="card" id="emg-card"><div class="card-head"><div><h3>双臂肌电 · 8 通道</h3><p id="emg-note">显示近 2 秒信号包络；每个通道居中自动缩放</p></div><span class="pill" id="emg-calibration">左右待确认</span></div><p id="emg-manual-help" class="hidden">先只握左拳再放松，观察哪一路波形随动作变化；再用右手核对。在对应信号下选择实际左臂或右臂，最后点击确认。A/B 只是临时编号，不代表左右。</p><div class="signal-grid" id="signals"></div><div class="emg-assignment hidden" id="emg-assignment"><div><p id="emg-selection" aria-live="polite">请观察动作对应的信号，再选择实际左臂或右臂。</p><small id="emg-selection-hint">选择一侧后另一路自动设为相反侧；点击确认才会保存。</small></div><button class="primary" data-action="assign_emg_roles" id="confirm-emg" disabled>确认肌电左右</button></div><div class="help">波形使用原始 ADC 数值，界面预览做降采样；正式文件保留完整原始数据。左右由你观察并确认，程序不会根据序列号或动作自动判定。</div></div>
+<div class="card"><div class="card-head"><div><h3 id="eeg-channels-title">脑电 · FC3 / C3 / O1 / Pz / Oz / O2 / C4 / FC4</h3><p>CH1–CH8 全部启用；近 2 秒逐点波形，纵轴标注实际 µV</p></div><small>250 Hz</small></div><div class="signal-grid" style="grid-template-columns:1fr"><div class="signal" id="eeg"><div class="signal-head"><b>OmniBCI</b><span class="live-tag">等待数据</span></div><canvas width="900" height="432"></canvas><div class="signal-meta"></div></div></div><section class="impedance-panel" id="impedance-panel" aria-label="采集前阻抗检查"><div class="impedance-heading"><h3>采集前阻抗检查</h3><span class="pill" id="impedance-phase">等待准备</span></div><p id="impedance-verdict" class="impedance-disabled" role="status">等待判定</p><p id="impedance-policy" class="muted">所有启用通道须低于 60 kΩ；等于 60 kΩ 不通过。参考与偏置电极未单独测量。</p><p class="muted" id="impedance-note">准备本段后，可在正式录制前检查各通道接触。</p><div class="impedance-buttons"><button class="primary" data-impedance-action="impedance_start" disabled>开始检查</button><button data-impedance-action="impedance_end" disabled>结束检查</button><button data-impedance-action="impedance_review" disabled>确认通过结果，继续</button></div><table><thead><tr><th>脑电通道</th><th>阻抗 kΩ</th><th>检查状态</th></tr></thead><tbody id="impedance-channels"></tbody></table><small id="impedance-time">尚无本段检查结果</small></section><div class="help">滤波只生成派生数据；原始 ADC 和微伏数据始终保留。采前阻抗与录后质量检验分别进行，检测阶段不会作为正式 EEG 数据保存。</div></div>
+<div class="card"><div class="card-head"><h3>设备检查</h3><small id="device-count"></small></div><div style="padding:0 18px 12px;overflow:auto"><table><thead><tr><th>设备</th><th>接收器尾号 / USB 路径</th><th>最近自检</th><th>当前数据</th></tr></thead><tbody id="device-rows"></tbody></table></div></div>
+</section><aside class="stack side"><div class="card step-card"><div class="card-head"><div><div class="step-no" id="step-no">当前步骤</div><h3 id="step-title">请稍候</h3></div></div><div class="step-body"><p id="instruction">正在读取采集状态…</p><div class="actions" id="actions"></div><div class="hint" id="busy"></div><p id="voice"></p></div></div>
+<div class="card reference-card"><div class="card-head"><h3>本段任务参考图像</h3></div><div class="reference"><img id="reference-image" class="hidden" alt="本段任务参考图像"><p id="reference-name">准备本段后显示</p><small>用于布置场景和确定任务，不是相机实时画面。开始按钮才会开启录制。</small></div></div>
+<div class="card settings-card" id="settings-card"><div class="card-head"><h3>设备与控制设置</h3></div><div class="settings"><button data-action="calibrate_wrist">重新标定腕部左右</button><button data-action="rescan">重新扫描设备</button><button data-action="calibrate_emg">重新确认肌电左右</button><button data-action="shutdown" class="danger">关闭设备电源</button><div><label for="wrist-fps-policy">双腕自动曝光与帧率</label><div class="row"><select id="wrist-fps-policy" style="min-width:0;max-width:100%;padding:8px"><option value="null">保持相机当前设置</option><option value="false">不允许自动曝光改变帧率</option><option value="true">允许自动曝光改变帧率</option></select><button id="set-wrist-fps-policy">应用</button></div><small>同时用于双腕预览与采集，并保留到下次开机。此选项不等于关闭自动曝光；不保证零丢帧，不允许自动曝光改变帧率时，低光画面可能更暗。准备完成后更改需重新准备。</small><div id="wrist-fps-readback" class="muted" style="font-size:11px;margin-top:6px" aria-live="polite"></div></div><div id="eeg-filter-settings"><label for="eeg-filter">本段脑电滤波</label><div class="row"><select id="eeg-filter" style="min-width:0;max-width:100%;padding:8px"></select><button id="set-eeg-filter">应用</button></div><small>录制前可更改；准备完成后更改需重新准备。</small><small id="eeg-filter-readback" aria-live="polite">等待脑电滤波状态</small></div><div><div class="row"><small>头环提示音音量</small><b id="volume-label">110%</b></div><div class="row"><input id="volume" type="range" min="20" max="120" value="110" step="5"><button id="set-volume">应用</button></div><small id="volume-readback" aria-live="polite">等待头环音量状态</small></div></div><div class="help" id="keyboard-help">在当前步骤点击对应操作。采集中请长按黑屏三秒，圆环完成后停止；松手或离开页面会取消本次长按。</div><div class="help" id="keyboards"></div></div></aside></div>
+<div class="footer">Orange Pi CM5 · 本地采集 ｜ 预览约 3 帧/秒，正式录制沿用原采样参数 ｜ <span id="session"></span></div></main>
+<div id="login"><div class="login-card"><div class="mark">π</div><h2 style="margin-top:18px">连接你的采集台</h2><p class="muted">使用带访问码的设备链接，或输入此 Pi 的访问码。</p><input id="access-token" type="password" placeholder="访问码" autocomplete="off"><button class="primary" id="connect">连接</button><p class="error" id="login-error"></p></div></div><div id="toast" class="hidden"></div>
+<div id="privacy-cover" role="status" tabindex="-1" aria-label="正在同步采集状态"><span>正在同步采集状态</span></div>
+<script id="screen-privacy-controller">
+/* This source is embedded verbatim into dashboard.html and tested in Node. */
+(function(global){
+ 'use strict';
+ const POLICY='screen_black_before_capture_v1';
+ // Both budgets stay inside the Pi's 5s client lease (screen_privacy.py
+ // lease_seconds=5.0), so the browser always gives up being trusted before the
+ // Pi stops counting it as a listening display. Readers are issued every 750ms,
+ // so these must exceed that interval plus a realistic round trip.
+ const TRUTH_DEADLINE=3500,REGISTRATION_DEADLINE=4500;
+ function clientIdentity(){
+  let suffix='';
+  if(global.crypto&&typeof global.crypto.getRandomValues==='function'){
+   const bytes=new Uint8Array(16);global.crypto.getRandomValues(bytes);
+   suffix=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  }else suffix=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2)+'-'+Math.random().toString(36).slice(2);
+  return 'web-'+suffix;
+ }
+ function createPrivacyScreen(options){
+  const identity=clientIdentity(),now=options.now||(()=>performance.now());
+  const frame=options.frame||(callback=>global.requestAnimationFrame(callback));
+  let locked=false,login=false,authenticated=false,trustedStatus=false,latest=null,seenInstance='',seenGeneration=-1;
+  let registeredInstance='',registeredAt=-Infinity,lastStatusAt=-Infinity,heartbeatPending=null;
+  let displayPending=null,lastDisplayAt=-Infinity,lastDisplayTry=-Infinity;
+  let lockEpoch=0,paintPromise=null,lastAck='',ackPending=null,localStart=null;
+  let stopPending=false,stopAccepted=false,stopKey='',stopGeneration=-1,stopError='',stopResultTime=-Infinity;
+  const visible=()=>!options.visible||options.visible();
+  const displayFresh=()=>!!options.readDisplayState&&trustedStatus&&now()-lastDisplayAt<TRUTH_DEADLINE;
+  const key=p=>p.instance+'|'+p.session_id+'|'+p.nonce;
+  function presentation(){
+   const p=latest?.privacy;
+   const canStop=authenticated&&!!latest&&!stopPending&&!stopAccepted&&(!!localStart||valid(p)&&
+    (p.required||['recording','countdown'].includes(latest.state)||latest.worker?.recording_active===true));
+   return {snapshot:latest,canStop,localStart:!!localStart,stopPending:stopPending||stopAccepted,stopError,
+    stale:!trustedStatus||now()-lastStatusAt>TRUTH_DEADLINE||now()-registeredAt>=REGISTRATION_DEADLINE};
+  }
+  function notify(){if(options.onState)options.onState(presentation())}
+  function showLogin(value){login=!!value;options.setLogin(login)}
+  function lock(){
+   if(!locked){locked=true;lockEpoch++;paintPromise=null;options.setLocked(true);if(options.onLock)options.onLock()}
+   notify();
+  }
+  function painted(){
+   lock();
+   if(!paintPromise){
+    const epoch=lockEpoch;
+    paintPromise=new Promise(resolve=>frame(()=>frame(resolve))).then(()=>epoch===lockEpoch&&locked);
+   }
+   return paintPromise;
+  }
+  function valid(p){
+   return p&&p.policy===POLICY&&typeof p.instance==='string'&&p.instance.length>0&&p.instance.length<=128
+    &&Number.isSafeInteger(p.generation)&&p.generation>=0
+    &&['idle','arming','recording','stopping','fault'].includes(p.phase)
+    &&typeof p.required==='boolean'&&typeof p.stop_confirmed==='boolean'
+    &&typeof p.nonce==='string'&&p.nonce.length<=128&&typeof p.session_id==='string'
+    &&(p.phase==='idle'?!p.required&&p.stop_confirmed:p.required&&!p.stop_confirmed&&p.nonce.length>0);
+  }
+  function safeIdle(snapshot){
+   const p=snapshot&&snapshot.privacy;
+   return valid(p)&&p.phase==='idle'&&!p.required&&p.stop_confirmed
+    &&typeof snapshot.state==='string'&&snapshot.state.length>0
+    &&!['recording','countdown'].includes(snapshot.state)&&snapshot.worker?.recording_active!==true;
+  }
+  async function heartbeat(force){
+   if(!authenticated||!visible()||!seenInstance)return false;
+   if(options.integratedRegistration&&!force)return registeredInstance===seenInstance&&now()-registeredAt<REGISTRATION_DEADLINE;
+   if(heartbeatPending)return heartbeatPending;
+   const instance=seenInstance;
+   if(!force&&registeredInstance===instance&&now()-registeredAt<700)return true;
+   heartbeatPending=(async()=>{
+    try{
+     await Promise.resolve().then(()=>options.post('privacy_display',{client_id:identity,stop_protocol:'session-stop-v1'}));
+     if(seenInstance!==instance)return false;
+     registeredInstance=instance;registeredAt=now();return true;
+    }catch(error){if(!displayFresh()||now()-registeredAt>=REGISTRATION_DEADLINE)lock();return false}
+    finally{heartbeatPending=null}
+   })();
+   return heartbeatPending;
+  }
+  async function acknowledge(p){
+   const nonceKey=key(p);
+   if(lastAck===nonceKey)return;
+   if(ackPending)return ackPending;
+   ackPending=(async()=>{
+    if(!await painted())return;
+    const current=latest&&latest.privacy;
+    if(!current||current.phase!=='arming'||key(current)!==nonceKey||!locked||!visible())return;
+    if(!await heartbeat(true))return;
+    try{await options.post('privacy_ack',{client_id:identity,nonce:p.nonce,stop_protocol:'session-stop-v1'});lastAck=nonceKey}
+    catch(error){lock()}
+   })().finally(()=>{ackPending=null});
+   return ackPending;
+  }
+  async function synchronize(snapshot,depth){
+   depth=depth||0;
+   const p=snapshot&&snapshot.privacy;
+   if(!valid(p)){trustedStatus=false;lock();return {accepted:false,snapshot}}
+   if(p.instance===seenInstance&&p.generation<seenGeneration)return {accepted:false,snapshot};
+   if(p.instance===seenInstance&&p.generation===seenGeneration&&latest
+      &&(latest.privacy.phase!==p.phase||latest.privacy.nonce!==p.nonce)){
+    trustedStatus=false;lock();return {accepted:false,snapshot};
+   }
+   if(p.instance!==seenInstance){
+    lock();registeredInstance='';lastAck='';seenInstance=p.instance;seenGeneration=-1;
+   }
+   seenGeneration=p.generation;latest=snapshot;lastStatusAt=now();trustedStatus=true;
+   const registration=snapshot.display_registration;
+   if(options.integratedRegistration&&registration?.client_id===identity&&registration.instance===p.instance
+      &&typeof snapshot._displayRequestedAt==='number'){
+    registeredInstance=p.instance;registeredAt=Math.min(now(),snapshot._displayRequestedAt);
+   }
+   if(stopKey&&stopKey!==key(p)){stopPending=false;stopAccepted=false;stopKey='';stopError=''}
+   if(stopKey&&safeIdle(snapshot)){stopAccepted=false;stopError=''}
+   const stopResult=snapshot.result;
+   if(stopKey&&(stopPending||stopAccepted)&&!safeIdle(snapshot)&&stopResult?.action==='stop'
+      &&stopResult.ok===false&&stopResult.time>stopResultTime){
+    stopAccepted=false;stopError=stopResult.error||'停止操作未完成，请长按重试';
+   }
+   if(stopAccepted&&p.phase==='fault'&&p.generation>stopGeneration){stopAccepted=false;stopError=p.error||'停止状态未确认，请长按重试'}
+   if(localStart&&safeIdle(snapshot)){
+    const result=snapshot.result;
+    const failedNewRequest=result&&result.ok===false&&typeof result.time==='number'
+     &&result.time>localStart.resultTime&&result.time>=localStart.serverTime;
+    if(p.instance!==localStart.instance||p.generation>localStart.generation||failedNewRequest)localStart=null;
+   }
+   if(!safeIdle(snapshot)){
+    lock();showLogin(false);
+    if(localStart&&p.phase!=='idle')localStart=null;
+   }
+   const fresh=registeredInstance===p.instance&&now()-registeredAt<REGISTRATION_DEADLINE;
+   if(!fresh){
+    lock();
+    if(depth>=2||!await heartbeat(true))return {accepted:true,snapshot};
+    // An idle response obtained before registration cannot safely reveal the
+    // reference: another controller may have started while we registered.
+    const second=options.readDisplayState?Object.assign({},snapshot,await options.readDisplayState()):await options.readStatus();
+    return synchronize(second,depth+1);
+   }
+   if(p.phase==='arming')await acknowledge(p);
+   notify();
+   return {accepted:true,snapshot};
+  }
+  function revealIfSafe(snapshot){
+   if(options.holdReveal?.()||snapshot!==latest||!authenticated||!trustedStatus||now()-lastStatusAt>TRUTH_DEADLINE||!safeIdle(snapshot)||localStart
+      ||registeredInstance!==seenInstance||now()-registeredAt>=REGISTRATION_DEADLINE||!visible())return false;
+   stopAccepted=false;stopPending=false;stopKey='';stopError='';lastAck='';showLogin(false);
+   if(locked){locked=false;paintPromise=null;options.setLocked(false)}
+   notify();
+   return true;
+  }
+  async function beforeStart(){
+   localStart={instance:seenInstance,generation:seenGeneration,
+               resultTime:typeof latest?.result?.time==='number'?latest.result.time:-Infinity,
+               serverTime:typeof latest?.server_time==='number'?latest.server_time:Infinity};
+   showLogin(false);lock();
+   await painted();
+  }
+  function startRejected(){localStart=null;lock()}
+  async function requestStop(){
+   if(!authenticated||!latest||stopPending||stopAccepted)return false;
+   const p=latest.privacy;
+   if(!p||(!p.required&&!localStart&&!['recording','countdown'].includes(latest.state)))return false;
+   lock();stopPending=true;stopError='';stopKey=key(p);stopGeneration=p.generation;stopResultTime=latest.result?.time??-Infinity;const attemptKey=stopKey;notify();
+   try{
+    await options.stop(latest);
+    if(stopKey===attemptKey&&!stopError&&!safeIdle(latest))stopAccepted=true;
+    return true;
+   }catch(error){
+    // Failure never wakes the screen. A new deliberate gesture can retry.
+    if(stopKey===attemptKey){
+     stopAccepted=false;
+     if(!safeIdle(latest))stopError=['AbortError','TimeoutError'].includes(error.name)?'连接超时，停止状态未确认；请检查连接后长按重试':String(error.message||'停止请求失败，请长按重试');
+    }
+    return false;
+   }finally{if(stopKey===attemptKey)stopPending=false;notify()}
+  }
+  function tick(){
+   // The full status includes waveform/QC/impedance payloads. Its latency is
+   // not the display gate: keep an independent, small authoritative reader.
+   if(options.readDisplayState&&authenticated&&visible()&&!displayPending&&now()-lastDisplayTry>=750){
+    lastDisplayTry=now();
+    displayPending=(async()=>{
+     try{
+      const result=await synchronize(Object.assign({},latest,await options.readDisplayState()));
+      if(result.accepted&&result.snapshot===latest){lastDisplayAt=now();revealIfSafe(result.snapshot)}
+     }catch(error){if(now()-lastStatusAt>TRUTH_DEADLINE)lock()}
+    })().finally(()=>{displayPending=null});
+   }
+   // A slow link is not a loss of truth. The budget must cover the 750ms issue
+   // interval plus a full round trip, or a laggy-but-healthy reader can never
+   // beat its own deadline and the cover flaps on an idle Pi. An in-flight read
+   // keeps the last confirmation trusted; a read that stops arriving does not.
+   const waitingOnReader=!!displayPending&&now()-lastDisplayTry<TRUTH_DEADLINE;
+   const truthStale=now()-lastStatusAt>TRUTH_DEADLINE&&!waitingOnReader;
+   const leaseStale=now()-registeredAt>=REGISTRATION_DEADLINE;
+   if(!visible()||(authenticated&&(truthStale||leaseStale))){trustedStatus=false;lock()}
+   notify();
+  }
+  function authorized(){authenticated=true;showLogin(false)}
+  function unauthorized(){trustedStatus=false;lock();if(!authenticated)showLogin(true)}
+  function disconnected(){if(!displayFresh()){trustedStatus=false;lock()}}
+  function visibilityChanged(){trustedStatus=false;lock();if(visible()&&options.refresh)options.refresh()}
+  lock();showLogin(!!options.needsLogin());
+  return {synchronize,revealIfSafe,beforeStart,startRejected,requestStop,heartbeat,tick,
+          authorized,unauthorized,disconnected,visibilityChanged,lock,
+          presentation,canRequestStop:()=>presentation().canStop,
+          isLocked:()=>locked,isLoginVisible:()=>login,clientId:identity};
+ }
+ function bindPrivacyInput(screen,doc,now,ui){
+  now=now||(()=>performance.now());ui=ui||{};
+  const frame=ui.frame||(callback=>global.requestAnimationFrame(callback));
+  let pressed=false,gesture=false,fired=false,started=0,suppressUntil=-Infinity,pointer=null,origin=null,keyboard='';
+  const points=new Set(),protectedScreen=()=>screen.isLocked()&&!screen.isLoginVisible();
+  const block=event=>{event.preventDefault();event.stopImmediatePropagation()};
+  const held=()=>gesture||now()<suppressUntil;
+  const discardTarget=event=>event.target?.closest?.('#recording-discard')&&screen.canRequestStop?.();
+  const progress=value=>{if(ui.progress)ui.progress(value)};
+  function cancel(consume=true){pressed=false;fired=false;keyboard='';progress(0);if(!consume){gesture=false;points.clear();pointer=null;origin=null;suppressUntil=Math.max(suppressUntil,now()+500);}}
+  function tick(){
+   if(!pressed)return;
+   if(!protectedScreen()||doc.hidden||screen.canRequestStop&&!screen.canRequestStop()){cancel();return;}
+   const value=Math.min(1,Math.max(0,(now()-started)/3000));progress(value);
+   if(value>=1){pressed=false;fired=true;suppressUntil=Math.max(suppressUntil,now()+1200);if(ui.commit)ui.commit();Promise.resolve(screen.requestStop()).catch(()=>{});return;}
+   frame(tick);
+  }
+  function begin(){if(pressed||fired||screen.canRequestStop&&!screen.canRequestStop())return;gesture=true;pressed=true;started=now();progress(0);frame(tick);}
+  doc.addEventListener('pointerdown',event=>{
+   if(discardTarget(event))return;
+   if(protectedScreen()){block(event);points.add(event.pointerId??1);gesture=true;if(points.size>1){cancel();return;}
+    if(event.button===undefined||event.button===0){pointer=event.pointerId??1;origin={x:event.clientX||0,y:event.clientY||0};begin();}
+   }else if(held())block(event);
+  },true);
+  doc.addEventListener('pointermove',event=>{
+   if(discardTarget(event))return;
+   if(!gesture)return;if(protectedScreen()||held())block(event);
+   if(pressed&&origin&&Math.hypot((event.clientX||0)-origin.x,(event.clientY||0)-origin.y)>32)cancel();
+  },true);
+  for(const name of ['pointerup','pointercancel','lostpointercapture'])doc.addEventListener(name,event=>{
+   if(discardTarget(event))return;
+   if(protectedScreen()||held()){block(event);points.delete(event.pointerId??1);cancel();if(points.size===0){gesture=false;pointer=null;origin=null;suppressUntil=Math.max(suppressUntil,now()+500);}}
+  },{capture:true,passive:false});
+  for(const name of ['click','dblclick','contextmenu','wheel','touchstart','touchend','touchcancel'])doc.addEventListener(name,event=>{if(!discardTarget(event)&&(protectedScreen()||held()))block(event);},{capture:true,passive:false});
+  doc.addEventListener('keydown',event=>{
+   if(discardTarget(event))return;
+   if(!protectedScreen()&&!held())return;
+   if(!event.ctrlKey&&!event.altKey&&!event.metaKey&&['Enter',' ','a','A','b','B','Tab'].includes(event.key)){
+    block(event);if(!event.repeat&&['Enter',' '].includes(event.key)){keyboard=event.key;begin();}
+   }
+  },true);
+  doc.addEventListener('keyup',event=>{if(discardTarget(event))return;if(held()){block(event);if(!keyboard||event.key===keyboard){cancel(false);}}},true);
+  doc.addEventListener('visibilitychange',()=>{if(doc.hidden)cancel(false)},true);
+  if(global.addEventListener)global.addEventListener('blur',()=>cancel(false));
+  return {cancel:()=>cancel(false),sample:tick};
+ }
+ global.createPrivacyScreen=createPrivacyScreen;
+ global.bindPrivacyInput=bindPrivacyInput;
+})(window);
+
+</script>
+<script>
+'use strict';
+const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
+const accessCodeRequired=document.body.dataset.accessCodeRequired!=='false';
+const accessFragment=location.hash.slice(1);
+let wristPolicyDirty=false,wristPolicyPending=null,privacyScreen=null,phoneCompanion=null,recordingOverlay=null;
+const settingsDraft=window.createDashboardSettingsDraft();
+let token=accessCodeRequired?(accessFragment||sessionStorage.getItem('pi-access')||''):'',status=null,inFlight=false,lastReference='',lastResult=0,online=false,lastBoot='',lastController=null;
+let collectionContext=null;
+const MODE_INTENT_KEY='pi-mode-switch-intent-v1';
+let modeIntent=null,modeReloadQueued=false,latestDisplayTruth=null;
+try{const saved=JSON.parse(sessionStorage.getItem(MODE_INTENT_KEY)||'null');if(saved&&['emg','eeg'].includes(saved.target)&&Date.now()-saved.started<120000)modeIntent=saved;else sessionStorage.removeItem(MODE_INTENT_KEY);}catch{}
+function modeOverlay(){recordingOverlay?.modeSwitch?.(modeIntent?.target||null);document.body.classList.toggle('mode-transition',!!modeIntent);}
+function beginModeIntent(target,fromContext,resultBaseline=status?.result?.time??null){
+ if(!['emg','eeg'].includes(target))return;
+ modeIntent={target,fromContext,resultBaseline,started:Date.now()};try{sessionStorage.setItem(MODE_INTENT_KEY,JSON.stringify(modeIntent));}catch{}
+ privacyScreen?.lock();modeOverlay();
+}
+function clearModeIntent(){modeIntent=null;try{sessionStorage.removeItem(MODE_INTENT_KEY);}catch{}modeOverlay();}
+function idleModeState(s){return !!s&&['device_confirm','idle','failed_wait','exhausted'].includes(s.state)&&!s.busy&&s.privacy?.phase==='idle'&&s.privacy.required===false&&s.privacy.stop_confirmed===true&&!s.worker?.recording_active&&[null,undefined,'idle','stopped'].includes(s.worker?.state);}
+function modeActionReady(){
+ const display=latestDisplayTruth||privacyScreen?.presentation?.()?.snapshot;
+ return !modeIntent&&!!status&&!!display&&status.collection_context===display.collection_context&&status.revision===display.revision&&status.privacy?.instance===display.privacy?.instance;
+}
+function reconcileModeIntent(s){
+ if(!modeIntent)return;
+ if(s.privacy?.required||s.worker?.recording_active||['recording','countdown'].includes(s.state)){clearModeIntent();return;}
+ if(s.collection_mode===modeIntent.target&&idleModeState(s)){clearModeIntent();return;}
+ if(s.collection_context===modeIntent.fromContext&&!s.busy&&s.state!=='mode_switching'&&s.result?.ok===false&&s.result.time!==modeIntent.resultBaseline){const message=s.result.error;clearModeIntent();toast(message||'切换未执行，已恢复当前采集版本。');return;}
+ if(Date.now()-modeIntent.started>45000&&s.collection_context===modeIntent.fromContext&&idleModeState(s)){
+  clearModeIntent();toast('切换尚未确认，请核对当前采集版本后重新选择。');
+ }
+}
+async function boundedJson(url,config={},milliseconds=5000){
+ const controller=new AbortController();let timer;
+ const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new DOMException('连接读取超时，将自动重试','TimeoutError'));},milliseconds);});
+ const work=(async()=>{const response=await fetch(url,{...config,signal:controller.signal,cache:'no-store'});const value=await response.json();return {response,value};})();
+ try{return await Promise.race([work,deadline]);}finally{clearTimeout(timer);controller.abort();}
+}
+function reloadModePage(){if(!modeReloadQueued){modeReloadQueued=true;suspendVisibleMedia();location.reload();}}
+async function requestCollectionMode(target){
+ if(!['emg','eeg'].includes(target)||inFlight||modeIntent||!online||privacyScreen?.isLocked())return false;
+ inFlight=true;let sent=false,accepted=false;
+ try{
+  const before=collectionContext;
+  const display=await readDisplayState();
+  const query=new URLSearchParams({signals:'',review:'0',cameras:'0',display:privacyScreen.clientId});
+  const {response,value:fresh}=await boundedJson('/api/status?'+query,{headers:authHeaders()},5000);
+  if(!response.ok)throw Error(fresh.error||'状态尚未同步，请稍候');
+  if(fresh.collection_context!==display.collection_context||fresh.privacy?.instance!==display.privacy?.instance)throw Error('采集版本正在更新，请等待界面同步');
+  if(before&&fresh.collection_context!==before){beginModeIntent(fresh.collection_mode,before);reloadModePage();return false;}
+  if(!idleModeState(display)||!idleModeState(fresh)||!fresh.actions?.includes('collection_mode'))throw Error('请先结束当前操作，再切换采集版本');
+  if(fresh.collection_mode===target)return true;
+  beginModeIntent(target,fresh.collection_context,fresh.result?.time??null);
+  sent=true;
+  const result=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders(),'X-Collection-Context':fresh.collection_context},body:JSON.stringify({action:'collection_mode',value:target,revision:display.revision,collection_context:fresh.collection_context})},6000);
+  if(!result.response.ok){sent=false;throw Error(result.value.error||'切换未执行，请核对当前状态');}
+  accepted=true;
+ }catch(error){
+  if(!sent)clearModeIntent();
+  toast(sent?'正在确认切换结果，请保持页面前台。':error.message);
+ }finally{inFlight=false;await poll();}
+ return accepted;
+}
+
+const authHeaders=()=>({...((accessCodeRequired)?{'X-Access-Token':token}:{}),...(collectionContext?{'X-Collection-Context':collectionContext}:{})}),authQuery=()=>accessCodeRequired?'token='+encodeURIComponent(token)+'&':'';
+if(location.hash)history.replaceState(null,'',location.pathname+location.search);
+if(!accessCodeRequired)$('#login').classList.add('hidden');
+const wristSlots=['cam_left_wrist','cam_right_wrist'];
+let wristDraftKey='',wristLeftSlot=null,lastPreviewId=null;
+const emgSlots=['emg_left','emg_right'];
+let emgDraftKey='',emgLeftSlot=null,lastStatusReceivedAt=null;
+if(location.hash)history.replaceState(null,'',location.pathname);
+const cameraNames={cam_left_wrist:'腕部相机 A',cam_right_wrist:'腕部相机 B',cam_ros_left:'头环前左',cam_ros_right:'头环前右',cam_ros_bleft:'头环后左',cam_ros_bright:'头环后右'};
+for(const [name,label] of Object.entries(cameraNames)){
+ const card=document.createElement('div');card.className='camera';card.id=name;
+ card.innerHTML='<div class="camera-top"><b></b><span class="live-tag">等待画面</span></div><div class="view stale"><img alt="实时相机预览" hidden><span class="placeholder">等待实时画面</span></div><div class="camera-foot"></div>';
+ card.querySelector('b').textContent=label;$(name.startsWith('cam_ros')?'#heads':'#wrists').append(card);
+ if(wristSlots.includes(name)){
+  const picks=document.createElement('div');picks.className='wrist-role-buttons hidden';
+  for(const [side,text] of [['left','这是左腕'],['right','这是右腕']]){const button=document.createElement('button');button.textContent=text;button.dataset.side=side;button.setAttribute('aria-pressed','false');button.onclick=()=>chooseWrist(name,side);picks.append(button)}
+  const role=document.createElement('div');role.className='wrist-role-label hidden';card.append(picks,role);
+ }
+}
+function wristCanAssign(s){
+ return s?.state==='wrist_manual'&&!inFlight&&s.actions?.includes('assign_wrist_roles')&&s.wrist_assignment?.preview_id===s.preview_id&&!!s.preview_id&&wristSlots.every(slot=>{
+  const img=$('#'+slot+' img');return s.previews?.[slot]?.live&&!img.hidden&&img.dataset.previewId===s.preview_id&&Date.now()-Number(img.dataset.loadedAt)<3000;
+ });
+}
+function chooseWrist(slot,side){
+ if(!wristCanAssign(status))return;
+ wristLeftSlot=side==='left'?slot:wristSlots.find(name=>name!==slot);renderWrist(status);
+}
+function renderWrist(s){
+ const active=s.state.startsWith('wrist_'),manual=s.state==='wrist_manual',context=s.wrist_assignment;
+ const key=context?context.session_id+'|'+context.preview_id:'';
+ if(key!==wristDraftKey||!manual){wristDraftKey=key;wristLeftSlot=null}
+ $('#wrist-methods').classList.toggle('hidden',!active);$('#wrist-manual-help').classList.toggle('hidden',!manual);$('#wrist-assignment').classList.toggle('hidden',!manual);
+ $$('#wrist-methods button').forEach(button=>{button.disabled=inFlight||!s.actions?.includes('wrist_method');button.setAttribute('aria-pressed',String(button.dataset.method===(manual?'manual':active&&s.state!=='wrist_choose'?'occlusion':'')))});
+ const canAssign=wristCanAssign(s);
+ for(const slot of wristSlots){const card=$('#'+slot),side=wristLeftSlot?(slot===wristLeftSlot?'left':'right'):null;card.querySelector('.wrist-role-buttons').classList.toggle('hidden',!manual);const role=card.querySelector('.wrist-role-label');role.classList.toggle('hidden',!manual);role.textContent=side?'已选择：'+(side==='left'?'左腕':'右腕'):'待指定左右';card.querySelectorAll('[data-side]').forEach(button=>{button.disabled=!canAssign;button.setAttribute('aria-pressed',String(button.dataset.side===side))})}
+ $('#confirm-wrist').disabled=!canAssign||!wristLeftSlot;
+ const left=wristLeftSlot===wristSlots[0]?'A':'B',right=left==='A'?'B':'A';
+ $('#wrist-selection').textContent=wristLeftSlot?'待确认：'+left+' → 左腕，'+right+' → 右腕':'请选择实际左腕或右腕对应的画面。';
+ $('#wrist-selection-hint').textContent=canAssign?'选择后点击确认才会保存。':'等待两路实时画面，或等待当前操作完成。';
+}
+$$('#wrist-methods button').forEach(button=>button.onclick=()=>act('wrist_method',button.dataset.method));
+$('#confirm-wrist').onclick=()=>{const context=status?.wrist_assignment;if(wristCanAssign(status)&&wristLeftSlot&&context)act('assign_wrist_roles',{session_id:context.session_id,preview_id:context.preview_id,left_slot:wristLeftSlot})};
+for(const [name,label] of [['emg_left','肌电 A'],['emg_right','肌电 B']]){
+ const card=document.createElement('div');card.className='signal';card.id=name;
+ card.innerHTML='<div class="signal-head"><b></b><span class="live-tag">等待数据</span></div><canvas width="900" height="432"></canvas><div class="signal-meta"></div>';
+ card.querySelector('b').textContent=label;$('#signals').append(card);
+ const picks=document.createElement('div');picks.className='emg-role-buttons hidden';picks.setAttribute('role','group');picks.setAttribute('aria-label',label+'的实际佩戴侧');
+ for(const [side,text] of [['left','这是左臂'],['right','这是右臂']]){const button=document.createElement('button');button.textContent=text;button.dataset.side=side;button.setAttribute('aria-pressed','false');button.onclick=()=>chooseEmg(name,side);picks.append(button)}
+ const role=document.createElement('div');role.className='emg-role-label hidden';card.append(picks,role);
+}
+function emgConfirmed(s){return s?.emg_calibration?.valid===true&&!['emg_manual','emg_pairing'].includes(s.state)}
+function emgLabel(s,slot){return emgConfirmed(s)?(slot==='emg_left'?'左臂肌电':'右臂肌电'):'肌电 '+(slot==='emg_left'?'A':'B')}
+function emgContextKey(s){
+ const context=s?.emg_assignment;
+ if(!context||typeof context.session_id!=='string'||!context.session_id||typeof context.preview_id!=='string'||!context.preview_id||context.preview_id!==s.preview_id)return '';
+ const sources=emgSlots.map(slot=>context.sources?.[slot]);
+ if(sources.some(source=>typeof source!=='string'||!source)||sources[0]===sources[1])return '';
+ return JSON.stringify([s.system?.boot_id,s.system?.controller_pid,context.session_id,context.preview_id,...sources]);
+}
+function emgSignalFresh(s,slot){
+ const context=s?.emg_assignment,value=s?.signals?.[slot];
+ if(!online||lastStatusReceivedAt===null||!emgContextKey(s)||!value?.live||value.preview_id!==context.preview_id||value.source_path!==context.sources[slot])return false;
+ const elapsed=(performance.now()-lastStatusReceivedAt)/1000,age=Number(s.server_time)-Number(value.time);
+ if(!Number.isFinite(elapsed)||elapsed<0||!Number.isFinite(age)||age<0||age+elapsed>=3)return false;
+ const validRow=row=>Array.isArray(row)&&Number.isFinite(row[0])&&Array.isArray(row[1])&&row[1].length===8&&row[1].every(bounds=>Array.isArray(bounds)&&bounds.length===2&&bounds.every(Number.isFinite));
+ return Array.isArray(value.rows)&&value.rows.length>0&&value.rows.every(validRow)&&value.rows.some(row=>Number(s.server_time)-row[0]>=0&&Number(s.server_time)-row[0]+elapsed<3);
+}
+function emgManualReady(s){return s?.state==='emg_manual'&&!!emgContextKey(s)&&emgSlots.every(slot=>emgSignalFresh(s,slot))}
+function emgCanAssign(s){return emgManualReady(s)&&!inFlight&&s.actions?.includes('assign_emg_roles')}
+function clearEmgDraft(){emgDraftKey='';emgLeftSlot=null}
+function chooseEmg(slot,side){
+ renderEmg(status);
+ if(!emgSlots.includes(slot)||!['left','right'].includes(side)||!emgCanAssign(status))return;
+ emgLeftSlot=side==='left'?slot:emgSlots.find(name=>name!==slot);renderEmg(status);
+}
+function renderEmg(s){
+ if(!s)return;
+ const manual=s.state==='emg_manual',key=emgContextKey(s),ready=emgManualReady(s);
+ if(!manual||key!==emgDraftKey||!ready){emgDraftKey=manual?key:'';emgLeftSlot=null}
+ $('#emg-manual-help').classList.toggle('hidden',!manual);$('#emg-assignment').classList.toggle('hidden',!manual);
+ $('#emg-calibration').textContent=emgConfirmed(s)?(s.emg_calibration.method==='ordered_insertion'?'左右已按插入顺序确认':'左右已人工确认'):'左右待确认';
+ $('#emg-note').textContent=manual?'请分别握拳观察，人工指定两路信号的实际佩戴侧':'近2秒原始ADC包络 · 每通道独立自动缩放 · '+(emgConfirmed(s)?'已确认实际左右':'A/B暂不代表左右');
+ if(s.state==='emg_pairing')$('#emg-note').textContent=s.emg_pairing?.message||'按插入顺序确认肌电左右';
+ const canAssign=emgCanAssign(s);
+ for(const slot of emgSlots){
+  const card=$('#'+slot),side=emgLeftSlot?(slot===emgLeftSlot?'left':'right'):null;
+  card.querySelector('b').textContent=emgLabel(s,slot);card.querySelector('.emg-role-buttons').classList.toggle('hidden',!manual);
+  const role=card.querySelector('.emg-role-label');role.classList.toggle('hidden',!manual);role.textContent=side?'待确认：'+(side==='left'?'左臂':'右臂'):'待指定左右';
+  card.querySelectorAll('.emg-role-buttons button').forEach(button=>{button.disabled=!canAssign;button.setAttribute('aria-pressed',String(button.dataset.side===side))});
+  if(manual&&!emgSignalFresh(s,slot))drawSignal(slot,{live:false,rows:[]});
+ }
+ $('#confirm-emg').disabled=!canAssign||!emgLeftSlot||emgDraftKey!==key;
+ const left=emgLeftSlot===emgSlots[0]?'A':'B',right=left==='A'?'B':'A';
+ $('#emg-selection').textContent=emgLeftSlot?'待确认：'+left+' → 左臂，'+right+' → 右臂':'请观察动作对应的信号，再选择实际左臂或右臂。';
+ $('#emg-selection-hint').textContent=!ready?'等待两路当前预览的实时信号；恢复后请重新选择。':inFlight?'正在提交，请稍候。':'选择一侧后另一路自动设为相反侧；点击确认才会保存。';
+}
+$('#confirm-emg').onclick=()=>{renderEmg(status);const context=status?.emg_assignment;if(emgCanAssign(status)&&emgLeftSlot&&emgDraftKey===emgContextKey(status))act('assign_emg_roles',{session_id:context.session_id,preview_id:context.preview_id,left_slot:emgLeftSlot})};
+const steps={
+ emg_pairing:['按插入顺序确认肌电左右','先插左臂，等待确认后再插右臂；先按提示只拔下两只肌电接收器，其他设备保持连接。',1],
+ starting:['启动中','正在启动采集服务。',0],scanning:['正在检查设备','正在检查图像、肌电数据，请稍候。',0],device_confirm:['确认采集设备','检查预览和下方设备列表，确认后进入本次采集。',0],
+ wrist_choose:['选择腕部标定方式','在腕部画面上方选择“看画面选择左右”或“遮挡镜头标定”。点击遮挡镜头标定进入该流程。',1],
+ wrist_manual:['看画面确认腕部左右','观察两路实时画面，在画面下指定实际左腕或右腕，再点击确认左右。',1],
+ emg_manual:['观察信号确认肌电左右','分别握左拳、右拳并放松，观察两路信号；在对应信号下选择实际左臂或右臂，最后点击确认肌电左右。',1],
+ wrist_baseline:['相机标定 · 1 / 4','松开两只腕部镜头，保持无遮挡，点击检测本步。',1],
+ wrist_left:['相机标定 · 2 / 4','只遮住你实际左腕的镜头，右腕保持无遮挡。点击检测，并保持到下一步。',1],
+ wrist_right:['相机标定 · 3 / 4','松开左腕镜头，只遮住右腕镜头。点击检测，并保持到下一步。',1],
+ wrist_restore:['相机标定 · 4 / 4','松开两只镜头，点击检测本步，完成左右确认。',1],
+ idle:['标定就绪 · 准备任务','点击准备本段，查看任务参考图像并启动设备预检。此时尚未录制。',2],
+ preparing:['正在准备本段','正在打开本段采集设备。参考图像用于布置场景，请等待设备就绪。',2],
+ ready:['准备完成 · 等待开始','目前尚未录制。确认场景准备好后，点击开始录制。',2],
+ countdown:['即将开始录制','正在倒计时，请保持准备姿势。',3],
+ recording:['正在录制','数据正在写入 Pi。完成本段后长按黑屏三秒停止采集。',3],
+ confirm_stop:['已停止 · 等待保存确认','确认保存后才整理文件并做质量检查。重采会删除本段文件，重新准备同一任务。',4],
+ discarding:['正在放弃本段','正在关闭设备并删除本段文件，完成后重新准备同一任务。',4],
+ finalizing:['正在保存与检验','文件已停止录制，正在整理和检查数据。可在下方回看已完成收尾的视频。',5],
+ failed_wait:['本段需要处理','请查看下方错误提示，排查后重试。',2],error:['检测到采集错误','数据保存状态正在确认，请查看错误提示。',5],
+ exhausted:['任务队列已完成','当前参考图像都已采集，可重新检查任务队列。',5],stopped:['采集服务已停止','请检查 Pi 上的采集服务。',0]};
+const labels={abandon:'放弃本次采集',impedance_start:'开始阻抗检查',impedance_end:'结束阻抗检查',impedance_review:'确认结果，继续',confirm_devices:'确认设备，继续',prepare:'准备本段',measure:'检测本步',restart_calibration:'从头标定',start:'开始录制',stop:'停止录制',keep:'确认保存',retry:'重采本段',repeat:'重复语音提示'};
+const primary=['impedance_review','impedance_start','impedance_end','confirm_devices','prepare','measure','start','stop','keep'];
+function renderActions(s){
+ const phone=document.body.classList.contains('phone-app'),container=$('#actions'),allowed=s.actions||[];
+ const wanted=allowed.filter(action=>labels[action]&&(phone||!action.startsWith('impedance_')));
+ for(const button of [...container.children])if(!wanted.includes(button.dataset.action))button.remove();
+ wanted.forEach((action,index)=>{
+  let button=[...container.children].find(b=>b.dataset.action===action);
+  if(!button){button=document.createElement('button');button.dataset.action=action;button.onclick=()=>act(action);}
+  const text=phone&&action==='start'?'开始采集':labels[action];
+  if(button.textContent!==text)button.textContent=text;
+  const className=primary.includes(action)?(action==='stop'?'danger':'primary'):'';
+  if(button.className!==className)button.className=className;
+  const blockedReview=action==='impedance_review'&&!impedanceDisplay(s.eeg_impedance||{},s.server_time).canContinue;
+  const disabled=inFlight||!allowed.includes(action)||blockedReview;
+  if(button.disabled!==disabled)button.disabled=disabled;
+  if(container.children[index]!==button)container.insertBefore(button,container.children[index]||null);
+ });
+}
+function toast(text){$('#toast').textContent=text;$('#toast').classList.remove('hidden');setTimeout(()=>$('#toast').classList.add('hidden'),4500)}
+function duration(seconds){seconds=Math.max(0,Math.floor(seconds));return String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0')}
+let reviewKey='',playingKey='';
+function renderReview(s){
+ if(document.body.classList.contains('phone-app'))return;
+ const review=s.review,video=$('#review-video');
+ $('#review-card').classList.toggle('hidden',!review);
+ if(!review){if(playingKey){video.pause();video.removeAttribute('src');video.load();playingKey=''}reviewKey='';return}
+ const key=review.session+'|'+review.videos.map(v=>v.name).join(',');
+ if(key!==reviewKey){
+  if(!playingKey.startsWith(review.session+'|')){video.pause();video.removeAttribute('src');video.load();video.classList.add('hidden');playingKey='';$('#review-playback').textContent=''}
+  const old=$('#review-camera').value;$('#review-camera').replaceChildren();
+  for(const v of review.videos){const option=document.createElement('option');option.value=v.name;option.textContent=v.label+' · '+v.duration.toFixed(1)+' 秒';$('#review-camera').append(option)}
+  if(review.videos.some(v=>v.name===old))$('#review-camera').value=old;
+  reviewKey=key;
+ }
+ $('#review-play').disabled=!review.videos.length;
+ $('#review-session').textContent='录像 '+review.session;
+ const isCurrent=s.session?.split('/').pop()===review.session;
+ $('#review-note').textContent=review.videos.length?(s.state==='confirm_stop'&&isCurrent?'视频已暂存到 Pi，可先回看再决定是否保留。回看不会确认保存。':'选择一路回看，可播放、暂停或拖动进度。原始视频由浏览器播放，不在 Pi 上重新压缩。'):'正在完成视频文件收尾，通常几秒后即可回看。';
+ $('#review-quality').textContent=review.qc_state==='pending'?'待主机质检':({INFO:'检验通过',WARN:'检验完成 · 有提示',ERROR:'检验发现错误'})[review.qc_level]||'质量检验进行中';
+ $('#review-summary').textContent='质量提示 '+review.warnings.length+' 项'+(review.qc_elapsed_seconds?' · 检验耗时 '+review.qc_elapsed_seconds.toFixed(1)+' 秒':'');
+ $('#review-findings').replaceChildren();
+ for(let message of review.warnings){
+  const m=message.match(/^(\w+): frame timestamp gap ns=(\d+)$/);
+  if(m)message=({cam_left_wrist:'左腕相机',cam_right_wrist:'右腕相机'})[m[1]]+'：两帧间隔 '+(Number(m[2])/1e6).toFixed(1)+' 毫秒，可能存在延迟或丢帧。';
+  const li=document.createElement('li');li.textContent=message;$('#review-findings').append(li);
+ }
+}
+$('#review-play').onclick=async()=>{
+ const review=status?.review,name=$('#review-camera').value;if(!review||!name)return;
+ const video=$('#review-video');video.classList.remove('hidden');playingKey=review.session+'|'+name;
+ video.src='/api/video/'+encodeURIComponent(name)+'?'+authQuery()+'session='+encodeURIComponent(review.session);
+ $('#review-playback').textContent='正在读取所选录像…';
+ try{await video.play()}catch(error){$('#review-playback').textContent='未能开始播放，请尝试视频上的播放按钮；浏览器需支持 H.265 视频。'}
+};
+$('#review-video').onloadedmetadata=()=>$('#review-playback').textContent='录像已加载 · '+$('#review-video').duration.toFixed(1)+' 秒，可拖动进度回看';
+$('#review-video').onplaying=()=>$('#review-playback').textContent='正在回看已录制视频';
+$('#review-video').onerror=()=>{if(playingKey)$('#review-playback').textContent='当前浏览器未能播放此 H.265 录像，请使用支持该格式的浏览器。'};
+function drawSignal(name,value){
+ if(document.body.classList.contains('phone-app')&&!document.getElementById(name)?.getClientRects().length)return;
+ if(privacyScreen?.isLocked())return;
+ if(emgSlots.includes(name)&&status?.state==='emg_manual'&&!emgSignalFresh(status,name))value={live:false,rows:[]};
+ if(window.drawLiveSignalPlot){window.drawLiveSignalPlot(document.getElementById(name),name,value,status);return;}
+ const canvas=$('#'+name+' canvas'),ctx=canvas.getContext('2d'),w=canvas.width,h=canvas.height;
+ ctx.clearRect(0,0,w,h);ctx.font='19px sans-serif';const rows=(value.rows||[]).filter(r=>status.server_time-r[0]<3);
+  const channelLabels=value.channel_labels||Array.from({length:8},(_,i)=>String(i+1)), channels=channelLabels.length;
+ for(let ch=0;ch<channels;ch++){
+  const y=(ch+.5)*h/channels;ctx.strokeStyle='#dbe5ea';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(52,y);ctx.lineTo(w-12,y);ctx.stroke();ctx.fillStyle='#6e838e';ctx.fillText(channelLabels[ch],8,y+6);
+  if(!value.live||!rows.length)continue;
+  const vals=rows.flatMap(r=>r[1][ch]),min=Math.min(...vals),max=Math.max(...vals),mid=(max+min)/2,span=Math.max(max-min,20);
+  ctx.strokeStyle=ch%2?'#5589a6':'#087e85';ctx.lineWidth=1.8;ctx.beginPath();
+  rows.forEach(r=>{let x=56+(r[0]-(rows[rows.length-1][0]-2))/2*(w-76);if(x<56)return;const bounds=r[1][ch];ctx.moveTo(x,y-(bounds[0]-mid)/span*h/10);ctx.lineTo(x,y-(bounds[1]-mid)/span*h/10)});ctx.stroke();
+ }
+ const tag=$('#'+name+' .live-tag');tag.textContent=value.live?'● 数据持续到达':'未收到实时数据';tag.classList.toggle('live',!!value.live);
+ if(name==='eeg'){const preset=status.eeg_filter_presets?.[value.filter_preset]?.label||'等待数据';$('#eeg .signal-meta').textContent=preset+' · 单位 µV · CH1–CH8 全部启用';return;}
+ const identity=emgConfirmed(status)?'尾号 '+(status.emg_serial_roles?.[name]?.slice(-5)||'—'):'临时通道 '+(name==='emg_left'?'A':'B');
+ $('#'+name+' .signal-meta').textContent=identity+' · '+(value.live?'原始 ADC 包络 · 通道独立自动缩放':'等待当前实时数据');
+}
+function impedanceDisplay(value,serverTime){
+ const q=value.quality||{},phase=value.phase||'unavailable';
+ const advisory=value.impedance_acceptance_policy==='advisory';
+ const qKnown=q.policy==='all_enabled_impedance_lt_60kohm_v1'&&q.threshold_kohm===60&&q.comparison==='lt'
+  &&Number.isInteger(q.expected_mask)&&q.expected_mask>0&&q.expected_mask<=255
+  &&Number.isInteger(q.expected_count)&&q.expected_count>0&&q.expected_count<=8&&Array.isArray(q.channels);
+ const mask=qKnown?q.expected_mask:(Number.isInteger(value.expected_channel_mask)&&value.expected_channel_mask>0&&value.expected_channel_mask<=255?value.expected_channel_mask:255),expected=Array.from({length:8},(_,i)=>i+1).filter(ch=>mask&(1<<(ch-1)));
+ const age=typeof value.updated_at==='number'?Number(serverTime)-value.updated_at:null;
+ const stale=value.stale===true||(phase==='measuring'&&age!==null&&(!Number.isFinite(age)||age<0||age>=2));
+ let passed=0;
+ const channels=Array.from({length:8},(_,i)=>{
+  const channel=i+1,item=(value.channels||[]).find(c=>c.channel===channel)||{},part=(q.channels||[]).find(c=>c.channel===channel)||{};
+  const enabled=expected.includes(channel),number=item.value_kohm;
+  const valid=enabled&&!stale&&item.enabled===true&&item.reason==='ok'&&typeof number==='number'&&Number.isFinite(number)&&number>=0;
+  let state='待测',style='impedance-disabled',text='—';
+  if(!enabled)state='未参与';
+  else if(stale||item.stale===true){state='不通过 · 数据过期';style='impedance-high'}
+  else if(qKnown&&part.state==='pass'&&valid&&number<60&&q.window_ready===true){state='通过';style='impedance-good';passed++}
+  else if(qKnown&&(part.state==='fail'||(valid&&number>=60))){state='不通过';style='impedance-high'}
+  else if(qKnown&&part.state==='pending')state='待测';
+  else if(qKnown&&phase==='completed'){state='不通过 · 缺有效结果';style='impedance-high'}
+  else if(valid)state='等待判定';
+  if(advisory&&enabled&&state.startsWith('不通过'))state=valid&&number>=60?'偏高 · 仅作参考':'无有效结果 · 仅作参考';
+  if(valid)text=number<60&&number.toFixed(1)==='60.0'?'<60.0':number<1?number.toFixed(3):number.toFixed(1);
+  return {channel,item,enabled,state,style,text};
+ });
+ const complete=qKnown&&q.expected_count===expected.length&&q.valid_count===expected.length&&q.passed_count===expected.length
+   &&passed===expected.length&&!stale&&phase==='completed'&&value.active===false&&value.pending===false&&!value.error&&value.loff_off_confirmed===true&&value.frontend_restored===true&&value.normal_frame_confirmed===true;
+ const accepted=complete&&q.passed===true&&q.state==='pass';
+ let label='等待判定',style='impedance-disabled';
+ if(accepted){label='通过 · '+passed+'/'+expected.length;style='impedance-good'}
+ else if(qKnown&&(q.state==='fail'||q.state==='pass'||stale)){label='不通过 · '+passed+'/'+expected.length;style='impedance-high'}
+ else if(qKnown&&q.state==='pending'){label=(phase==='restoring'||phase==='resuming'?'等待设备恢复':'检测中')+' · '+passed+'/'+expected.length;style='impedance-watch'}
+ else if(qKnown&&q.state==='unavailable')label='未检测';
+  const recovered=qKnown&&q.window_ready===true&&q.expected_count===expected.length&&q.valid_count===expected.length
+   &&channels.filter(c=>c.enabled&&c.item.enabled===true&&c.item.reason==='ok'&&typeof c.item.value_kohm==='number'&&Number.isFinite(c.item.value_kohm)&&c.item.value_kohm>=0&&c.item.stale!==true).length===expected.length&&!stale
+   &&phase==='completed'&&value.active===false&&value.pending===false&&!value.error&&value.window_ready===true
+  &&value.loff_off_confirmed===true&&value.frontend_restored===true&&value.normal_frame_confirmed===true;
+ if(advisory&&phase==='completed'){label='检测已结束 · 阻抗仅作参考';style='impedance-watch'}
+ return {accepted,canContinue:accepted||advisory&&recovered,advisory,label,style,channels,stale};
+}
+function renderImpedance(s){
+ const value=s.eeg_impedance||{},phase=value.phase||'unavailable',verdict=impedanceDisplay(value,s.server_time);
+ const configured=s.eeg_config?.labels;
+ const names=Array.isArray(configured)&&configured.length===8?configured:['FC3','C3','O1','Pz','Oz','O2','C4','FC4'];
+ $('#eeg-channels-title').textContent='脑电 · '+names.filter((_,i)=>!(s.eeg_config?.disabled_channels||[]).includes(i+1)).join(' / ');
+ const phases={unavailable:'暂不可用',not_selected:'未选择脑电',awaiting_prepare:'先准备本段',initializing:'正在连接脑电',interrupted:'上次准备已中断',not_checked:'待检查',starting:'正在准备检测',measuring:'检测中',restoring:'正在恢复设备',resuming:'等待普通脑电',completed:'检查已完成',fault:'检查异常'};
+ $('#impedance-phase').textContent=phases[phase]||'等待检查';
+ $('#impedance-verdict').textContent=verdict.label;$('#impedance-verdict').className=verdict.style;
+ $('#impedance-policy').textContent=verdict.advisory?'当前版本阻抗仅作参考，是否达到 60 kΩ 均可继续。结束检查并确认结果后进入参考图。':'所有启用通道须低于 60 kΩ；等于 60 kΩ 不通过。参考与偏置电极未单独测量。';
+ for(const button of $$('[data-impedance-action="impedance_review"]'))button.textContent=verdict.advisory?'确认结果，继续':'确认通过结果，继续';
+ let note=value.message||value.error||({unavailable:'阻抗检查暂不可用。',not_selected:'本段未选择脑电设备。',awaiting_prepare:'请先准备本段，设备就绪后开始阻抗检查。',initializing:'正在准备本段并连接脑电设备。',interrupted:'上次准备已中断，请重新准备。',not_checked:'开始检查后调整电极接触，全部启用通道低于 60 kΩ 才能通过。',starting:'正在确认检测配置。',measuring:'调整电极接触并观察逐通道结果，等待完整检测窗口。',restoring:'正在关闭检测并恢复原配置。',resuming:'正在等待恢复后的普通脑电数据。',completed:verdict.accepted?(value.can_record?'阻抗已通过并确认，可开始正式录制。':'阻抗已通过，请确认结果后继续。'):'阻抗尚未通过，请调整不通过通道并重新检测。',fault:'检测或设备恢复未确认，请处理错误。'})[phase]||'等待设备状态';
+ if(verdict.advisory&&phase==='not_checked')note='开始检查并记录阻抗；当前版本不按 60 kΩ 拦截采集。';
+  if(verdict.advisory&&phase==='completed'&&!value.error)note=!verdict.canContinue?'缺少完整有效读数，请重新检测。':value.can_record?'阻抗结果已记录，普通脑电采样已恢复，可以继续。':'阻抗结果仅作参考，确认结果后继续查看参考图。';
+ if(verdict.stale)note='检测数据已过期，请等待新的完整有效检测窗口。';
+ $('#impedance-note').textContent=note;$('#impedance-note').classList.toggle('error',!!value.error||verdict.stale||!verdict.advisory&&value.quality?.state==='fail');
+ if(s.state==='ready'&&value.required===true&&!value.can_record){$('#step-title').textContent='采集前阻抗检查';$('#instruction').textContent=note}
+ $('#impedance-channels').replaceChildren();
+ for(const rowValue of verdict.channels){
+  const row=document.createElement('tr');
+  for(const cell of ['CH'+rowValue.channel+' · '+(rowValue.item.label||names[rowValue.channel-1]),rowValue.text,rowValue.state]){const td=document.createElement('td');td.textContent=cell;td.className=rowValue.style;row.append(td)}
+  $('#impedance-channels').append(row);
+ }
+ const stamp=value.completed_at||value.updated_at,date=stamp?new Date(typeof stamp==='number'?stamp*1000:stamp):null;
+ $('#impedance-time').textContent=date&&!Number.isNaN(date.valueOf())?(phase==='completed'?'本段检测完成：':'最近更新：')+date.toLocaleString():'尚无本段检查结果';
+ for(const button of $$('[data-impedance-action]'))button.disabled=!(s.actions||[]).includes(button.dataset.impedanceAction)||inFlight||(button.dataset.impedanceAction==='impedance_review'&&!verdict.canContinue);
+}
+
+function render(s){
+ const settingsState=settingsDraft.observe(s);
+ const system=s.system||{};
+ if(lastBoot&&system.boot_id&&lastBoot!==system.boot_id){
+  clearEmgDraft();$('#system-notice').textContent='检测到 Pi 整机重新启动：上一段录制可能未完成保存。腕部相机与肌电需要重新确认实际左右。';
+  $('#system-notice').classList.remove('hidden');
+ }else if(lastController&&system.controller_pid&&lastController!==system.controller_pid){
+  clearEmgDraft();$('#system-notice').textContent='采集服务已重新启动，未确认的肌电选择已清除。已保存的左右结果以当前设备检查为准。';
+  $('#system-notice').classList.remove('hidden');
+ }
+ if(system.boot_id)lastBoot=system.boot_id;
+ if(system.controller_pid)lastController=system.controller_pid;
+ const manualFinished=status?.state==='wrist_manual'&&!s.state.startsWith('wrist_');
+ if(s.preview_id!==lastPreviewId||manualFinished){for(const name of Object.keys(cameraNames)){const img=$('#'+name+' img');img.onload=img.onerror=null;img.hidden=true;img.removeAttribute('src');delete img.dataset.loading;delete img.dataset.previewId;delete img.dataset.loadedAt}lastPreviewId=s.preview_id}
+ status=s;document.body.classList.toggle('recording',s.state==='recording');
+ const step=s.state==='idle'&&s.last_completed?.outcome==='success'?['本段已保存 · 可回看','可回看刚才的录像和质量提示，点击准备本段进入下一段任务。',5]:(steps[s.state]||[s.state,'等待采集程序更新。',0]);$('#title').textContent=step[0];$('#step-title').textContent=step[0];$('#step-no').textContent='当前步骤 / '+String(step[2]+1).padStart(2,'0');$('#instruction').textContent=step[1];
+ if(s.state==='emg_pairing')$('#instruction').textContent=s.emg_pairing?.message||steps.emg_pairing[1];
+ if(s.state==='finalizing'){
+  const w=s.worker||{},p=w.progress||{};
+  if(w.state==='postprocessing')$('#instruction').textContent='正在整理肌电和时间戳数据。视频完成收尾后可在下方回看。';
+  if(w.state==='checking')$('#instruction').textContent='质量检验：已完成 '+(p.completed||0)+' / '+(p.total||'—')+' 项。'+(p.active?.length?'正在检查 '+p.active.map(n=>({emg_left:'左臂肌电',emg_right:'右臂肌电',board_imu:'惯性传感器',marker:'起止标记',eeg:'脑电',...cameraNames})[n]||n).join('、')+'。':'')+(w.processing_started?' 已用时 '+duration(s.server_time-w.processing_started)+'。':'');
+  if(w.state==='success')$('#instruction').textContent='文件与检验已完成，正在登记本段结果。';
+ }
+ renderReview(s);
+ $('#subtitle').textContent=s.state==='recording'?'实时预览与原始数据同步采集':emgConfirmed(s)?'左肌电 '+(s.emg_serial_roles?.emg_left?.slice(-5)||'—')+' · 右肌电 '+(s.emg_serial_roles?.emg_right?.slice(-5)||'—')+' · 左右已人工确认':'肌电 A / B · 实际左右待人工确认';
+ $$('#flow li').forEach((el,i)=>{el.classList.toggle('active',i===step[2]);el.classList.toggle('past',i<step[2])});
+ $('#saved').textContent=s.success_count||0;$('#disk').textContent=s.storage?.free_gb??'—';$('#elapsed').textContent=duration(s.state==='recording'&&s.recording_since?s.server_time-s.recording_since:0);
+ $('#calibration').textContent=s.wrist_calibration?.valid?'本次开机已标定':'左右待确认';$('#wrist-note').textContent=s.wrist_calibration?.valid?'重新插拔相机后需要再次确认左右':'标定前的 A/B 是临时编号，不代表实际左/右';
+ $('#busy').textContent=s.can_skip_speech?'正在播报，可直接点击操作跳过语音。':s.busy?(s.state==='wrist_manual'||s.state==='emg_manual'?'正在确认左右，请稍候。':s.state==='wrist_choose'?'正在切换标定方式，请稍候。':s.state.startsWith('wrist_')?'正在检测本步，请保持镜头遮挡状态，检测完成后可继续。':'正在执行，请等待…'):'';$('#voice').textContent=s.last_voice?'最近语音：'+s.last_voice:'';
+ renderActions(s);
+ $$('#settings-card [data-action]').forEach(el=>el.disabled=!(s.actions||[]).includes(el.dataset.action));$('#set-volume').disabled=!(s.actions||[]).includes('volume');
+ const eegSettings=document.getElementById('eeg-filter-settings');if(eegSettings)eegSettings.hidden=s.collection_mode==='emg';
+ const filterSelect=$('#eeg-filter');if(!filterSelect.options.length){for(const [key,item] of Object.entries(s.eeg_filter_presets||{})){const option=document.createElement('option');option.value=key;option.textContent=item.label;filterSelect.append(option)}}
+ const eegPreset=s.eeg_config?.filter_preset||'general',filterFeedback=$('#eeg-filter-readback'),eegDraft=settingsState.eeg;
+ if(!eegDraft.dirty&&!eegDraft.pending&&!inFlight&&document.activeElement!==filterSelect&&filterSelect.value!==eegPreset)filterSelect.value=eegPreset;
+ filterSelect.disabled=!(s.actions||[]).includes('eeg_filter')||inFlight;$('#set-eeg-filter').disabled=filterSelect.disabled;
+ filterFeedback.textContent=eegDraft.feedback||('当前已读回：'+(s.eeg_filter_presets?.[eegPreset]?.label||eegPreset));
+ const audio=s.audio||{},volumeSlider=$('#volume'),volumeFeedback=$('#volume-readback'),volumeDraft=settingsState.volume;
+ if(!volumeDraft.dirty&&!volumeDraft.pending&&!inFlight&&document.activeElement!==volumeSlider&&Number.isInteger(audio.volume_requested))volumeSlider.value=String(audio.volume_requested);
+ $('#volume-label').textContent=volumeSlider.value+'%';
+ $('#set-volume').disabled=!(s.actions||[]).includes('volume')||inFlight;
+ if(volumeDraft.pending)volumeFeedback.textContent='已提交 '+volumeDraft.pending.value+'%，等待头环输出应用与读回。';
+ else if(volumeDraft.dirty)volumeFeedback.textContent=volumeDraft.feedback||'新值尚未应用到头环。';
+ else if(audio.volume_state==='applied')volumeFeedback.textContent='已应用并读回：'+audio.volume_applied+'%'+(audio.volume_sink?' · '+audio.volume_sink:'');
+ else if(audio.volume_state==='failed'||audio.volume_state==='unavailable')volumeFeedback.textContent='头环音量尚未应用：'+(audio.volume_error||audio.volume_state);
+ else if(audio.volume_state==='disabled')volumeFeedback.textContent='头环语音输出已停用。';
+ else volumeFeedback.textContent='等待头环音量状态。';
+ const wristSettings=s.wrist_camera_settings||{},wristSelect=$('#wrist-fps-policy');
+ if(wristPolicyPending&&s.result&&s.result.time!==wristPolicyPending.previousResultTime&&!s.busy){if(s.result.ok&&wristSettings.preference===wristPolicyPending.value)wristPolicyDirty=false;wristPolicyPending=null;}
+ const wristPreference=JSON.stringify(wristSettings.preference??null);
+ if(!wristPolicyDirty&&!inFlight&&document.activeElement!==wristSelect&&wristSelect.value!==wristPreference)wristSelect.value=wristPreference;
+ wristSelect.disabled=inFlight||!(s.actions||[]).includes('wrist_camera_settings')||wristSettings.can_change===false;$('#set-wrist-fps-policy').disabled=wristSelect.disabled;
+ const wristReadback=[];
+ for(const slot of wristSlots){const report=wristSettings.devices?.[slot],label=(s.devices||[]).find(d=>d.name===slot)?.label||cameraNames[slot];let text='等待读回';
+  if(report?.pending)text='相机未接入，接入后应用';
+  else if(report?.error)text='设置或读回提示：'+report.error;
+  else if(report?.supported===false)text='相机不支持此选项';
+  else if(typeof report?.actual_allow_auto_exposure_fps_change==='boolean')text=report.actual_allow_auto_exposure_fps_change?'最近读回：允许自动曝光改变帧率':'最近读回：不允许自动曝光改变帧率';
+  wristReadback.push(label+'：'+text);
+ }
+ if(wristSettings.error)wristReadback.push(wristSettings.error);
+ const wristChange=wristSettings.last_change;
+ if(wristChange?.ok===false){wristReadback.push('上次更改失败：'+wristChange.error);
+  for(const slot of wristSlots){const report=wristChange.devices?.[slot],label=(s.devices||[]).find(d=>d.name===slot)?.label||cameraNames[slot];
+   if(report?.rolled_back&&typeof report.actual_allow_auto_exposure_fps_change==='boolean')wristReadback.push(label+'已恢复原设置：'+(report.actual_allow_auto_exposure_fps_change?'允许':'不允许')+'自动曝光改变帧率');
+   else if(report?.rollback_error)wristReadback.push(label+'恢复原设置失败：'+report.rollback_error);
+   else if(report?.rollback_skipped)wristReadback.push(label+(report.pending||report.requested===null?'本次未改动相机参数，无需恢复。':'未执行恢复，请查看更改提示。'));
+  }
+ }
+ if(wristSettings.can_change===false)wristReadback.push('设备正在采集、准备或交接，当前不可更改。');
+ $('#wrist-fps-readback').textContent=wristReadback.join('；');
+ const deviceRows=$('#device-rows'),deviceNames=new Set((s.devices||[]).map(d=>d.name));let ready=0;
+ for(const row of [...deviceRows.children])if(!deviceNames.has(row.dataset.device))row.remove();
+ for(const d of s.devices||[]){
+  if(d.connected)ready++;const identity=d.config?.discovery||{};let tr=[...deviceRows.children].find(row=>row.dataset.device===d.name);const live=s.signals?.[d.name]?.live??s.previews?.[d.name]?.live;
+  if(!tr){tr=document.createElement('tr');tr.dataset.device=d.name;for(let i=0;i<4;i++)tr.append(document.createElement('td'));deviceRows.append(tr);}
+  [emgSlots.includes(d.name)?emgLabel(s,d.name):d.label,identity.serial&&d.name.startsWith('emg')?identity.serial.slice(-5):identity.topology||'板载',d.connected?'通过':d.error||'未连接',live===undefined?'—':live?'持续到达':'等待数据'].forEach((text,index)=>{if(tr.children[index].textContent!==String(text??''))tr.children[index].textContent=text??'';});
+  const camera=$('#'+d.name);if(camera&&camera.classList.contains('camera')){camera.querySelector('b').textContent=d.label;camera.querySelector('.camera-foot').textContent=identity.topology?'USB '+identity.topology:'ROS 板载相机'}
+ }
+ $('#device-count').textContent=ready+' / '+(s.devices||[]).length+' 最近自检通过';
+ for(const name of Object.keys(cameraNames)){const p=s.previews?.[name]||{},card=$('#'+name);card.querySelector('.view').classList.toggle('live',!!p.live);card.querySelector('.view').classList.toggle('stale',!p.live);card.querySelector('.live-tag').textContent=p.live?'● 实时':'等待画面';card.querySelector('.live-tag').classList.toggle('live',!!p.live)}
+ renderWrist(s);
+ renderEmg(s);
+ renderImpedance(s);
+ for(const name of ['emg_left','emg_right','eeg'])drawSignal(name,s.signals?.[name]||{});
+ if(!privacyScreen?.isLocked()&&s.image!==lastReference){lastReference=s.image;$('#reference-image').classList.toggle('hidden',!s.image);if(s.image)$('#reference-image').src='/api/reference?'+authQuery()+'t='+Date.now()}
+ if(!privacyScreen?.isLocked()){const name=s.image?(s.image_name||s.image.split('/').pop().replace('.png','')):'准备本段后显示';if($('#reference-name').textContent!==name)$('#reference-name').textContent=name;}
+ $('#keyboards').textContent='Pi 已识别键盘：'+((s.keyboard_names||[]).join('、')||'暂无，仍可用网页控制');$('#session').textContent=s.session?'本段 '+s.session.split('/').pop():'';
+ const warnings=[...(s.errors||[]),...(s.worker?.errors||[])];if(s.worker?.last_warning){
+  const match=s.worker.last_warning.match(/^(\w+): frame timestamp gap ns=(\d+)$/);
+  const device=match&&(s.devices||[]).find(d=>d.name===match[1]);
+  warnings.push(match?'画面间隔提示：'+(device?.label||cameraNames[match[1]]||match[1])+' 两帧间隔 '+(Number(match[2])/1e6).toFixed(1)+' 毫秒，可能存在延迟或丢帧。此提示本身不会停止录制；请以当前录制状态为准。':s.worker.last_warning);
+ }$('#notice').classList.toggle('hidden',!warnings.length);$('#notice').textContent=[...new Set(warnings)].join('；');
+ if(s.result&&s.result.time!==lastResult){lastResult=s.result.time;if(s.result.error)toast(s.result.error)}
+}
+async function act(action,value){
+ if(action==='collection_mode')return requestCollectionMode(value);
+ if(modeIntent)return false;
+ if(inFlight||!online||!status?.actions?.includes(action)||privacyScreen?.isLocked())return;
+ if(action==='start'&&phoneCompanion?.beforeStart&&!phoneCompanion.beforeStart())return;
+ if(action==='assign_emg_roles'&&(!emgCanAssign(status)||!emgLeftSlot||emgDraftKey!==emgContextKey(status)||value?.left_slot!==emgLeftSlot||value?.session_id!==status.emg_assignment?.session_id||value?.preview_id!==status.emg_assignment?.preview_id)){renderEmg(status);return}
+ if(['retry','discard_recording'].includes(action)&&!confirm('放弃并删除本段录制文件？清理完成后返回总览，由您手动准备。本段文件将不再保留。'))return;
+ const previousResultTime=status.result?.time,requestRevision=status.revision,requestInstance=status.privacy?.instance;let accepted=false;inFlight=true;$$('button[data-action],button[data-impedance-action]').forEach(b=>b.disabled=true);$('#set-volume').disabled=true;$('#eeg-filter').disabled=true;$('#set-eeg-filter').disabled=true;renderEmg(status);
+ const actionController=new AbortController(),actionTimer=setTimeout(()=>actionController.abort(),6000);
+ try{if(action==='start'){await privacyScreen.beforeStart();if(!online||!status?.actions?.includes('start')||status.revision!==requestRevision||status.privacy?.instance!==requestInstance){privacyScreen.startRejected();return}}const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value,revision:requestRevision,collection_context:collectionContext,...(action==='start'?{stop_protocol:'session-stop-v1'}:{})}),signal:actionController.signal});const data=await res.json();if(!res.ok){const error=Error(data.error||'操作失败');error.status=res.status;throw error}accepted=true;if(action==='wrist_camera_settings')wristPolicyPending={value,previousResultTime};}
+ catch(error){if(action==='start'&&error.status>=400&&error.status<500)privacyScreen.startRejected();if(action==='assign_emg_roles')clearEmgDraft();toast(error.name==='AbortError'?'操作结果尚未确认，请等待 Pi 状态更新后再继续。':error.message)}finally{clearTimeout(actionTimer);inFlight=false;await poll();renderEmg(status)}
+ return accepted;
+}
+// AbortSignal.timeout is unavailable in the Pi's Chromium 91.
+async function readStatus(){
+ const display=phoneCompanion?.displayOptions?.()||{review:true,cameras:true};
+ const signals=!document.hidden&&!privacyScreen?.isLocked()?['eeg','emg_left','emg_right'].filter(name=>document.getElementById(name)?.getClientRects().length):[];
+ const query=new URLSearchParams({signals:signals.join(','),review:display.review?'1':'0',cameras:display.cameras?'1':'0',display:privacyScreen?.clientId||'web'});
+ if(display.camera)query.set('camera',display.camera);
+ const {response:res,value}=await boundedJson('/api/status?'+query,{headers:authHeaders()},5000);
+ if(res.status===401){privacyScreen?.unauthorized();$('#login').classList.remove('hidden');throw Error('访问码无效')}
+ if(!res.ok)throw Error(value.error||'连接失败');
+ if(value.state==='mode_switching'&&value.mode_switch_target&&!modeIntent)beginModeIntent(value.mode_switch_target,collectionContext||value.collection_context);
+ if(collectionContext&&value.collection_context&&collectionContext!==value.collection_context){beginModeIntent(value.collection_mode,collectionContext);reloadModePage();throw Error('正在加载新的采集模式');}
+ collectionContext=value.collection_context||null;privacyScreen?.authorized();return value;
+}
+async function readDisplayState(){
+ const started=performance.now();
+ const {response:res,value}=await boundedJson('/api/display-state?'+new URLSearchParams({client_id:privacyScreen.clientId,stop_protocol:'session-stop-v1'}),{headers:authHeaders()},2500);
+ if(res.status===401){privacyScreen?.unauthorized();throw Error('访问码无效')}
+ if(!res.ok)throw Error(value.error||'屏幕状态暂不可用');
+ value._displayRequestedAt=started;latestDisplayTruth=value;return value;
+}
+let polling=false;
+async function poll(){
+ if(polling||(accessCodeRequired&&!token))return;polling=true;
+ try{
+  let s;
+  try{s=await readStatus();const privacy=await privacyScreen.synchronize(s);if(!privacy.accepted)return;s=privacy.snapshot}
+  catch(error){
+   privacyScreen.disconnected();online=false;clearEmgDraft();renderEmg(status);$('#connection span').textContent='连接中断 · 正在重连';$('#connection').style.background='#fbe2dc';
+   $$('button[data-action],button[data-impedance-action]').forEach(b=>b.disabled=true);$('#set-volume').disabled=true;$('#eeg-filter').disabled=true;$('#set-eeg-filter').disabled=true;$('#wrist-fps-policy').disabled=true;$('#set-wrist-fps-policy').disabled=true;
+   if(!$('#login').classList.contains('hidden'))$('#login-error').textContent=error.message;
+   return;
+  }
+  online=true;lastStatusReceivedAt=performance.now();if(accessCodeRequired)sessionStorage.setItem('pi-access',token);$('#login').classList.add('hidden');
+  $('#connection span').textContent='已连接 Pi';$('#connection').style.background='';
+  try{
+   // Keep the exact trusted snapshot for the privacy gate. The fallback is
+   // only for rendering and must never manufacture authoritative idle state.
+   const rendered=typeof s.state==='string'&&s.state?s:{...s,state:'starting'};
+   status=rendered;reconcileModeIntent(rendered);recordingOverlay?.update(rendered);
+   if(!s.privacy?.required){render(rendered);privacyScreen.revealIfSafe(s);phoneCompanion?.update(rendered);recordingOverlay?.renderFault(null)}
+  }catch(error){
+   recordingOverlay?.renderFault(error);privacyScreen.lock();
+   // A rendering exception is not evidence that the Pi disconnected.
+   $('#connection span').textContent='Pi 在线 · 页面显示异常';
+   $('#notice').textContent='页面显示异常，请刷新网页：'+error.message;$('#notice').classList.remove('hidden');
+  }
+ }finally{polling=false}
+}
+async function frames(){
+ if(phoneCompanion?.managesPreview)return;
+ if(online&&status&&!document.hidden&&!privacyScreen?.isLocked()){for(const name of Object.keys(cameraNames)){if(!status.previews?.[name]?.live)continue;const card=$('#'+name);if(phoneCompanion?.managesPreview&&!phoneCompanion.legacyFrameVisible(name))continue;if(!card.getClientRects().length)continue;if(name.startsWith('cam_ros')&&!$('details.head-cameras').open)continue;const bounds=card.getBoundingClientRect();if(bounds.bottom<0||bounds.top>innerHeight)continue;const img=card.querySelector('img');if(img.dataset.loading)continue;const sourceId=status.preview_id;img.dataset.loading='1';img.onload=()=>{if(sourceId!==status?.preview_id)return;img.hidden=false;img.dataset.previewId=sourceId||'';img.dataset.loadedAt=String(Date.now());delete img.dataset.loading;renderWrist(status)};img.onerror=()=>{delete img.dataset.loading};img.src='/preview/'+name+'.jpg?'+authQuery()+'t='+Date.now()}}
+}
+$$('[data-impedance-action]').forEach(button=>button.onclick=()=>act(button.dataset.impedanceAction));
+$('#eeg-filter').onchange=()=>{settingsDraft.chooseEeg($('#eeg-filter').value);$('#eeg-filter-readback').textContent='所选值尚未应用。';};
+$('#set-eeg-filter').onclick=()=>{const value=$('#eeg-filter').value;settingsDraft.submitEeg(value,status||{});act('eeg_filter',value);};
+$('#wrist-fps-policy').onchange=()=>{wristPolicyDirty=true;};
+$('#set-wrist-fps-policy').onclick=()=>act('wrist_camera_settings',JSON.parse($('#wrist-fps-policy').value));
+$('#connect').onclick=()=>{token=$('#access-token').value.trim();poll()};$('#access-token').onkeydown=e=>{if(e.key==='Enter')$('#connect').click()};
+$$('#settings-card [data-action]').forEach(b=>{
+ if(b.dataset.action==='shutdown'){
+  b.onclick=()=>{
+   if(!confirm('关闭设备电源会断开所有连接，关机后需要手动按电源键重新开机。确定继续吗？'))return;
+   if(!confirm('再次确认：现在立即关闭设备电源吗？'))return;
+   act('shutdown').then(ok=>{if(ok)toast('关机指令已发送，设备将在几秒后关闭。')});
+  };
+ }else{
+  b.onclick=()=>act(b.dataset.action);
+ }
+});
+$('#volume').oninput=e=>{settingsDraft.chooseVolume(Number(e.target.value));$('#volume-label').textContent=e.target.value+'%';$('#volume-readback').textContent='新值尚未应用到头环。';};$('#set-volume').onclick=()=>{const value=Number($('#volume').value);settingsDraft.submitVolume(value,status||{});act('volume',value);};
+// On phones move settings below the data so every adjustment remains available.
+const media=matchMedia('(max-width:760px)');function layout(){if(/^\/(?:phone\/?)?$/.test(location.pathname))return;const card=$('#settings-card');if(media.matches){$('main').append(card);card.classList.add('mobile-settings');card.style.marginTop='18px'}else{$('.side').append(card);card.classList.remove('mobile-settings');card.style.marginTop=''}}media.addEventListener('change',layout);layout();
+
+async function privacyPost(action,value){
+ const {response:res,value:data}=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value})},4000);
+ if(!res.ok){const error=Error(data.error||'屏幕同步失败');error.status=res.status;throw error}return data;
+}
+async function privacyStop(snapshot){
+ try{
+  const p=snapshot.privacy||{};
+  const privacy_target={instance:p.instance,session_id:p.session_id,nonce:p.nonce,generation:p.generation};
+  const {response:res,value:data}=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'stop',revision:snapshot.revision,collection_context:snapshot.collection_context,privacy_target})},4000);
+  if(!res.ok)throw Error(data.error||'停止请求未接受，请长按重试');
+ }finally{poll()}
+}
+async function privacyDiscard(snapshot){
+ if(snapshot?.state!=='recording'||!confirm('停止并放弃本段？本段文件将删除，随后返回总览。'))return;
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),6000);
+ try{
+  const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action:'discard_recording',revision:snapshot.revision,collection_context:snapshot.collection_context}),signal:controller.signal});
+  const data=await res.json();if(!res.ok)throw Error(data.error||'放弃请求未确认');
+ }catch(error){toast(error.message)}finally{clearTimeout(timer);poll()}
+}
+function suspendVisibleMedia(){
+ for(const name of Object.keys(cameraNames)){
+  const image=$('#'+name+' img');image.onload=image.onerror=null;image.hidden=true;image.removeAttribute('src');
+  delete image.dataset.loading;delete image.dataset.previewId;delete image.dataset.loadedAt;
+ }
+ phoneCompanion?.pause();
+ const reference=$('#reference-image');reference.classList.add('hidden');reference.removeAttribute('src');lastReference='';
+ const video=$('#review-video');video.pause();video.removeAttribute('src');video.load();video.classList.add('hidden');playingKey='';
+}
+privacyScreen=createPrivacyScreen({
+ post:privacyPost,stop:privacyStop,readStatus,readDisplayState,integratedRegistration:true,refresh:poll,holdReveal:()=>!!modeIntent,
+ visible:()=>!document.hidden,needsLogin:()=>accessCodeRequired&&!token,
+ setLocked:locked=>{document.body.classList.toggle('privacy-locked',locked);document.documentElement.classList.toggle('privacy-open',!locked);$('#privacy-cover').hidden=!locked},
+ setLogin:shown=>{document.body.classList.toggle('privacy-login',shown);if(shown)$('#login').classList.remove('hidden')},
+ onLock:suspendVisibleMedia,onState:value=>recordingOverlay?.state(value)
+});
+recordingOverlay=window.createRecordingOverlay?.({discard:privacyDiscard});recordingOverlay?.state(privacyScreen.presentation());modeOverlay();
+bindPrivacyInput(privacyScreen,document,undefined,{progress:value=>recordingOverlay?.progress(value),commit:()=>recordingOverlay?.commit()});
+document.addEventListener('visibilitychange',()=>{privacyScreen.visibilityChanged();if(!document.hidden)poll()});
+setInterval(()=>privacyScreen.heartbeat(false),1000);
+setInterval(()=>privacyScreen.tick(),250);
+
+phoneCompanion=window.createPhoneCompanion({status:()=>status,unlocked:()=>online&&!privacyScreen.isLocked(),headers:authHeaders,action:act,
+ protection:()=>privacyScreen.presentation(),pending:()=>inFlight||!!modeIntent,modeReady:modeActionReady,requiresCode:accessCodeRequired,refresh:poll,
+ acceptToken:value=>{if(accessCodeRequired&&typeof value==='string'&&value.length>=24&&value.length<=511){token=value;sessionStorage.setItem('pi-access',token)}poll()},
+ beforeSwitch:()=>{privacyScreen.disconnected();online=false},drawSignal:name=>drawSignal(name,status?.signals?.[name]||{}),renderWrist:()=>renderWrist(status)});
+async function statusLoop(){if(!document.hidden)await poll();setTimeout(statusLoop,status?.state==='countdown'||status?.privacy?.phase==='arming'?100:750)}
+if(!phoneCompanion?.managesPreview)setInterval(frames,500);setInterval(()=>{if(!document.hidden&&!privacyScreen.isLocked()&&status?.state==='emg_manual'&&$('#emg-card').getClientRects().length)renderEmg(status)},500);statusLoop();
+</script><!-- PI_CAPTURE_STATUS_FIX=20261105.4 --></body></html>

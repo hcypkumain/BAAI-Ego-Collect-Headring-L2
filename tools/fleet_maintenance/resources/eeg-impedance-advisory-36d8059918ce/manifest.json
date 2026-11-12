@@ -1,0 +1,42 @@
+{
+  "commit": "f5d03b7b5fb197eb76e78610a0bce672e5cc4853",
+  "files": [
+    {
+      "before_sha256": "b46fd30276c758c74ccdbe90468f6551d28a36be4878f12a922f9ea57fcccef4",
+      "git_mode": "100644",
+      "path": "orangepi/src/orangepi_collect/common/impedance_quality.py",
+      "sha256": "da24ab2e98343042a764199465907935bd2eb3d07ae5b9f905913f0857d42fab",
+      "size": 9317
+    },
+    {
+      "before_sha256": "330acc2822e2966a35e1e770ac6a005f453c7ed69adf21982b5ade2da0f506c5",
+      "git_mode": "100644",
+      "path": "orangepi/src/orangepi_collect/common/eeg_settings.py",
+      "sha256": "a90774add55180ad2e1477996b63e95a25b2bb10a0ee7ea8f9dfa07e9d2dbbe0",
+      "size": 1991
+    },
+    {
+      "before_sha256": "8eb1524cddcd56e02b73305914076bd9e1e95d9305c3706d9e17b8457b924a94",
+      "git_mode": "100644",
+      "path": "orangepi/src/orangepi_collect/common/impedance_record.py",
+      "sha256": "dc437d13d2e488a361671949fc6dc9199a7148447191720bf2287c36a65a09d3",
+      "size": 19182
+    },
+    {
+      "before_sha256": "2b473bc8e8d24af727255c4e9632935de489b3303ff0f434956e8067c270164a",
+      "git_mode": "100644",
+      "path": "orangepi/src/orangepi_collect/control/dashboard.html",
+      "sha256": "b787ed400e657e77770ce9a627b07cc28636ab0c2faf6b524944d559ff992ff3",
+      "size": 95065
+    },
+    {
+      "before_sha256": "9f9749ea369378a8f1e73987095616bd8683c5ee52598dc5aee49a9b9fc7c1b0",
+      "git_mode": "100644",
+      "path": "orangepi/src/orangepi_collect/framework/eeg_qc.py",
+      "sha256": "b362e196b9f2d568e9e64037667a0cfbf31e2b7c12751344cbf7fdb730a9b78d",
+      "size": 18349
+    }
+  ],
+  "project": "/home/orangepi/Desktop/Embodied-Brain-Collect-main.2",
+  "schema": 1
+}

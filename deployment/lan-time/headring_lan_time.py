@@ -1,20 +1,40 @@
 #!/usr/bin/env python3
 """Best-effort LAN clock sync. Acquisition always wins; no hardware data is edited."""
 import argparse
+from contextlib import contextmanager
 import fcntl
 import json
 import math
 import os
 from pathlib import Path
 import socket
+import stat
 import struct
 import subprocess
 import time
+import urllib.error
 import urllib.request
 
 BASE=Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi')
 CONFIG=Path('/etc/headring-lan-time.json')
 STATE=Path('/run/headring-lan-time.json')
+ACQUISITION_LOCK=Path('/run/lock/headring-acquisition-time.lock')
+
+@contextmanager
+def exclusive_acquisition_lock():
+ # Provisioned by root at boot. Never create, replace, or follow a symlink.
+ fd=os.open(ACQUISITION_LOCK,os.O_RDONLY|os.O_CLOEXEC|os.O_NOFOLLOW)
+ try:
+  info=os.fstat(fd)
+  if not stat.S_ISREG(info.st_mode) or info.st_nlink!=1:
+   raise OSError('invalid_acquisition_lock')
+  if ACQUISITION_LOCK==Path('/run/lock/headring-acquisition-time.lock') and (info.st_uid!=0 or info.st_mode&0o022):
+   raise OSError('insecure_acquisition_lock')
+  fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  current=os.stat(ACQUISITION_LOCK,follow_symlinks=False)
+  if (current.st_dev,current.st_ino)!=(info.st_dev,info.st_ino):raise OSError('replaced_acquisition_lock')
+  yield
+ finally:os.close(fd)
 SAFE={'ready','device_confirm','idle','failed_wait','exhausted'}
 
 def verdict(display,started=False):
@@ -27,23 +47,39 @@ def verdict(display,started=False):
   return False,'prepared_recording_has_started_or_is_uncertain'
  return True,'safe_idle'
 
-def safe_to_step():
+def safe_to_step(boot=False):
  try:
   token=(BASE/'runtime/dashboard_token').read_text().strip()
   request=urllib.request.Request('http://127.0.0.1:8765/api/display-state',headers={'X-Access-Token':token})
   with urllib.request.urlopen(request,timeout=.7) as response:v=json.load(response)
-  started=bool(v.get('session') and (Path(v['session'])/'start_gate.json').exists())
-  return verdict(v,started)
+  if not isinstance(v,dict):return False,'invalid_display_state'
+  session=v.get('session')
+  if session:
+   if not isinstance(session,str):return False,'invalid_session'
+   status=json.loads((Path(session)/'status.json').read_text())
+   if not isinstance(status,dict) or not isinstance(status.get('eeg_impedance'),dict):return False,'invalid_impedance_status'
+   impedance=status['eeg_impedance']
+   if any(type(impedance.get(k)) is not bool for k in ('active','pending')):return False,'invalid_impedance_status'
+   if impedance['active'] or impedance['pending']:return False,'eeg_impedance_measurement_active'
+  started=bool(session and (Path(session)/'start_gate.json').exists())
+  allowed,reason=verdict(v,started)
+  if not allowed:return False,reason
+  # A responding application may be an older process without the new lock.
+  # Even idle UI state is not sufficient to permit a step.
+  return False,'application_ui_active'
+ except FileNotFoundError:
+  # Only boot may proceed without a UI token, while holding the exclusive
+  # acquisition lock; a missing session status must instead fail closed.
+  if boot and not (BASE/'runtime/dashboard_token').exists():return True,'before_application_start'
+  return False,'authoritative_status_unavailable'
+ except urllib.error.HTTPError as error:
+  if boot and error.code==503 and error.headers.get('X-HeadRing-Startup')=='1':return True,'startup_web_before_controller'
+  return False,'authoritative_status_unavailable'
+ except urllib.error.URLError as error:
+  if boot and isinstance(error.reason,ConnectionRefusedError):return True,'before_application_start'
+  return False,'authoritative_status_unavailable'
  except Exception:
-  # During boot the UI is intentionally ordered after this service. A failed
-  # UI read must never permit stepping a live capture or a starting controller.
-  targets=[str(BASE/'src/orangepi_collect'/name).encode() for name in ['control/launcher.py','framework/framework_recorder.py','acquisition/capture.py']]
-  for p in Path('/proc').iterdir():
-   if not p.name.isdigit():continue
-   try:args=(p/'cmdline').read_bytes().split(b'\0')
-   except OSError:continue
-   if any(target in args for target in targets):return False,'application_active_without_authoritative_status'
-  return True,'before_application_start'
+  return False,'authoritative_status_unavailable'
 
 def parse_reply(data,nonce,t0,t1):
  if len(data)<48 or data[0]&7!=4 or data[0]>>6==3 or not 1<=data[1]<=15:
@@ -74,9 +110,6 @@ def write_state(value):
 
 def run(boot=False,dry_run=False):
  config=json.loads(CONFIG.read_text());server=config['server'];result={'server':server,'checked_at':time.time(),'policy':'continue_capture_if_unavailable'}
- allowed,reason=safe_to_step()
- if not allowed:
-  result.update(status='deferred',reason=reason);return result
  deadline=time.monotonic()+config.get('boot_retry_seconds',8.)
  while True:
   try:
@@ -89,12 +122,18 @@ def run(boot=False,dry_run=False):
    # but never keep collection waiting indefinitely when the host is absent.
    time.sleep(.25)
  result.update(sample)
- allowed,reason=safe_to_step()
- if not allowed:result.update(status='deferred',reason=reason);return result
- needs_step=abs(sample['offset_seconds'])>config.get('step_threshold_seconds',.05)
- if dry_run:result.update(status='dry_run',would_step=needs_step);return result
- if needs_step:time.clock_settime(time.CLOCK_REALTIME,time.time()+sample['offset_seconds'])
- result.update(status='aligned' if needs_step else 'already_aligned',stepped=needs_step,after_epoch=time.time())
+ try:
+  with exclusive_acquisition_lock():
+   allowed,reason=safe_to_step(boot=boot)
+   if not allowed:result.update(status='deferred',reason=reason);return result
+   needs_step=abs(sample['offset_seconds'])>config.get('step_threshold_seconds',.05)
+   if dry_run:result.update(status='dry_run',would_step=needs_step);return result
+   if needs_step:time.clock_settime(time.CLOCK_REALTIME,time.time()+sample['offset_seconds'])
+   result.update(status='aligned' if needs_step else 'already_aligned',stepped=needs_step,after_epoch=time.time())
+ except OSError as error:
+  result.update(status='deferred',reason='acquisition_lock_unavailable_or_clock_error',detail=str(error));return result
+ # These commands persist the clock, but do not alter CLOCK_REALTIME. Run them
+ # outside the exclusion lock so hardware startup never waits for their timeout.
  if needs_step or boot:
   result['persistence']={}
   for name,args in [('rtc',['hwclock','--systohc','--utc']),('saved_clock',['fake-hwclock','save'])]:

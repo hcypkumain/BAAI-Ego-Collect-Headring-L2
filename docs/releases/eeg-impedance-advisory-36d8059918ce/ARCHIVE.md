@@ -1,0 +1,3 @@
+# Archived EEG impedance overlay
+
+These payload files, patch, tests and original `RELEASE.md` are preserved as historical review artifacts; they are not applied to the main source tree. The byte-identical registered bundle, manifest, bootstrap and transaction are in `tools/fleet_maintenance/resources/eeg-impedance-advisory-36d8059918ce/`. The original release note is historical: its account that device 22 was not applied and that CLI registration remained future work was subsequently superseded. See the release note beside the registered bundle for the updated, limited acceptance summary. No physical impedance or recording validation is claimed. Tests may depend on historical temporary paths and require an isolated test environment.

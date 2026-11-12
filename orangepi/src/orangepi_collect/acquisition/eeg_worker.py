@@ -207,6 +207,8 @@ class Writer:
 
 
 def main():
+    from acquisition_time_lock import acquire
+    acquire()
     ap = argparse.ArgumentParser(); ap.add_argument('--output', type=Path)
     mode = ap.add_mutually_exclusive_group(); mode.add_argument('--preview', action='store_true'); mode.add_argument('--probe', action='store_true')
     args = ap.parse_args(); config = validate(json.loads(sys.stdin.readline()))

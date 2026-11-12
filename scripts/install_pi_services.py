@@ -18,6 +18,7 @@ def render_systemd_unit(raw,root):
 
 def plan(root,include_vendor,include_lan_time=False):
     result=[]
+    result.append((root/'deployment/tmpfiles/headring-acquisition-time.conf',Path('/etc/tmpfiles.d/headring-acquisition-time.conf'),False))
     for source in sorted((root/'services/phone-media').rglob('*')):
         if source.is_file() and '__pycache__' not in source.parts and source.suffix in ('.py','.wav'):
             result.append((source,Path('/opt/pi-phone-media')/source.relative_to(root/'services/phone-media'),False))
@@ -152,6 +153,8 @@ def main():
         print(str(source.relative_to(root))+' -> '+str(target))
     if not args.apply:
         print('Plan only. No files or services changed.');return
+    if args.with_lan_time:
+        parser.error('LAN time protocol migration is not automated: old acquisition and old clock processes must first be quiesced together in a controlled maintenance window; do not install over a live station')
     if platform.system()!='Linux' or platform.machine() not in ('aarch64','arm64'):
         parser.error('apply requires the compatible Linux aarch64 Pi')
     if os.geteuid()!=0:parser.error('apply requires sudo')
@@ -189,6 +192,10 @@ def main():
             finally:os.close(directory)
         finally:
             if os.path.exists(temporary):os.unlink(temporary)
+        # This item is first in the plan: provision the shared inode before
+        # publishing any executable which depends on the lock.
+        if target==Path('/etc/tmpfiles.d/headring-acquisition-time.conf'):
+            subprocess.run(['systemd-tmpfiles','--create',str(target)],check=True)
     initialize_usb(adb)
     initialize_qc_results()
     subprocess.run(['systemctl','daemon-reload'],check=True)
