@@ -118,6 +118,13 @@ The original one-shot journal, ZIP/privacy/controller/revision guards and
 is a protocol constant, not device enrollment. Historical cp0018 TEST audit roots
 remain explicitly historical evidence scope, not a general today's-device promise.
 
+Local caller state and ordinary/streaming IPC use frozen C0 strict JSON parsing:
+duplicate keys, NaN/Infinity and overflowing JSON numbers reject. State reads are
+bounded regular non-symlink files; execute parses and hashes the same bytes.
+Timestamps must be finite non-boolean numbers before the existing 600-second
+expiry check (no new future-time policy). Canonical valid JSON retains its prior
+encoding/newline/hash; unknown remote reason strings are replaced by fixed codes.
+
 Run all `test_*.py` suites under `host/common/tests`, `host/qc/tests`,
 `services/headring-qc/tests`, `host/standardizer/tests` and
 `tools/fleet_maintenance/tests`; run source scope lint as well. Reports distinguish

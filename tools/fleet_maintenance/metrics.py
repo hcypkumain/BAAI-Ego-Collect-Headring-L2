@@ -1,6 +1,7 @@
 import json, time, subprocess, re, ipaddress, os
 from pathlib import Path
 import online, operations, fleet
+from host.common.strict_json import strict_json_loads
 PROBE=Path(__file__).parent/'resources/metrics_probe.py'
 def collect(config,device):
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices']: raise ValueError('invalid device')
@@ -9,7 +10,7 @@ def collect(config,device):
     argv=ssh.argv[:-1]+['-o','BatchMode=yes','-T',ssh.argv[-1],'python3 - '+device]
     p=subprocess.run(argv,input=PROBE.read_bytes(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=45)
     if p.returncode: raise RuntimeError('SSH unavailable or authentication failed')
-    result=json.loads(p.stdout)
+    result=strict_json_loads(p.stdout.decode('utf-8'))
     if result.get('error'): raise RuntimeError('remote probe context unavailable')
     if result.get('identity_mismatch') or result.get('identity')!=device: return {'identity_mismatch':True,'address':address,'checked_at':time.time()}
     now=time.time()
@@ -25,7 +26,7 @@ def deep_check(config,device):
     if ssh.run('cat /opt/egorecord/DEVICE_ID').decode().strip()!=device: raise RuntimeError('identity mismatch')
     raw=(fleet.RESOURCES/'manifest.json').read_bytes()
     if fleet.sha(raw)!=fleet.MANIFEST_SHA256: raise RuntimeError('manifest invalid')
-    manifest=json.loads(raw)
+    manifest=strict_json_loads(raw.decode('utf-8'))
     if manifest.get('commit')!=fleet.PIN or len(manifest.get('files',[]))!=236: raise RuntimeError('manifest invalid')
     live=online.read_live(ssh,manifest)
     if live.get('device_id')!=device or live.get('project')!=online.PROJECT: raise RuntimeError('identity mismatch')
@@ -35,7 +36,7 @@ def deep_check(config,device):
     if not isinstance(protected,dict): protected={}
     # Paths and contents, including credentials, never leave this process through the API.
     calibration=[v for k,v in protected.items() if ('calibration' in k.lower()) and isinstance(v,dict)]
-    encoded=json.dumps(protected,sort_keys=True,separators=(',',':')).encode()
+    encoded=json.dumps(protected,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
     return {'checked_at':time.time(),'identity_verified':True,'source':'read_live manifest hash comparison','target_commit':fleet.PIN,'manifest_sha256':fleet.MANIFEST_SHA256,'matched_files':matched,'total_files':len(manifest['files']),'code_matches_pin':matched==len(manifest['files']) and not live.get('errors'),'errors_present':bool(live.get('errors')),'calibration':{'protected_entries':len(calibration),'regular_files':sum(v.get('type')=='regular' for v in calibration),'snapshot_entries':len(protected),'aggregate_sha256':hashlib.sha256(encoded).hexdigest() if protected else None,'previous_deployment_match':None},'component_timer':{k:(live.get('component_timer') or {}).get(k) for k in ('is-enabled','is-active')},'component_full_verification':'unknown_requires_terminal_sudo','hardware':'unknown'}
 
 def create_plan(config,device,state):
@@ -47,7 +48,7 @@ def create_plan(config,device,state):
     ssh=operations.caller_ssh(config,device)
     if ssh.run('cat /opt/egorecord/DEVICE_ID').decode().strip()!=device: raise RuntimeError('identity mismatch')
     bundle=fleet.build(Path(state)/'bundles')
-    manifest=json.loads((fleet.RESOURCES/'manifest.json').read_bytes())
+    manifest=strict_json_loads((fleet.RESOURCES/'manifest.json').read_bytes().decode('utf-8'))
     live=online.read_live(ssh,manifest)
     plan=online.prepare_plan(live,manifest,device,bundle)
     operations.require_config(config,registry)
@@ -64,7 +65,7 @@ def fetch_thumbnails(config,device,mode,revision,ids,state):
     argv=ssh.argv[:-1]+['-o','BatchMode=yes','-T',ssh.argv[-1],'python3 - '+' '.join([device,mode,str(revision),*ids])]
     proc=subprocess.run(argv,input=(Path(__file__).parent/'resources/thumbnail_probe.py').read_bytes(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=35)
     if proc.returncode: raise RuntimeError('thumbnail SSH failed')
-    data=json.loads(proc.stdout)
+    data=strict_json_loads(proc.stdout.decode('utf-8'))
     if data.get('error'): raise RuntimeError('privacy gate or API unavailable')
     assets=Path(state)/'assets'; assets.mkdir(mode=0o700,exist_ok=True)
     results={}
@@ -93,7 +94,7 @@ def fetch_original(config,device,mode,revision,ident,state):
     argv=ssh.argv[:-1]+['-o','BatchMode=yes','-T',ssh.argv[-1],'python3 - '+' '.join([device,mode,str(revision),ident])]
     proc=subprocess.run(argv,input=(Path(__file__).parent/'resources/original_probe.py').read_bytes(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=45)
     if proc.returncode or len(proc.stdout)>12000000: raise RuntimeError('image unavailable')
-    value=json.loads(proc.stdout)
+    value=strict_json_loads(proc.stdout.decode('utf-8'))
     if value.get('id')!=ident: raise RuntimeError('image unavailable')
     raw=base64.b64decode(value.get('data',''),validate=True)
     digest=hashlib.sha256(raw).hexdigest()

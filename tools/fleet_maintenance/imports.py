@@ -1,18 +1,47 @@
 """Fixed USB import plans; browser supplies opaque IDs, never paths or commands."""
-import base64,hashlib,ipaddress,json,os,re,shlex,subprocess,time,selectors,threading
+import base64,hashlib,json,math,os,re,shlex,stat,subprocess,time,selectors,threading
 from pathlib import Path
 import online, operations, fleet
+from host.common.strict_json import strict_json_loads
 HERE=Path(__file__).parent
 REGISTRY='usb-tasks-v1'
-def canonical(value):return (json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n').encode()
+def canonical(value):return (json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'),allow_nan=False)+'\n').encode()
 def store(path,data):
+    raw=canonical(data)
     path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
-    raw=canonical(data);fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+    fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
     with os.fdopen(fd,'wb') as f:f.write(raw);f.flush();os.fsync(f.fileno())
     return hashlib.sha256(raw).hexdigest()
+def load_bytes(path,limit=8388608):
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+    try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size>limit:raise ValueError('unsafe_state')
+        with os.fdopen(fd,'rb') as stream:
+            fd=None
+            raw=stream.read(limit+1)
+    finally:
+        if fd is not None:os.close(fd)
+    if len(raw)>limit:raise ValueError('unsafe_state')
+    return raw
 def load(path,limit=8388608):
-    if path.is_symlink() or path.stat().st_size>limit:raise ValueError('unsafe_state')
-    return json.loads(path.read_bytes())
+    return strict_json_loads(load_bytes(path,limit).decode('utf-8'))
+def expired(created_at):
+    if type(created_at) not in (int,float):raise ValueError('invalid_created_at')
+    try:finite=math.isfinite(created_at)
+    except OverflowError:finite=False
+    if not finite:raise ValueError('invalid_created_at')
+    # Preserve existing >600s policy; do not introduce a new future-time protocol.
+    return time.time()-created_at>600
+def safe_reason(value):
+    allowed=('identity','code_root','profile','context_changed','invalid_plan','catalog_changed',
+        'invalid_scan_entry','usb_unmounted_or_identity_changed','duplicate_zip','zip_changed',
+        'batch_limit','insufficient_space','preview_drift','busy_privacy_or_context','zip_size',
+        'unsafe_path','unsafe_member','expansion_limit','duplicate_path','duplicate_basename',
+        'member_size','pixel_limit','image_or_scene_count','probe_failed','controller_failed',
+        'controller_needs_recovery','readback_or_protected_mismatch','controller_timeout',
+        'controller_response_unknown')
+    return value if type(value) is str and value in allowed else 'remote_failed'
 def remote(config,device,payload,timeout=120,on_event=None):
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices']:raise ValueError('invalid_device')
     ssh=operations.caller_ssh(config,device)
@@ -25,7 +54,7 @@ def remote(config,device,payload,timeout=120,on_event=None):
     if on_event is None:
         proc=subprocess.run(args,input=request,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=timeout)
         if proc.returncode or len(proc.stdout)>8388608:raise RuntimeError('remote_unavailable')
-        result=json.loads(proc.stdout)
+        result=strict_json_loads(proc.stdout.decode('utf-8'))
     else:
         proc=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL)
         def writer():
@@ -44,7 +73,7 @@ def remote(config,device,payload,timeout=120,on_event=None):
                 pending+=chunk
                 if len(pending)>8388608:raise RuntimeError('remote_too_large')
                 while b'\n' in pending:
-                    raw,pending=pending.split(b'\n',1);value=json.loads(raw)
+                    raw,pending=pending.split(b'\n',1);value=strict_json_loads(raw.decode('utf-8'))
                     if isinstance(value,dict) and 'event' in value:
                         event=value['event']
                         if isinstance(event,str) and (event=='verifying' or re.fullmatch(r'(building|ready|committing):\d{1,8}:\d{1,8}',event)):on_event(event)
@@ -58,6 +87,7 @@ def remote(config,device,payload,timeout=120,on_event=None):
             selector.close();proc.stdout.close()
             if proc.poll() is None:proc.terminate();proc.wait(timeout=5)
     if not isinstance(result,dict):raise ValueError('invalid_remote_result')
+    if 'reason' in result:result={**result,'reason':safe_reason(result['reason'])}
     return result
 def scan(state,config,device):
     registry=operations.caller_registry(config,device)
@@ -79,12 +109,12 @@ def preview(state,config,device,sid,ids):
     if not re.fullmatch(r'[a-f0-9]{32}',sid or '') or not isinstance(ids,list) or not 1<=len(ids)<=50 or any(not isinstance(x,str) or not re.fullmatch(r'[a-f0-9]{32}',x) for x in ids) or len(set(ids))!=len(ids):raise ValueError('invalid_selection')
     scan=load(Path(state)/'imports/scans'/(sid+'.json'))
     fleet.require_registry_plan(scan,registry=registry,device=device)
-    if scan['device']!=device or scan['address']!=config['devices'].get(device) or time.time()-scan['created_at']>600:raise ValueError('scan_expired')
+    if scan['device']!=device or scan['address']!=config['devices'].get(device) or expired(scan.get('created_at')):raise ValueError('scan_expired')
     byid={x['id']:x for x in scan['entries']};entries=[byid[x] for x in ids if x in byid]
     if len(entries)!=len(ids):raise ValueError('unknown_zip_id')
     payload={'op':'preview','device':device,'scan':sid,'mode':scan['mode'],'context':scan['context'],'revision':scan['revision'],'entries':entries}
     info=remote(config,device,payload,timeout=300)
-    if info.get('status')!='preview':raise ValueError(info.get('reason','preview_failed'))
+    if info.get('status')!='preview':raise ValueError(safe_reason(info.get('reason')))
     plan={'schema':1,'operation':'import_tasks','device':device,'address':scan['address'],'created_at':time.time(),'scan':sid,'mode':scan['mode'],'context':scan['context'],'revision':scan['revision'],'entries':entries,'expected':info,'remove_list_ids':[]}
     operations.require_config(config,registry)
     plan=fleet.bind_registry_plan(plan,registry=registry,device=device)
@@ -96,9 +126,10 @@ def preview(state,config,device,sid,ids):
 def execute(state,config,device,digest,progress=lambda *_:None):
     registry=operations.caller_registry(config,device)
     if not re.fullmatch(r'[a-f0-9]{64}',digest or ''):raise ValueError('invalid_plan')
-    path=Path(state)/'imports/plans'/(digest+'.json');plan=load(path)
+    path=Path(state)/'imports/plans'/(digest+'.json');raw=load_bytes(path)
+    plan=strict_json_loads(raw.decode('utf-8'))
     fleet.require_registry_plan(plan,registry=registry,device=device)
-    if hashlib.sha256(path.read_bytes()).hexdigest()!=digest or plan.get('schema')!=1 or plan.get('operation')!='import_tasks' or plan.get('device')!=device or plan.get('address')!=config['devices'].get(device) or plan.get('remove_list_ids')!=[] or time.time()-plan.get('created_at',0)>600:raise ValueError('plan_expired_or_scope')
+    if hashlib.sha256(raw).hexdigest()!=digest or plan.get('schema')!=1 or plan.get('operation')!='import_tasks' or plan.get('device')!=device or plan.get('address')!=config['devices'].get(device) or plan.get('remove_list_ids')!=[] or expired(plan.get('created_at')):raise ValueError('plan_expired_or_scope')
     if plan.get('expected',{}).get('deleted_conflicts',0):raise ValueError('deleted_asset_conflict')
     progress('preflight')
     operations.require_config(config,registry)
@@ -111,4 +142,5 @@ def execute(state,config,device,digest,progress=lambda *_:None):
     try:result=remote(config,device,payload,timeout=1320,on_event=progress)
     except Exception:return {'status':'interrupted_reconcile','reason':'transport_unknown'}
     if result.get('status') not in ('succeeded','failed','partial_failed','interrupted_reconcile'):return {'status':'interrupted_reconcile','reason':'invalid_remote_result'}
+    if 'reason' in result:result={**result,'reason':safe_reason(result['reason'])}
     return result

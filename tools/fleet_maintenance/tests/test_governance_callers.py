@@ -1,10 +1,12 @@
 """Registry caller boundaries: synthetic inputs only, never real SSH or USB."""
 import copy
+import hashlib
 import json
 from pathlib import Path
 import sys
 import tempfile
 import time
+import subprocess
 import unittest
 from unittest.mock import Mock, patch
 
@@ -171,3 +173,97 @@ class CallerTests(unittest.TestCase):
             with self.assertRaises(ValueError):imports.execute(self.state,self.config,self.device,'a'*64)
             remote.assert_not_called();load.assert_not_called();popen.assert_not_called()
         self.assertEqual(list(self.state.iterdir()),[])
+
+    def malformed_records(self,record):
+        raw=json.dumps(record,separators=(',',':')).encode()
+        for token in (b'NaN',b'Infinity',b'-Infinity',b'1e999',b'true',b'"recent"'):
+            changed=dict(record);changed['created_at']='TIMESTAMP'
+            yield json.dumps(changed,separators=(',',':')).encode().replace(b'"TIMESTAMP"',token)
+        yield raw.replace(b'"registry_digest":',b'"registry_digest":"wrong","registry_digest":',1)
+
+    def test_strict_execute_malformed_hashed_records_zero_marker_or_remote(self):
+        with patch.object(imports,'remote') as remote,patch('subprocess.Popen') as popen:
+            for raw in self.malformed_records(self.plan()):
+                digest=hashlib.sha256(raw).hexdigest()
+                path=self.state/'imports/plans'/(digest+'.json');path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_bytes(raw)
+                with self.subTest(raw=raw[-100:]),self.assertRaises(ValueError):
+                    imports.execute(self.state,self.config,self.device,digest)
+            remote.assert_not_called();popen.assert_not_called()
+        self.assertFalse((self.state/'imports/started').exists())
+
+    def test_strict_scan_record_preview_malformed_zero_remote_or_plans(self):
+        sid='a'*32;zid='b'*32
+        record=fleet.bind_registry_plan({'device':self.device,'address':self.config['devices'][self.device],
+            'created_at':time.time(),'entries':[{'id':zid,'relative_path':'a.zip'}],
+            'mode':'emg','context':'emg:5','revision':1},registry=self.registry,device=self.device)
+        path=self.state/'imports/scans'/(sid+'.json');path.parent.mkdir(parents=True)
+        with patch.object(imports,'remote') as remote,patch('subprocess.Popen') as popen:
+            for raw in self.malformed_records(record):
+                path.write_bytes(raw)
+                with self.subTest(raw=raw[-100:]),self.assertRaises(ValueError):
+                    imports.preview(self.state,self.config,self.device,sid,[zid])
+            remote.assert_not_called();popen.assert_not_called()
+        self.assertFalse((self.state/'imports/plans').exists())
+
+    def test_strict_IPC_plain_import_metrics_and_assets(self):
+        bad=[b'{"status":"failed","status":"succeeded"}',b'{"revision":NaN}',
+             b'{"revision":Infinity}',b'{"revision":1e999}',
+             b'{"identity":"cp_0043","identity":"cp_0042","revision":NaN}',b'{bad}']
+        transport=Mock();transport.argv=['ssh','synthetic-alias']
+        with patch.object(operations,'caller_ssh',return_value=transport):
+            for raw in bad:
+                with patch('subprocess.run',return_value=type('Result',(),{'returncode':0,'stdout':raw})()):
+                    for call in (lambda:imports.remote(self.config,self.device,{'op':'scan'}),
+                            lambda:metrics.collect(self.config,self.device),
+                            lambda:metrics.fetch_thumbnails(self.config,self.device,'emg',1,['image_x'],self.state),
+                            lambda:metrics.fetch_original(self.config,self.device,'emg',1,'image_'+'a'*40,self.state)):
+                        with self.subTest(raw=raw),self.assertRaises(ValueError):call()
+        self.assertFalse((self.state/'assets').exists())
+
+    def test_strict_stream_each_line_real_local_process(self):
+        popen=subprocess.Popen
+        transport=Mock();transport.argv=['ssh','synthetic-alias']
+        for raw in (b'{"status":"failed","status":"succeeded"}',b'{"revision":NaN}',
+                    b'{"event":"verifying","event":"building:1:1"}',b'{"revision":Infinity}'):
+            processes=[];events=[]
+            def local(argv,**kwargs):
+                p=popen([sys.executable,'-I','-S','-c',
+                    'import sys;sys.stdin.buffer.read();sys.stdout.buffer.write('+repr(raw+b'\n')+');sys.stdout.flush()'],**kwargs)
+                processes.append(p);return p
+            with patch.object(operations,'caller_ssh',return_value=transport),patch('subprocess.Popen',side_effect=local):
+                with self.subTest(raw=raw),self.assertRaises(ValueError):
+                    imports.remote(self.config,self.device,{'op':'apply'},timeout=5,on_event=events.append)
+            self.assertEqual(events,[])
+            self.assertTrue(all(p.poll() is not None for p in processes))
+
+    def test_canonical_finite_unchanged_encoding_and_safe_reason(self):
+        value={'unicode':'示例','created_at':time.time()}
+        expected=(json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n').encode()
+        self.assertEqual(imports.canonical(value),expected)
+        for value in (float('nan'),float('inf'),float('-inf')):
+            with self.assertRaises(ValueError):imports.canonical({'value':value})
+        self.assertEqual(imports.safe_reason('/private/remote/error/token'),'remote_failed')
+        self.assertEqual(imports.safe_reason('catalog_changed'),'catalog_changed')
+
+    def test_execute_hashes_same_bounded_bytes_and_preserves_time_policy(self):
+        plan=self.plan();raw=imports.canonical(plan);digest=hashlib.sha256(raw).hexdigest()
+        with patch.object(imports,'load_bytes',return_value=raw) as read,\
+                patch.object(Path,'read_bytes',side_effect=AssertionError('second state read')),\
+                patch.object(imports,'remote',return_value={'status':'failed','reason':'/private/unverified'}) as remote:
+            result=imports.execute(self.state,self.config,self.device,digest)
+        read.assert_called_once();remote.assert_called_once()
+        self.assertEqual(result,{'status':'failed','reason':'remote_failed'})
+        with patch.object(imports.time,'time',return_value=1000):
+            self.assertFalse(imports.expired(400));self.assertTrue(imports.expired(399))
+            self.assertFalse(imports.expired(1001))  # Preserve existing future policy.
+            for value in (True,False,None,'1000',float('nan'),float('inf')):
+                with self.assertRaises(ValueError):imports.expired(value)
+
+    def test_state_load_is_bounded_regular_nonsymlink(self):
+        path=self.state/'state.json';path.write_bytes(b'{"ok":true}')
+        self.assertEqual(imports.load(path),{'ok':True})
+        with self.assertRaises(ValueError):imports.load(path,limit=2)
+        link=self.state/'link';link.symlink_to(path)
+        with self.assertRaises((OSError,ValueError)):imports.load(link)
+        with self.assertRaises((OSError,ValueError)):imports.load(self.state)
