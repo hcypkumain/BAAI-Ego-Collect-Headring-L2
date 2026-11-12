@@ -215,7 +215,7 @@ class WebControls:
         self.ui_last_revision=revision;self.ui_last_publish=now
         # self.path can still refer to a previous failed/reviewed session after
         # its worker was reaped. Do not present that old error as a live worker.
-        try:worker=self.worker_status() if getattr(self,'worker',None) is not None else {}
+        try:worker=self.worker_status() if getattr(self,'worker',None) is not None else dict(state='absent',recording_active=False)
         except (OSError,ValueError):worker={}
         if (getattr(self,'owner_exit_recovered',False)
                 and (getattr(self,'worker',None) is None or self.worker.poll() is not None)):
@@ -439,11 +439,14 @@ class WebControls:
                 impedance = self.worker_status().get('eeg_impedance', {}) if 'eeg' in (getattr(self,'selected_devices',None) or ()) else dict(required=False)
                 allowed=list(actions_for(self.state,impedance))
                 privacy=dashboard.privacy.snapshot()
+                already_stopped=(job['action']=='stop' and privacy.get('phase')=='idle'
+                    and dashboard.privacy.target_matches(job.get('privacy_target'),allow_stopped=True))
                 stop_bound=(job['action']=='stop' and dashboard.privacy.target_matches(
                     job.get('privacy_target'),allow_same_session=True))
+                if already_stopped:allowed.append('stop')
                 if privacy.get('required') and privacy.get('stop_confirmed') is not True and stop_bound:
                     allowed.append('stop')
-                if job['action']=='stop' and not stop_bound:
+                if job['action']=='stop' and not stop_bound and not already_stopped:
                     raise ValueError('采集会话已变化，请刷新后重试')
                 if getattr(self,'reference_can_switch_list',getattr(self,'reference_can_change',lambda:False))():allowed.append('reference_list')
                 mode_action=job['action']=='collection_mode'
@@ -451,7 +454,7 @@ class WebControls:
                     from project_paths import COLLECTION_CONTEXT
                     if job.get('collection_context')!=COLLECTION_CONTEXT:raise ValueError('采集模式已变化，请刷新页面后操作')
                 stale_revision=job['revision']!=getattr(self,'ui_revision',0)
-                if (not mode_action and stale_revision and not stop_bound) or job['action'] not in allowed:
+                if (not mode_action and stale_revision and not stop_bound and not already_stopped) or job['action'] not in allowed:
                     raise ValueError('流程已经变化，本次点击未执行，请重新选择')
                 action=job['action']
                 if action not in ('volume','eeg_filter','wrist_camera_settings'):
@@ -470,11 +473,12 @@ class WebControls:
                 elif action=='stop':
                     privacy=dashboard.privacy
                     target=job.get('privacy_target')
-                    if not privacy.target_matches(target,allow_same_session=True):
+                    if already_stopped:pass
+                    elif not privacy.target_matches(target,allow_same_session=True):
                         raise ValueError('采集会话已变化，请刷新后重试')
-                    if not privacy.snapshot().get('required'):
+                    elif not privacy.snapshot().get('required'):
                         raise ValueError('当前会话已经确认停止，请刷新页面')
-                    if self.stop_before_prompt(target) is False:
+                    elif self.stop_before_prompt(target) is False:
                         raise ValueError(getattr(self,'owner_command_error',None) or '停止请求未能送达，请重试')
                 elif action=='discard_recording':
                     if self.discard_recording() is False:

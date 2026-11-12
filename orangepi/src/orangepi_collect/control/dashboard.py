@@ -172,6 +172,7 @@ class Dashboard:
         self.phone_stream_slots=threading.BoundedSemaphore(3)
         self.lock=threading.Lock();self.snapshot={'state':'starting','revision':0,'devices':[],'selected_devices':[],'worker':{},'session':None,'image':None};self.pending=None;self.busy=False;self.result=None;self.prompting=False
         self.publish_seq=0;self.published_monotonic=time.monotonic();self.terminal_results=[];self.active_request_id=None;self.active_start_committed=False
+        self.cancelled_starts=set();self.start_targets={};self.pending_stop=None
         from diagnostic_events import EventWriter, NullEvents
         try:self.events=EventWriter(self.base/'runtime/diagnostics')
         except Exception:self.events=NullEvents()
@@ -367,6 +368,14 @@ class Dashboard:
                 if current and data.get('collection_context')!=current:
                     raise ValueError('采集模式已变化，请刷新页面后操作')
         if data.get('action')=='start':
+            if not request_id:raise ValueError('页面版本已更新，请刷新后再开始')
+            with self.lock:
+                if data.get('privacy_instance')!=self.privacy.instance:
+                    raise ValueError('控制器已变化，请刷新后再开始')
+                if len(self.cancelled_starts)>=256:
+                    same_active=self.active_request_id==request_id or (self.pending and self.pending.get('request_id')==request_id)
+                    if not same_active:self._terminal_locked(request_id,'start','取消记录已满，本次未开始',False)
+                    raise ValueError('取消记录已满，本次未开始，请联系维护人员')
             if data.get('stop_protocol') != 'session-stop-v1':raise ValueError('页面版本已更新，请刷新后再开始')
             self.privacy.require_stop_protocol()
             if not self.camera_checks.approved():raise ValueError('请先完成全部相机同屏检查并确认画面方向')
@@ -375,6 +384,36 @@ class Dashboard:
             self.privacy.display(data.get('value'));return
         if data.get('action')=='privacy_ack':
             self.privacy.acknowledge(data.get('value'));return
+        if data.get('action')=='cancel_start':
+            if not request_id:raise ValueError('缺少开始请求标识')
+            with self.lock:
+                if data.get('privacy_instance')!=self.privacy.instance:raise ValueError('控制器已变化，无法确认原请求')
+                if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
+                    raise ValueError('采集模式已变化，请刷新页面后操作')
+                target=self.start_targets.get(request_id)
+                if target:
+                    if self.privacy.snapshot()['phase']=='idle' and self.privacy.target_matches(target,allow_stopped=True):return
+                    if not self.privacy.target_matches(target,allow_same_session=True):
+                        raise ValueError('该请求的采集会话已变化，不能停止其他采集')
+                    self._queue_stop_locked(target,request_id)
+                    return
+                known_pending=(self.pending and self.pending.get('action')=='start' and self.pending.get('request_id')==request_id)
+                known_active=(getattr(self,'active_action',None)=='start' and self.active_request_id==request_id)
+                if not known_pending and not known_active and self.privacy.snapshot()['phase']!='idle':
+                    raise ValueError('无法确认该请求属于当前采集，不能停止其他会话')
+                if request_id not in self.cancelled_starts and len(self.cancelled_starts)>=256 and not (known_pending or known_active):
+                    raise ValueError('取消记录已满，状态未确认，请联系维护人员')
+                self.cancelled_starts.add(request_id)
+                if known_pending:
+                    self.pending=None
+                    self._terminal_locked(request_id,'start','本次开始已取消',False)
+                elif known_active:
+                    p=self.privacy.snapshot()
+                    if p['phase']=='arming' and p['nonce']:
+                        self.privacy.cancel_request({k:p[k] for k in ('instance','session_id','nonce','generation')})
+                elif not any(r['request_id']==request_id for r in self.terminal_results):
+                    self._terminal_locked(request_id,'start','本次开始已取消',False)
+                return
         if data.get('action')=='stop':
             # STOP is session-bound; unrelated status revisions must not make
             # a valid retry unreachable after the native writer faults.
@@ -382,19 +421,23 @@ class Dashboard:
                 if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
                     raise ValueError('采集模式已变化，请刷新页面后操作')
                 target=data.get('privacy_target')
+                if self.privacy.snapshot()['phase']=='idle' and self.privacy.target_matches(target,allow_stopped=True):return
                 if not self.privacy.target_matches(target,allow_same_session=True):
                     raise ValueError('采集会话已变化，请刷新后重试')
                 if target.get('generation')==self.privacy.generation and self.privacy.cancel_request(target):return
+                self._queue_stop_locked(target)
+                return
         with self.lock:
             if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
                 raise ValueError('采集模式已变化，请刷新页面后操作')
             current_stop=(data.get('action')=='stop'
                 and self.privacy.target_matches(data.get('privacy_target'),allow_same_session=True))
-            if ((self.busy and not self.prompting) or self.pending is not None) and not current_stop:
+            if ((self.busy and not self.prompting) or self.pending is not None or self.pending_stop is not None) and not current_stop:
                 raise ValueError('正在执行上一步，请等待')
             if data.get('action') not in ('collection_mode','stop') and data.get('revision')!=self.snapshot.get('revision'):
                 raise ValueError('流程已变化，请刷新后操作')
             if data.get('action') not in snapshot_actions(dict(self.snapshot,privacy=self.privacy.snapshot())):raise ValueError('当前步骤不允许这个操作')
+            if data.get('action')=='start' and request_id in self.cancelled_starts:raise ValueError('本次开始已取消')
             if request_id and (request_id==self.active_request_id or any(r['request_id']==request_id for r in self.terminal_results)):
                 raise ValueError('请求已处理，请查询状态')
             if data['action']=='collection_mode' and data.get('value') not in ('emg','eeg'):
@@ -456,11 +499,45 @@ class Dashboard:
         with self.lock:self.prompting=bool(active)
 
     def has_pending(self):
-        with self.lock:return self.pending is not None
+        with self.lock:return self.pending is not None or self.pending_stop is not None
+
+    def _terminal_locked(self,request_id,action,error,committed):
+        self.terminal_results.append(dict(request_id=request_id,action=action,ok=not bool(error),error=error,
+            publish_seq=self.publish_seq,commit_state='committed' if committed else 'not_committed'))
+        self.terminal_results=self.terminal_results[-64:]
+        retained={r['request_id'] for r in self.terminal_results}
+        self.start_targets={k:v for k,v in self.start_targets.items() if k in retained or k==self.active_request_id}
+
+    def _queue_stop_locked(self,target,request_id=None):
+        target=self.privacy.stopping(target,allow_same_session=True)
+        if self.pending_stop:
+            if not self.privacy.target_matches(self.pending_stop.get('privacy_target'),allow_same_session=True):
+                raise ValueError('已有其他停止请求等待执行')
+            if request_id and not self.pending_stop.get('request_id'):self.pending_stop['request_id']=request_id
+            return
+        self.pending_stop=dict(action='stop',revision=self.snapshot.get('revision'),privacy_target=target,request_id=request_id)
+
+    def arm_start(self,session,**owner):
+        with self.lock:
+            if self.active_request_id in self.cancelled_starts:return False
+            self.privacy.arm(session,**owner)
+            return True
+
+    def commit_start(self):
+        with self.lock:
+            if self.active_request_id in self.cancelled_starts:raise ValueError('本次开始已取消')
+            proof=self.privacy.commit()
+            if self.active_action=='start':
+                self.active_start_committed=True
+                if self.active_request_id:
+                    p=self.privacy.snapshot()
+                    self.start_targets[self.active_request_id]={k:p[k] for k in ('instance','session_id','nonce','generation')}
+            return proof
 
     def take(self):
         with self.lock:
-            job=self.pending;self.pending=None
+            if self.pending_stop is not None:job=self.pending_stop;self.pending_stop=None
+            else:job=self.pending;self.pending=None
             if job:
                 self.busy=True;self.active_action=job.get('action');self.active_request_id=job.get('request_id');self.active_start_committed=False
                 self.events.emit('action_taken', action=self.active_action if self.active_action in ('start','stop','impedance_start','impedance_end','impedance_review','rescan') else 'other', request_id=job.get('request_id'), revision=job.get('revision'))
@@ -472,8 +549,7 @@ class Dashboard:
             action=getattr(self,'active_action',None)
             request_id=self.active_request_id
             if request_id:
-                self.terminal_results.append(dict(request_id=request_id,action=action,ok=not bool(error),error=error,publish_seq=self.publish_seq,commit_state=('committed' if self.active_start_committed else 'not_committed') if action=='start' else 'not_applicable'))
-                self.terminal_results=self.terminal_results[-64:]
+                self._terminal_locked(request_id,action,error,self.active_start_committed if action=='start' else False)
             self.active_request_id=None
             self.events.emit('action_complete', action=action if action in ('start','stop','impedance_start','impedance_end','impedance_review','rescan') else 'other', request_id=request_id, ok=not bool(error), reason='failed' if error else 'ok')
 
@@ -485,7 +561,7 @@ class Dashboard:
         """Authoritative display gate without disk, QC, media or impedance parsing."""
         with self.lock:
             value={key:self.snapshot.get(key) for key in ('state','session','preview_id','image','selected_devices','revision','collection_mode','collection_context')}
-            value['busy']=self.busy or self.pending is not None
+            value['busy']=self.busy or self.pending is not None or self.pending_stop is not None
             value['result']=copy.deepcopy(self.result)
             value['terminal_results']=copy.deepcopy(self.terminal_results)
             value['publish_seq']=self.publish_seq
@@ -496,10 +572,12 @@ class Dashboard:
 
     def status(self,include_signals=None,include_review=True):
         with self.lock:
-            data=copy.deepcopy(self.snapshot);data.update(busy=self.busy or self.pending is not None,result=self.result)
+            data=copy.deepcopy(self.snapshot);data.update(busy=self.busy or self.pending is not None or self.pending_stop is not None,result=self.result,
+                terminal_results=copy.deepcopy(self.terminal_results),publish_seq=self.publish_seq,
+                publish_age_ms=max(0,round((time.monotonic()-self.published_monotonic)*1000)))
             review_root=self.review_root
             data['speaking']=self.prompting
-            data['actions']=[] if self.pending is not None or (self.busy and not self.prompting) else snapshot_actions(data)
+            data['actions']=[] if self.pending is not None or self.pending_stop is not None or (self.busy and not self.prompting) else snapshot_actions(data)
         data['can_skip_speech']=data['speaking'] and bool(data['actions'])
         data['privacy']=self.privacy.snapshot()
         data['camera_check']=self.camera_checks.status()

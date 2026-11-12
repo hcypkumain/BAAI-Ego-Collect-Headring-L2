@@ -12,14 +12,14 @@ from screen_privacy import ScreenPrivacy
 def submit_type():
  tree=ast.parse((ROOT/'src/orangepi_collect/control/dashboard.py').read_text())
  cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='Dashboard')
- cls.bases=[];cls.body=[n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name=='submit']
+ cls.bases=[];cls.body=[n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in ('submit','_queue_stop_locked')]
  scope={'snapshot_actions':lambda _:['stop','start']};exec(compile(ast.Module(body=[cls],type_ignores=[]),'dashboard.py','exec'),scope)
  return scope['Dashboard']
 
 class Tests(unittest.TestCase):
  def setup_dashboard(self, committed=False):
   d=submit_type()();d.lock=threading.Lock();d.snapshot={'revision':25,'collection_context':'emg:3'}
-  d.busy=False;d.prompting=False;d.pending=None;d.result=None
+  d.busy=False;d.prompting=False;d.pending=None;d.pending_stop=None;d.result=None
   d.privacy=ScreenPrivacy();d.privacy.phase='arming';d.privacy.session='/new';d.privacy.nonce='new';d.privacy.generation=7;d.privacy.committed=committed
   target={'instance':d.privacy.instance,'session_id':'/new','nonce':'new','generation':7}
   return d,{'action':'stop','revision':25,'collection_context':'emg:3','privacy_target':target}
@@ -36,12 +36,12 @@ class Tests(unittest.TestCase):
    d,job=self.setup_dashboard(committed);d.submit(job)
    if committed:
     self.assertFalse(d.privacy.cancelled);self.assertEqual(d.privacy.phase,'stopping')
-    self.assertEqual(d.pending['action'],'stop')
+    self.assertEqual(d.pending_stop['action'],'stop')
    else:self.assertTrue(d.privacy.cancelled);self.assertEqual(d.privacy.generation,8)
  def test_old_generation_cannot_stop_new_state(self):
   d,job=self.setup_dashboard();d.privacy.generation+=1
   d.submit(job)
-  self.assertFalse(d.privacy.cancelled);self.assertEqual(d.pending['action'],'stop')
+  self.assertFalse(d.privacy.cancelled);self.assertEqual(d.pending_stop['action'],'stop')
  def test_legacy_stop_without_identity_requires_refresh(self):
   d,job=self.setup_dashboard(True);del job['privacy_target']
   with self.assertRaisesRegex(ValueError,'刷新'):
@@ -51,8 +51,8 @@ class Tests(unittest.TestCase):
   d,job=self.setup_dashboard(True);d.privacy.phase='recording';d.busy=False;d.prompting=False;d.pending=None
   d.submit(job)
   self.assertEqual(d.privacy.phase,'stopping')
-  self.assertTrue(d.privacy.target_matches(d.pending['privacy_target']))
-  self.assertEqual(d.pending['privacy_target']['generation'],8)
+  self.assertTrue(d.privacy.target_matches(d.pending_stop['privacy_target']))
+  self.assertEqual(d.pending_stop['privacy_target']['generation'],8)
  def test_legacy_start_is_rejected_before_camera_or_pending(self):
   d,job=self.setup_dashboard();d.camera_checks=SimpleNamespace(approved=lambda: (_ for _ in ()).throw(AssertionError('camera check should not run')))
   with self.assertRaisesRegex(ValueError,'刷新'):

@@ -56,8 +56,8 @@ test('a local START latch cannot be revealed by an idle heartbeat',async()=>{
  const h=await harness();await h.tick(750);await h.screen.beforeStart();await h.tick(1500);assert.equal(h.locked,true);
 });
 test('an asynchronously rejected START can recover after a lightweight refresh',async()=>{
- const h=await harness();await h.tick(750);await h.screen.beforeStart();await h.tick(1500);
- const rejected=idle();rejected.result={ok:false,time:102};rejected.server_time=102;
+ const h=await harness();await h.tick(750);await h.screen.beforeStart('a'.repeat(32));await h.tick(1500);
+ const rejected=idle();rejected.result={ok:true,time:103};rejected.terminal_results=[{request_id:'a'.repeat(32),action:'start',ok:false,commit_state:'not_committed',publish_seq:4}];rejected.publish_seq=5;rejected.publish_age_ms=0;rejected._displayRequestedAt=h.now;
  const answer=await h.screen.synchronize(rejected);h.screen.revealIfSafe(answer.snapshot);assert.equal(h.locked,false);
 });
 test('an old idle response cannot reveal a newer recording generation',async()=>{

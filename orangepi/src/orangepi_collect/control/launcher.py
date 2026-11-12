@@ -513,8 +513,11 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.owner_exit_recovered=False;self.owner_exit_proof=None;self.owner_exit_persist_error=None
         self.stop_pending=False;self.stop_retry_authorized=False;self.stop_escalation_phase=None
         self.stop_force_deadline=None
-        privacy.arm(str(self.path.resolve()),worker_pid=self.worker_status().get('pid'),
-                    adapter_pid=self.worker.pid,owner_run=self.capture_owner_run)
+        arm=getattr(dashboard,'arm_start',None)
+        owner=dict(worker_pid=self.worker_status().get('pid'),adapter_pid=self.worker.pid,owner_run=self.capture_owner_run)
+        if callable(arm):
+            if not arm(str(self.path.resolve()),**owner):return False
+        else:privacy.arm(str(self.path.resolve()),**owner)
         try:
             deadline=time.monotonic()+12
             while not privacy.ready():
@@ -605,9 +608,12 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if contract_error:
             self.last_help=[contract_error+'。本次没有开始采集，请重新准备。'];self.state='ready';self.state_write();return False
         try:
-            proof=privacy.commit()
-            note=getattr(self.dashboard,'note_start_commit',None)
-            if callable(note):note()
+            commit=getattr(self.dashboard,'commit_start',None)
+            if callable(commit):proof=commit()
+            else:
+                proof=privacy.commit()
+                note=getattr(self.dashboard,'note_start_commit',None)
+                if callable(note):note()
             atomic_json(self.path/'screen_privacy_gate.json',proof)
         except Exception as error:
             if not privacy.committed:raise
