@@ -25,7 +25,14 @@ def acceptance_policy(value):
 
 
 def quality_allows_recording(state):
-    return acceptance_policy(state) == ADVISORY or assess_impedance(state).get('passed') is True
+    policy = acceptance_policy(state)
+    quality = assess_impedance(state)
+    if quality['passed']:
+        return True
+    return (policy == ADVISORY
+            and quality['reason'] == 'channels_not_passed'
+            and quality['expected_count'] > 0
+            and quality['valid_count'] == quality['expected_count'])
 
 
 def _number(value):

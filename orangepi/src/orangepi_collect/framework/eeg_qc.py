@@ -268,10 +268,15 @@ class OmniEegImpedance(BaseCheck):
             impedance_values_kohm={c['label']:c['value_kohm'] for c in enabled},
             impedance_review_to_start_seconds=(gate['start_monotonic_ns']-
                 proof['reviewed_monotonic_ns'])/1e9,
-            impedance_quality_policy='operator review; no automatic high-impedance threshold')
+            impedance_quality_policy=preflight.get('impedance_acceptance_policy', 'strict'),
+            impedance_quality=preflight.get('quality'),
+            impedance_quality_passed=(preflight.get('quality') or {}).get('passed'))
         if missing:
             out.findings.append(self.finding('WARN', '部分启用脑电通道的阻抗无有效读数；已保留原因及人工确认',
                 field='impedance_preflight.json', detail={'channels':missing}))
+        if isinstance(preflight.get('quality'), dict) and preflight['quality'].get('passed') is False:
+            out.findings.append(self.finding('WARN', '脑电阻抗质量未通过；已保留真实测量结果',
+                field='impedance_preflight.json', detail={'quality':preflight['quality']}))
         out.findings.append(self.finding('INFO', '已核对本段开始前保存的阻抗检测、人工确认与前端恢复证据',
             field='impedance_used.json', detail={'measurement_epoch':proof['measurement_epoch'],
                 'method':preflight['method'], 'units':'kOhm'}))

@@ -1539,7 +1539,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                     self.reference_prepare_failed(error);return
                 self.prepare()
             elif self.state in ('preparing','ready'):
-                self.begin()
+                result=self.begin()
+                if self.keyboard:self.keyboard.discard()
+                return result
             elif self.state=='recording':
                 self.stop_before_prompt()
             elif self.state=='confirm_stop':

@@ -13,7 +13,8 @@ PRESETS = {
 }
 DEFAULT = dict(label='OmniBCI 脑电 · 8 个有效通道', port='/dev/omnibci-unconnected',
                serial='F8:5B:1B:F4:27:44', enabled=True, sample_rate_hz=250,
-               labels=LAYOUT, disabled_channels=[], filter_preset='general', chunk_seconds=2)
+               labels=LAYOUT, disabled_channels=[], filter_preset='general', chunk_seconds=2,
+               impedance_acceptance_policy='advisory')
 
 
 def validate(item):
