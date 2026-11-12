@@ -1,11 +1,13 @@
 """Subprocess isolation tests. Every backend is local synthetic Python, never SSH."""
 import gc
 import os
+import signal
 import subprocess
 import sys
 import time
 import tracemalloc
 import unittest
+from unittest.mock import patch
 from dataclasses import asdict, replace
 
 from host.common.strict_json import canonical_json
@@ -52,6 +54,11 @@ def pump(scheduler, *, until, timeout=3):
 
 class IsolationTests(unittest.TestCase):
     def setUp(self):
+        from host.qc.fleet_monitor import isolated_transport as transport
+        # Explicit test-only state isolation, not a production reset API.
+        quarantine_patch = patch.dict(transport._PROCESS_QUARANTINE, clear=True)
+        quarantine_patch.start()
+        self.addCleanup(quarantine_patch.stop)
         self.registry = sample_registry()
         self.policy = sample_probe_policy(timeout_ms=40)
         self.schedulers = []
@@ -88,7 +95,8 @@ class IsolationTests(unittest.TestCase):
         self.assertEqual(second.stats()['global_children'], 1)
         self.assertTrue(first.close())
         second.tick(time.monotonic())
-        self.assertEqual(second.stats()['spawned'], 1)
+        self.assertEqual(second.stats()['spawned'], 0)
+        self.assertEqual(second.drain()[-1].status, 'quarantined')
 
     def test_process_wide_sixty_four_entry_budget(self):
         from host.qc.fleet_monitor import isolated_transport as transport
@@ -96,13 +104,160 @@ class IsolationTests(unittest.TestCase):
         scheduler = self.scheduler(devices=self.registry.devices[:1])
         self.assertEqual(len(transport._PROCESS_DOMAINS), 0)
         try:
-            transport._PROCESS_DOMAINS.update({f'synthetic-{i}': None for i in range(64)})
+            transport._PROCESS_DOMAINS.update({f'synthetic-{i}': ('synthetic', None) for i in range(64)})
             scheduler.tick(time.monotonic())
             self.assertEqual(scheduler.stats()['spawned'], 0)
             self.assertEqual(scheduler.stats()['global_children'], 64)
         finally:
             for i in range(64):
                 del transport._PROCESS_DOMAINS[f'synthetic-{i}']
+
+    def test_g1_timeout_quarantine_survives_reap_and_new_digest(self):
+        first = self.scheduler(devices=self.registry.devices[:1],
+                               factory=synthetic_factory(hung=(self.registry.devices[0].device_id,)))
+        rows, _ = pump(first, until=bool)
+        self.assertEqual(rows[-1].status, 'timeout')
+        self.assertEqual(first.stats()['children'], 0)
+        second = _test_scheduler(self.registry.devices[:1], registry_digest='b'*64,
+                                 policy=self.policy, factory=synthetic_factory())
+        self.schedulers.append(second)
+        second.tick(time.monotonic())
+        self.assertEqual(second.stats()['spawned'], 0)
+        self.assertEqual(second.drain()[-1].status, 'quarantined')
+        from host.qc.fleet_monitor.readonly_probe import probe_once
+        with patch('subprocess.Popen') as spawn:
+            row = probe_once(self.registry.devices[0], registry_digest='c'*64,
+                             generation=9, policy=replace(self.policy, timeout_ms=50))
+            spawn.assert_not_called()
+        self.assertEqual(row.status, 'quarantined')
+        self.assertEqual(first.stats()['global_children'], 0)
+        self.assertEqual(first.stats()['global_quarantined'], 1)
+
+    def test_g1_global_identity_budget_combines_live_and_tombstone_lists(self):
+        from host.qc.fleet_monitor import isolated_transport as transport
+        scheduler = self.scheduler(devices=self.registry.devices[:1])
+        with patch.dict(transport._PROCESS_QUARANTINE,
+                        {f'quarantined-{i}': 'timeout' for i in range(32)}, clear=True), \
+             patch.dict(transport._PROCESS_DOMAINS,
+                        {f'live-{i}': ('synthetic', None) for i in range(32)}, clear=True):
+            scheduler.tick(time.monotonic())
+            self.assertEqual(scheduler.stats()['spawned'], 0)
+            self.assertEqual(scheduler.stats()['global_identities'], 64)
+            self.assertEqual(scheduler.stats()['global_quarantined'], 32)
+            self.assertEqual(scheduler.drain()[-1].status, 'quarantined')
+
+    def test_g1_pipe_setup_failure_bounded_close_real_ignoring_term_child(self):
+        def factory(*args):
+            child = subprocess.Popen(
+                [sys.executable, '-I', '-S', '-c',
+                 'import os,signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);os.write(2,b"R");time.sleep(60)'],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                start_new_session=True, close_fds=True)
+            self.assertEqual(os.read(child.stderr.fileno(), 1), b'R')
+            return child
+        scheduler = self.scheduler(devices=self.registry.devices[:1], factory=factory)
+        try:
+            with patch('os.set_blocking', side_effect=OSError('synthetic setup failure')), \
+                 patch('os.killpg', wraps=os.killpg) as signals:
+                scheduler.tick(time.monotonic())
+                start = time.monotonic()
+                closed = scheduler.close(timeout_s=.03)
+                elapsed = time.monotonic()-start
+                self.assertLess(elapsed, .15)
+                self.assertTrue(any(call.args[1] == signal.SIGKILL for call in signals.call_args_list))
+                print('setup_failure_close_30ms_seconds=%.4f reaped=%s' % (elapsed, closed))
+        finally:
+            # Baseline failure cleanup too: no watchdog leaves a hung child behind.
+            for domain in tuple(scheduler._domains.values()):
+                try:
+                    os.killpg(domain.process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                for stream in (domain.process.stdin, domain.process.stdout, domain.process.stderr):
+                    if not stream.closed:
+                        os.set_blocking(stream.fileno(), False)
+            self.assertTrue(scheduler.close())
+
+    def test_g1_pipe_setup_failure_two_domains_do_not_block_healthy_third(self):
+        original_read, original_set = os.read, os.set_blocking
+        bad_fds = set()
+        healthy = synthetic_factory()
+        def factory(device, *args):
+            if device == self.registry.devices[2]:
+                with patch('os.read', original_read):
+                    child = healthy(device, *args)
+                bad_fds.difference_update(s.fileno() for s in (child.stdin, child.stdout, child.stderr))
+                return child
+            # Popen's internal exec-error pipe is not an adapter IPC pipe.
+            with patch('os.read', original_read):
+                child = subprocess.Popen(
+                    [sys.executable, '-I', '-S', '-c',
+                     'import os,signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);os.write(2,b"R");time.sleep(60)'],
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    start_new_session=True, close_fds=True)
+            self.assertEqual(original_read(child.stderr.fileno(), 1), b'R')
+            bad_fds.update(s.fileno() for s in (child.stdin, child.stdout, child.stderr))
+            return child
+        def set_blocking(fd, value):
+            if fd in bad_fds:
+                raise OSError('synthetic pipe initialization failure')
+            return original_set(fd, value)
+        def read(fd, size):
+            self.assertFalse(os.get_blocking(fd), 'never read an unconfirmed blocking pipe')
+            return original_read(fd, size)
+        scheduler = self.scheduler(devices=self.registry.devices[:3],
+                                   policy=replace(self.policy, timeout_ms=1000), factory=factory)
+        third = self.registry.devices[2].device_id
+        with patch('os.set_blocking', side_effect=set_blocking), patch('os.read', side_effect=read):
+            rows, elapsed = pump(scheduler, until=lambda rows: any(
+                r.device_id == third and r.identity_verified for r in rows), timeout=2)
+            self.assertLess(elapsed, 2)
+            print('two_setup_failures_third_healthy_seconds=%.4f' % elapsed)
+        self.assertTrue(scheduler.close())
+        self.assertEqual(scheduler.stats()['children'], 0)
+        self.assertEqual(scheduler.stats()['quarantined'], 2)
+
+    def test_g1_read_write_and_signal_oserrors_stay_device_local(self):
+        from host.qc.fleet_monitor import isolated_transport as transport
+        originals = os.read, os.write, os.killpg
+        for kind in ('read', 'write', 'signal'):
+            with self.subTest(kind=kind), patch.dict(transport._PROCESS_QUARANTINE, clear=True):
+                bad_fds, bad_pids, faults = set(), set(), []
+                normal = synthetic_factory(hung=tuple(d.device_id for d in self.registry.devices[:2])
+                                           if kind == 'signal' else ())
+                def factory(device, *args):
+                    with patch('os.read', originals[0]), patch('os.write', originals[1]), \
+                         patch('os.killpg', originals[2]):
+                        child = normal(device, *args)
+                    if device != self.registry.devices[2]:
+                        bad_fds.update(s.fileno() for s in (child.stdin, child.stdout, child.stderr))
+                        bad_pids.add(child.pid)
+                    else:
+                        bad_fds.difference_update(s.fileno() for s in (child.stdin, child.stdout, child.stderr))
+                    return child
+                def fault(fd, *args):
+                    targets = bad_pids if kind == 'signal' else bad_fds
+                    if fd in targets:
+                        faults.append(fd)
+                        # Signal fails once; subsequent close/KILL must still reap.
+                        if kind == 'signal':
+                            targets.remove(fd)
+                        raise OSError('synthetic device-local I/O error')
+                    return originals[('read', 'write', 'signal').index(kind)](fd, *args)
+                scheduler = self.scheduler(devices=self.registry.devices[:3],
+                                           policy=replace(self.policy, timeout_ms=1000), factory=factory)
+                if kind == 'signal':
+                    # Force stop on first two while the third remains eligible.
+                    scheduler.tick(time.monotonic())
+                    for domain in scheduler._domains.values():
+                        domain.invalid = True
+                with patch('os.' + ('killpg' if kind == 'signal' else kind), side_effect=fault):
+                    rows, _ = pump(scheduler, until=lambda rows: any(
+                        r.device_id == self.registry.devices[2].device_id and r.identity_verified
+                        for r in rows), timeout=2)
+                self.assertTrue(scheduler.close())
+                self.assertEqual(scheduler.stats()['children'], 0)
+                self.assertGreater(len(faults), 0)
 
     def test_six_devices_identical_payload_per_device_generations(self):
         scheduler = self.scheduler(policy=replace(self.policy, timeout_ms=1000))
@@ -133,6 +288,7 @@ class IsolationTests(unittest.TestCase):
         print('default_deadline_two_hung_three_rounds_seconds=%.3f' % elapsed)
 
     def test_wrong_digest_generation_device_rejected(self):
+        from host.qc.fleet_monitor import isolated_transport as transport
         for corrupt in ({'registry_digest': 'b'*64}, {'generation': 999}, {'device_id': 'cp_0099'}):
             scheduler = self.scheduler(devices=self.registry.devices[:1],
                                        policy=replace(self.policy, timeout_ms=1000),
@@ -141,6 +297,9 @@ class IsolationTests(unittest.TestCase):
             self.assertFalse(results[-1].identity_verified)
             self.assertTrue(all(e.value_json is None for _, e in results[-1].fields))
             self.assertGreater(scheduler.stats()['rejected'], 0)
+            self.assertTrue(scheduler.close())
+            # Independent synthetic fault profiles; no production reset exists.
+            transport._PROCESS_QUARANTINE.clear()
 
     def test_overflow_stops_and_does_not_retain_output(self):
         scheduler = self.scheduler(devices=self.registry.devices[:1],
@@ -209,6 +368,7 @@ class IsolationTests(unittest.TestCase):
               (peak_fd-baseline_fd, retained-baseline_mem, peak))
 
     def test_hundred_distinct_real_timeout_processes_fd_memory_budget(self):
+        from host.qc.fleet_monitor import isolated_transport as transport
         def factory(*args):
             return subprocess.Popen([sys.executable, '-I', '-S', '-c', 'import time;time.sleep(60)'],
                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -229,6 +389,10 @@ class IsolationTests(unittest.TestCase):
             self.assertTrue(scheduler.close())
             total += scheduler.stats()['spawned']
             self.assertEqual(scheduler.stats()['children'], 0)
+            self.assertEqual(scheduler.stats()['global_identities'], 1)
+            # Explicit synthetic-test-only reset AFTER confirmed local reap;
+            # production deliberately has no reset/approval shortcut.
+            transport._PROCESS_QUARANTINE.clear()
             self.assertEqual(len(os.listdir('/proc/self/fd')), base_fd)
             peak_rss = max(peak_rss, rss())
         gc.collect()

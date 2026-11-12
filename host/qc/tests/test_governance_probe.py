@@ -19,6 +19,10 @@ from host.qc.fleet_monitor.readonly_probe import (
 
 class ProbeTests(unittest.TestCase):
     def setUp(self):
+        from host.qc.fleet_monitor import isolated_transport as transport
+        quarantine_patch = patch.dict(transport._PROCESS_QUARANTINE, clear=True)
+        quarantine_patch.start()
+        self.addCleanup(quarantine_patch.stop)
         self.device = sample_device()
         self.policy = sample_probe_policy()
         self.digest = 'a' * 64
@@ -163,6 +167,58 @@ class ProbeTests(unittest.TestCase):
             result = probe_once(self.device, registry_digest=self.digest, generation=17, policy=self.policy)
         self.assertEqual(result.generation, 17)
         self.assertEqual(result.device_id, self.device.device_id)
+
+    def test_g1_once_occupied_full_and_closing_ledgers_return_without_spawn(self):
+        import time
+        from types import SimpleNamespace
+        from host.qc.fleet_monitor import isolated_transport as transport
+        closing = SimpleNamespace(_closed=True, _poll=lambda domain: None)
+        cases = (
+            {self.device.device_id: ('synthetic-unreaped', None)},
+            {f'synthetic-{i}': ('synthetic-unreaped', None) for i in range(64)},
+            {self.device.device_id: (closing, None)},
+        )
+        for ledger in cases:
+            with self.subTest(ledger_size=len(ledger)), \
+                 patch.dict(transport._PROCESS_DOMAINS, ledger, clear=True), \
+                 patch('subprocess.Popen') as spawn:
+                start = time.monotonic()
+                result = probe_once(self.device, registry_digest=self.digest, generation=17,
+                                    policy=replace(self.policy, timeout_ms=50))
+                elapsed = time.monotonic() - start
+                self.assertLess(elapsed, .15)
+                self.assertEqual(result.status, 'quarantined')
+                self.assertEqual(result.generation, 17)
+                self.assertFalse(result.identity_verified)
+                spawn.assert_not_called()
+                print('once_50ms_blocked_ledger_size=%d seconds=%.6f spawned=0' % (len(ledger), elapsed))
+
+    def test_g1_once_running_total_budget_includes_cleanup(self):
+        import time
+        from host.qc.fleet_monitor import isolated_transport as transport
+        from host.qc.tests.test_governance_isolation import synthetic_factory
+        original = transport.ProbeScheduler
+        owners = []
+        def constructor(devices, **kwargs):
+            time.sleep(.03)  # construction/admission time consumes the same budget
+            scheduler = original(devices, **kwargs)
+            scheduler._factory = synthetic_factory(partial_hang=True)
+            owners.append(scheduler)
+            return scheduler
+        try:
+            with patch.object(transport, 'ProbeScheduler', side_effect=constructor):
+                start = time.monotonic()
+                result = probe_once(self.device, registry_digest=self.digest, generation=18,
+                                    policy=replace(self.policy, timeout_ms=50))
+                elapsed = time.monotonic() - start
+            self.assertLess(elapsed, .15)
+            self.assertEqual(result.status, 'timeout')
+            self.assertEqual(owners[0].stats()['spawned'], 1)
+            self.assertEqual(owners[0].stats()['global_quarantined'], 1)
+            print('once_50ms_running_including_cleanup_seconds=%.4f' % elapsed)
+        finally:
+            for owner in owners:
+                self.assertTrue(owner.close())
 
 
 if __name__ == '__main__':

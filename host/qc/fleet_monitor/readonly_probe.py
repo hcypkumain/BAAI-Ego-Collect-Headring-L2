@@ -4,7 +4,7 @@ import re
 import shlex
 import stat
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 
 from host.common.device_registry import Device
 from host.common.governance_contract import (
@@ -216,16 +216,29 @@ def _decode_result(line, device, digest, generation):
 def probe_once(device: Device, *, registry_digest: str, generation: int,
                policy: ProbePolicy) -> ProbeResult:
     """One bounded direct SSH domain; no registry/config discovery or retries."""
-    from .isolated_transport import ProbeScheduler
+    started = time.monotonic()
+    from .isolated_transport import ProbeScheduler, _admission_blocked, _reap_closed_domains
     _validate_request(device, registry_digest, generation, policy)
+    deadline = started + policy.timeout_ms / 1000
+    _reap_closed_domains()
+    if _admission_blocked(device.device_id):
+        return _unknown(device, registry_digest, generation, 'quarantined')
     scheduler = ProbeScheduler((device,), registry_digest=registry_digest, policy=policy)
     scheduler._generations[device.device_id] = generation - 1
     try:
-        while True:
-            scheduler.tick(time.monotonic())
+        while time.monotonic() < deadline:
+            # Include validation/admission/setup time, not just time after spawn.
+            scheduler.tick(started if scheduler.stats()['spawned'] == 0 else time.monotonic())
             result = scheduler.drain()
             if result:
                 return result[-1]
-            time.sleep(0.005)
+            time.sleep(min(0.005, max(0, deadline - time.monotonic())))
+        domain = scheduler._domains.get(device.device_id)
+        if domain is not None and domain.latest is not None and not domain.invalid:
+            return replace(domain.latest, status='timeout')
+        return _unknown(device, registry_digest, generation, 'timeout')
     finally:
-        scheduler.close()
+        # Do not append a fresh two-second cleanup budget to the public deadline.
+        # Exhausted close immediately requests KILL and retains an honest ledger
+        # if reap is not yet possible; later API ticks reap closed owners.
+        scheduler.close(timeout_s=max(0, deadline - time.monotonic()))

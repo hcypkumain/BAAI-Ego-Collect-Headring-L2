@@ -17,6 +17,25 @@ from .readonly_probe import (_decode_result, _payload, _ssh_argv, _unknown,
 # the unreaped ledger even if a caller mistakenly drops its scheduler variable.
 # This module is deliberately single-threaded; all schedulers share main's loop.
 _PROCESS_DOMAINS = {}
+# Small identity-only tombstones, separate from handles. No production reset:
+# local reap does not prove that a remote D-state reader was cleaned up.
+_PROCESS_QUARANTINE = {}
+
+
+def _identity_count():
+    return len(_PROCESS_DOMAINS.keys() | _PROCESS_QUARANTINE.keys())
+
+
+def _admission_blocked(key):
+    return key in _PROCESS_DOMAINS or key in _PROCESS_QUARANTINE or _identity_count() >= 64
+
+
+def _reap_closed_domains():
+    # once() may exhaust its entire budget before local reap. Later API activity
+    # reaps those closed owners without retrying any quarantined identity.
+    for key, (owner, domain) in tuple(_PROCESS_DOMAINS.items()):
+        if getattr(owner, '_closed', False) and owner._poll(domain) is not None:
+            owner._finish(key, domain)
 
 
 @dataclass
@@ -34,6 +53,8 @@ class _Domain:
     latest: object = None
     invalid: bool = False
     reason: str = 'timeout'
+    nonblocking: set = field(default_factory=set)
+    kill_sent: bool = False
 
 
 def _spawn(device, digest, generation, policy):
@@ -69,18 +90,51 @@ class ProbeScheduler:
             os.killpg(domain.process.pid, sig)
         except ProcessLookupError:
             pass
+        except OSError:
+            self._quarantine_device(domain.device.device_id, 'signal-error')
+            return
+        if sig == signal.SIGKILL:
+            domain.kill_sent = True
+
+    def _quarantine_device(self, key, reason):
+        self._quarantine.add(key)
+        if key in _PROCESS_DOMAINS or key in _PROCESS_QUARANTINE or _identity_count() < 64:
+            _PROCESS_QUARANTINE.setdefault(key, reason)
+
+    @staticmethod
+    def _close_pipes(domain):
+        domain.nonblocking.clear()
+        domain.payload = b''
+        for stream in (domain.process.stdin, domain.process.stdout, domain.process.stderr):
+            if stream is not None and not stream.closed:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+    def _fail_io(self, domain):
+        domain.invalid = True
+        self._stop(domain, self._last_now, 'pipe-error')
+        self._close_pipes(domain)
+
+    def _poll(self, domain):
+        try:
+            return domain.process.poll()
+        except OSError:
+            self._fail_io(domain)
+            return None
 
     def _stop(self, domain, now, reason):
         if domain.phase == 'running':
             domain.phase, domain.boundary, domain.reason = 'term', now + 0.5, reason
             # Never retry timed-out devices: a killed local SSH cannot prove a
             # remote D-state reader exited. Healthy devices continue rotating.
-            self._quarantine.add(domain.device.device_id)
+            self._quarantine_device(domain.device.device_id, reason)
             self._signal(domain, signal.SIGTERM)
 
     def _read(self, domain):
         for stream, stdout in ((domain.process.stdout, True), (domain.process.stderr, False)):
-            if stream is None or stream.closed:
+            if stream is None or stream.closed or stream.fileno() not in domain.nonblocking:
                 continue
             # Fixed read budget per tick; a noisy peer cannot monopolize main.
             for _ in range(8):
@@ -88,8 +142,15 @@ class ProbeScheduler:
                     data = os.read(stream.fileno(), 16384)
                 except BlockingIOError:
                     break
+                except OSError:
+                    self._fail_io(domain)
+                    return
                 if not data:
-                    stream.close()
+                    try:
+                        stream.close()
+                    except OSError:
+                        self._fail_io(domain)
+                        return
                     break
                 if not stdout:
                     domain.stderr_bytes = min(8192, domain.stderr_bytes + len(data))
@@ -127,12 +188,10 @@ class ProbeScheduler:
     def _finish(self, key, domain):
         if (domain.process.returncode != 0 or domain.invalid or domain.latest is None
                 or not domain.latest.identity_verified):
-            self._quarantine.add(key)
+            self._quarantine_device(key, 'failed-observation')
         if domain.phase != 'quarantined':
             self._publish(domain, 'timeout' if domain.phase != 'running' else None)
-        for stream in (domain.process.stdin, domain.process.stdout, domain.process.stderr):
-            if stream is not None and not stream.closed:
-                stream.close()
+        self._close_pipes(domain)
         del self._domains[key]
         del _PROCESS_DOMAINS[key]
         self._reaped += 1
@@ -142,16 +201,17 @@ class ProbeScheduler:
                 or now_monotonic < self._last_now):
             raise ValueError('Expected increasing finite monotonic time')
         self._last_now = now = now_monotonic
+        _reap_closed_domains()
         for key, domain in tuple(self._domains.items()):
             if domain.phase == 'quarantined':
-                if domain.process.poll() is not None:
+                if self._poll(domain) is not None:
                     self._finish(key, domain)
                 continue
             if (domain.phase == 'running' and
                     now - domain.started >= self.policy.timeout_ms / 1000):
                 self._stop(domain, now, 'timeout')
             self._read(domain)
-            if domain.process.poll() is not None:
+            if self._poll(domain) is not None:
                 # Drain residual pipe bytes with a bounded second pass.
                 self._read(domain)
                 if domain.output and domain.phase == 'running':
@@ -168,18 +228,22 @@ class ProbeScheduler:
                 domain.phase = 'quarantined'
                 self._publish(domain, 'quarantined')
                 # Keep child/process handle and its ledger slot until reaped.
-                for stream in (domain.process.stdin, domain.process.stdout, domain.process.stderr):
-                    if stream is not None and not stream.closed:
-                        stream.close()
+                self._close_pipes(domain)
         if self._closed or not self.devices:
             return
         active = sum(d.phase != 'quarantined' for d in self._domains.values())
         for _ in range(len(self.devices)):
-            if active >= self.concurrency or len(_PROCESS_DOMAINS) >= 64:
+            if active >= self.concurrency:
                 break
             device = self.devices[self._cursor]
             self._cursor = (self._cursor + 1) % len(self.devices)
             key = device.device_id
+            if (key in _PROCESS_QUARANTINE or _identity_count() >= 64) and key not in _PROCESS_DOMAINS:
+                if key not in self._quarantine:
+                    self._quarantine_device(key, 'admission-quarantined')
+                    self._generations[key] += 1
+                    self._results[key] = _unknown(device, self.digest, self._generations[key], 'quarantined')
+                continue
             if key in _PROCESS_DOMAINS or key in self._quarantine or key in self._results:
                 continue
             generation = self._generations[key] + 1
@@ -189,20 +253,25 @@ class ProbeScheduler:
                 process = self._factory(device, self.digest, generation, self.policy)
             except (OSError, ValueError, UnicodeError):
                 self._results[key] = _unknown(device, self.digest, generation)
-                self._quarantine.add(key)
+                self._quarantine_device(key, 'admission-error')
                 continue
             domain = _Domain(device, generation, process, now)
             self._domains[key] = domain  # ledger before any fallible pipe action
             _PROCESS_DOMAINS[key] = (self, domain)
             self._spawned += 1
             active += 1
-            for stream in (process.stdin, process.stdout, process.stderr):
-                os.set_blocking(stream.fileno(), False)
             # Input can exceed PIPE_BUF. Nonblocking partial writes continue in tick.
             domain.payload = payload
+            try:
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    os.set_blocking(stream.fileno(), False)
+                    domain.nonblocking.add(stream.fileno())
+            except OSError:
+                self._fail_io(domain)
         for domain in self._domains.values():
             stream = domain.process.stdin
-            if domain.phase != 'running' or stream is None or stream.closed:
+            if (domain.phase != 'running' or stream is None or stream.closed
+                    or stream.fileno() not in domain.nonblocking):
                 continue
             try:
                 domain.sent += os.write(stream.fileno(), domain.payload[domain.sent:])
@@ -211,8 +280,8 @@ class ProbeScheduler:
                     domain.payload = b''
             except BlockingIOError:
                 pass
-            except BrokenPipeError:
-                stream.close()
+            except OSError:
+                self._fail_io(domain)
 
     def drain(self) -> tuple[ProbeResult, ...]:
         result = tuple(self._results.values())
@@ -229,10 +298,22 @@ class ProbeScheduler:
             self._stop(domain, base, 'close')
         while self._domains:
             now = time.monotonic()
+            # A short/expired close budget must not spend 0.5s waiting for TERM
+            # before requesting KILL. Never read unconfirmed blocking pipes.
+            if now - start >= max(0, timeout_s - 0.5):
+                for domain in tuple(self._domains.values()):
+                    if not domain.kill_sent:
+                        self._signal(domain, signal.SIGKILL)
             self.tick(max(base + now - start, self._last_now))
-            if now - start >= timeout_s:
+            if time.monotonic() - start >= timeout_s and self._domains:
+                for domain in self._domains.values():
+                    if domain.phase != 'quarantined':
+                        self._publish(domain, 'quarantined')
+                    domain.phase = 'quarantined'
+                    self._close_pipes(domain)
                 return False
-            time.sleep(0.005)
+            if self._domains:
+                time.sleep(min(0.005, max(0, timeout_s - (time.monotonic() - start))))
         return True
 
     def stats(self) -> dict[str, int]:
@@ -245,7 +326,8 @@ class ProbeScheduler:
                               for d in self._domains.values()) +
                     sum(len(canonical_json(asdict(r)).encode('utf-8')) for r in self._results.values()),
                     spawned=self._spawned, reaped=self._reaped, rejected=self._rejected,
-                    global_workers=len(_PROCESS_DOMAINS), global_children=len(_PROCESS_DOMAINS))
+                    global_workers=len(_PROCESS_DOMAINS), global_children=len(_PROCESS_DOMAINS),
+                    global_quarantined=len(_PROCESS_QUARANTINE), global_identities=_identity_count())
 
 
 def _test_scheduler(devices, *, registry_digest, policy, factory, concurrency=2):

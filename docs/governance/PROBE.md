@@ -10,7 +10,20 @@ and that the selected objects share that digest. Empty scheduler creates nothing
 ## API and admission (main must complete before live use)
 
 `readonly_probe.probe_once(device, *, registry_digest, generation, policy)` does
-one attempt. `isolated_transport.ProbeScheduler(devices, *, registry_digest,
+one attempt. Its `timeout_ms` budget starts at public-call entry (including
+validation, admission and cleanup), not at child spawn. Same-ID occupied/closing
+ledger, exhausted global identity budget or process quarantine returns an immediate
+null-valued `quarantined` result without spawning. No external watchdog is needed.
+An admitted attempt returns `timeout` at the overall deadline, retaining earlier
+accepted RAM if available. Cleanup uses only the remaining budget: if exhausted,
+it immediately requests KILL, closes pipes, and retains unreaped handles in the
+strong global ledger. Later once/tick activity reaps closed owners without retrying
+their identity. There is no thread/background reaper or claim that an OS D-state
+task can be forced to finish; callers must not interpret return as remote cleanup.
+These are foreground/event-loop bounds, subject to Python/OS scheduling and the
+same fundamental uninterruptible-kernel-I/O limitation, not hard realtime promises.
+
+`isolated_transport.ProbeScheduler(devices, *, registry_digest,
 policy, concurrency=2)` provides `tick(now_monotonic)`, `drain()`, `close(2.0)` and
 integer-valued `stats()`. Call tick frequently (e.g. 5–20 ms); deadline checks and
 fair service are event-loop driven, not an autonomous realtime guarantee.
@@ -100,9 +113,14 @@ tools. No service query is needed; controller/runtime remain unknown.
 
 One direct SSH subprocess/process group is the entire local worker domain per
 device; no wrapper process or extra thread. Scheduler is immutable in targets and
-digest. A process-wide strong-reference ledger enforces max 64 concurrent entries
-across scheduler objects/digests and prevents same-ID replacement until reap;
-dropping a scheduler reference cannot erase an unreaped slot. All scheduler calls
+digest. A process-wide strong-reference ledger retains unreaped handles. A separate
+identity-only quarantine dictionary survives local reap and new schedulers/digests.
+The union of live IDs and quarantined IDs is capped at **64**, not 64 in each list;
+no exited Popen is retained just to remember quarantine. Full budget rejects new
+identities with an observable quarantined result and no spawn. Same-ID quarantine
+cannot be bypassed by a new scheduler/once call; normal successful polls release
+their live identity and can continue fairly. Dropping a scheduler reference cannot
+erase an unreaped slot. All scheduler calls
 must use the same main thread. Max 64 devices per scheduler, max 64 global
 worker/SSH children, main process 1;
 default **normal concurrency 2**. Round-robin service lets healthy devices advance
@@ -110,16 +128,25 @@ after the two hung domains exhaust 5 seconds + TERM 0.5 + KILL 0.5 seconds.
 Unreapable domains release normal eligibility after that boundary but remain in
 the ledger with handles; never replace a worker for that device. `poll` reaps
 children; parent closes all pipes. `close` never spawns, waits at most caller's
-timeout plus bounded tick processing, returns false if any child is unreaped,
+timeout plus bounded tick processing, requests KILL early when the remaining budget
+cannot accommodate the ordinary grace, returns false if any child is unreaped,
 and can be retried to reap it. Caller must retain that scheduler/ledger on false.
+Each pipe is readable/writable only after its own successful nonblocking setup.
+Initialization/read/write/poll errors become device-local termination/quarantine;
+unconfirmed pipes are closed without reading. Signal OSError retains the handle
+and quarantine rather than aborting other devices' tick. A 30-ms close need not
+spend 0.5 seconds waiting for TERM before requesting KILL.
 
 **Conservative default: any timeout, invalid/missing output, rejected identity,
-nonzero SSH exit or admission failure quarantines that device for the scheduler
+nonzero SSH exit or admission failure quarantines that device for this process
 lifetime, even if reaped.**
 Healthy devices continue sampling. There is no automatic timeout retry/reset or
-namespace update API. Do not recreate schedulers to evade a quarantine; main must
-retain unclosed schedulers and explicitly review remote cleanup before another
-attempt. A fresh user invocation is not proof of prior remote cleanup.
+namespace update API and **no production approved-reset entry point**. Tests alone
+isolate/reset the private dictionary, only after synthetic child reap. Main must
+not automatically recreate schedulers or CLI processes to retry quarantined IDs.
+The identity record is in-process only, **not durable across a CLI/process restart**;
+a fresh invocation is not proof of prior remote cleanup. Main must separately
+review remote cleanup and future approved reset policy before any reattempt.
 
 SIGKILL cannot guarantee local D-state reap or terminate a remote D-state reader.
 Remote SIGALRM also cannot interrupt kernel uninterruptible sleep. This code does
@@ -143,7 +170,9 @@ or allocator overhead**. `workers/children` include unreapable ledger entries,
 `active` includes TERM/KILL grace until quarantine, `quarantined` counts denied
 devices even after their child is reaped, `queued` counts pending device results;
 spawned/reaped/rejected are lifetime counters; global_workers/global_children
-count the shared process-wide ledger. Read FD count is at most 3 per
+count the shared process-wide handle ledger; global_quarantined counts identity
+tombstones and global_identities counts their union with live IDs (maximum 64).
+The at-most-64 identity records contain no Popen/pipe/payload. Read FD count is at most 3 per
 running domain, with no persistent result storage.
 
 ## Local acceptance
@@ -159,7 +188,12 @@ remote reader against temporary identity/source fixtures and local proc, synthet
 disk hang, wrong identity/envelope, overflow, zero targets, per-device generation,
 bounded close and synthetic unreapable poll. One run uses the real default
 5000-ms policy and requires three healthy rounds within 8 seconds. A separate
-100 distinct short-timeout subprocess test measures FD/RSS/tracemalloc; a further
-100 post-timeout ticks confirms quarantined devices never receive replacements.
+100 distinct short-timeout subprocess test measures FD/RSS/tracemalloc, explicitly
+resetting test-only identity state after each confirmed reap; a further 100
+post-timeout ticks confirms quarantined devices never receive replacements.
+G1 regressions add direct 50-ms once calls against same-ID/full/closing ledgers
+(no watchdog), running-once total-budget checks, new-digest quarantine after reap,
+combined live+tombstone capacity, actual ignore-TERM children with injected pipe
+setup failure and 30-ms close, healthy third progress and device-local I/O errors.
 All process factories are local Python. No SSH subprocess, production config,
 trust/key file, network, DB or live QC service is used by tests.
