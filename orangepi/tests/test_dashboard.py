@@ -60,10 +60,18 @@ class DashboardTests(unittest.TestCase):
         self.url='http://127.0.0.1:'+str(self.ui.server.server_port)
         self.ui.publish({'state':'ready','revision':7})
     def tearDown(self):self.ui.close();self.tmp.cleanup()
+    def test_ticket_issue_http_requires_auth_and_is_idempotent(self):
+        request={'action':'start_ticket','request_id':'c'*32,'start_ticket':1,'privacy_instance':self.ui.privacy.instance}
+        with self.assertRaises(HTTPError) as error:self.post(request,token=False)
+        self.assertEqual(error.exception.code,401)
+        first=json.load(self.post(request));second=json.load(self.post(request))
+        self.assertTrue(first['accepted']);self.assertEqual(first,second)
+        self.assertEqual(self.ui.ticket_next,2)
     def test_request_terminal_history_survives_later_result_and_tracks_publications(self):
         self.ui.camera_checks.approved=lambda:True
         request_id='a'*32
-        self.ui.submit({'action':'start','revision':7,'stop_protocol':'session-stop-v1','request_id':request_id,'privacy_instance':self.ui.privacy.instance})
+        ticket=self.ui.submit({'action':'start_ticket','start_ticket':self.ui.ticket_next,'request_id':request_id,'privacy_instance':self.ui.privacy.instance})
+        self.ui.submit({'action':'start','revision':7,'stop_protocol':'session-stop-v1','request_id':request_id,'privacy_instance':self.ui.privacy.instance,**ticket})
         self.assertEqual(self.ui.take()['request_id'],request_id)
         self.ui.complete('start rejected')
         first=self.ui.display_state()
@@ -102,7 +110,8 @@ class DashboardTests(unittest.TestCase):
         with urlopen(self.url+'/api/status') as response:self.assertEqual(json.load(response)['revision'],7)
         with urlopen(self.url+'/preview/cam_left_wrist.jpg') as response:self.assertEqual(response.read(),b'\xff\xd8preview\xff\xd9')
         self.ui.camera_checks.approved=lambda:True
-        self.assertEqual(self.post({'action':'start','revision':7,'stop_protocol':'session-stop-v1','request_id':'a'*32,'privacy_instance':self.ui.privacy.instance},token=False).status,202)
+        ticket=self.ui.submit({'action':'start_ticket','start_ticket':self.ui.ticket_next,'request_id':'a'*32,'privacy_instance':self.ui.privacy.instance})
+        self.assertEqual(self.post({'action':'start','revision':7,'stop_protocol':'session-stop-v1','request_id':'a'*32,'privacy_instance':self.ui.privacy.instance,**ticket},token=False).status,202)
         self.assertEqual(self.ui.take()['action'],'start')
     def test_no_code_mode_still_checks_origin_and_state(self):
         self.without_access_code()
@@ -125,9 +134,10 @@ class DashboardTests(unittest.TestCase):
         self.assertIsNone(self.ui.take())
     def test_duplicate_start_is_rejected_and_never_becomes_stop(self):
         self.ui.camera_checks.approved=lambda:True
-        start={'action':'start','revision':7,'stop_protocol':'session-stop-v1','request_id':'a'*32,'privacy_instance':self.ui.privacy.instance}
+        ticket=self.ui.submit({'action':'start_ticket','start_ticket':self.ui.ticket_next,'request_id':'a'*32,'privacy_instance':self.ui.privacy.instance})
+        start={'action':'start','revision':7,'stop_protocol':'session-stop-v1','request_id':'a'*32,'privacy_instance':self.ui.privacy.instance,**ticket}
         self.assertEqual(self.post(start).status,202)
-        with self.assertRaises(HTTPError):self.post(start)
+        self.assertEqual(self.post(start).status,202)
         job=self.ui.take();self.assertEqual(job['action'],'start')
         self.ui.publish({'state':'recording','revision':8});self.ui.complete()
         with self.assertRaises(HTTPError):self.post({'action':'start','revision':8})

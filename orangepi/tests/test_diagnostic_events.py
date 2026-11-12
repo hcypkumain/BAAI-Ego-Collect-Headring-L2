@@ -15,7 +15,7 @@ class DiagnosticEventsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             writer = EventWriter(Path(tmp)/'diagnostics', max_bytes=180, files=4)
             for _ in range(15):writer.emit('action_complete', action='start', ok=False,
-                request_id='a'*32, reason='failed', secret='sensitive', payload={'token':'sensitive'})
+                request_id='a'*32, reason='failed', secret='sensitive', ticket_proof='sensitive', payload={'token':'sensitive'})
             writer.queue.join()
             directory=Path(tmp)/'diagnostics'
             self.assertEqual(os.stat(directory).st_mode & 0o777, 0o700)

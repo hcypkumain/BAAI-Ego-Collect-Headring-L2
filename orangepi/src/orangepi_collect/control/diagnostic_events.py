@@ -9,7 +9,7 @@ import stat
 import threading
 import time
 
-EVENTS = frozenset(('action_submitted', 'action_taken', 'action_complete', 'impedance_gate',
+EVENTS = frozenset(('action_submitted', 'action_taken', 'action_complete', 'ticket_issued', 'ticket_terminal', 'impedance_gate',
                     'scan_deferred', 'scan_start', 'scan_end', 'lock_wait', 'loop_lag'))
 WORDS = {
     'action': frozenset(('start', 'stop', 'impedance_start', 'impedance_end', 'impedance_review', 'rescan', 'other')),
@@ -22,7 +22,7 @@ WORDS = {
                          'measurement_unavailable', 'unknown')),
 }
 NUMBERS = frozenset(('revision', 'generation', 'publish_seq', 'enabled_count', 'valid_count',
-                     'duration_ms', 'lag_ms', 'publish_age_ms', 'dropped'))
+                     'duration_ms', 'lag_ms', 'publish_age_ms', 'dropped', 'ticket_number'))
 
 
 def safe_event(event, fields):

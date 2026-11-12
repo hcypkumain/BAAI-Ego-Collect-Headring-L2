@@ -172,7 +172,8 @@ class Dashboard:
         self.phone_stream_slots=threading.BoundedSemaphore(3)
         self.lock=threading.Lock();self.snapshot={'state':'starting','revision':0,'devices':[],'selected_devices':[],'worker':{},'session':None,'image':None};self.pending=None;self.busy=False;self.result=None;self.prompting=False
         self.publish_seq=0;self.published_monotonic=time.monotonic();self.terminal_results=[];self.active_request_id=None;self.active_start_committed=False
-        self.cancelled_starts=set();self.start_targets={};self.pending_stop=None
+        self.ticket_next=1;self.ticket_watermark=0;self.ticket_window=64;self.tickets={};self.ticket_secret=secrets.token_bytes(32)
+        self.start_targets={};self.pending_stop=None
         from diagnostic_events import EventWriter, NullEvents
         try:self.events=EventWriter(self.base/'runtime/diagnostics')
         except Exception:self.events=NullEvents()
@@ -341,8 +342,8 @@ class Dashboard:
                     if not 0<length<=2048:raise ValueError('请求太大或为空')
                     data=json.loads(self.rfile.read(length))
                     if not isinstance(data,dict):raise ValueError('无效操作')
-                    owner.submit(data)
-                    self.send(202,{'accepted':True})
+                    result=owner.submit(data)
+                    self.send(202,dict(accepted=True,**(result or {})))
                 except (ValueError,TypeError,json.JSONDecodeError) as exc:self.send(409,{'error':str(exc)})
         import startup_status
         startup_status.handoff()
@@ -367,15 +368,32 @@ class Dashboard:
                 current=self.snapshot.get('collection_context')
                 if current and data.get('collection_context')!=current:
                     raise ValueError('采集模式已变化，请刷新页面后操作')
+        if data.get('action')=='start_ticket':
+            if not request_id:raise ValueError('缺少请求标识')
+            with self.lock:
+                if data.get('privacy_instance')!=self.privacy.instance:raise ValueError('控制器已变化，请刷新页面')
+                if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
+                    raise ValueError('采集模式已变化，请刷新页面后操作')
+                number=data.get('start_ticket')
+                if type(number) is not int or number<1:raise ValueError('无效的开始票据序号')
+                existing=self.tickets.get(number)
+                if existing and existing['request_id']==request_id:
+                    return {'start_ticket':number,'ticket_proof':self._ticket_proof(number,request_id)}
+                if number!=self.ticket_next:raise ValueError('票据序号已变化，请刷新后重试')
+                if len(self.tickets)>=self.ticket_window:raise ValueError('未决开始票据已满，请结束其他页面的操作后重试')
+                self.tickets[number]={'request_id':request_id,'state':'issued'};self.ticket_next+=1
+                self.events.emit('ticket_issued',request_id=request_id,ticket_number=number)
+                return {'start_ticket':number,'ticket_proof':self._ticket_proof(number,request_id)}
         if data.get('action')=='start':
             if not request_id:raise ValueError('页面版本已更新，请刷新后再开始')
             with self.lock:
                 if data.get('privacy_instance')!=self.privacy.instance:
                     raise ValueError('控制器已变化，请刷新后再开始')
-                if len(self.cancelled_starts)>=256:
-                    same_active=self.active_request_id==request_id or (self.pending and self.pending.get('request_id')==request_id)
-                    if not same_active:self._terminal_locked(request_id,'start','取消记录已满，本次未开始',False)
-                    raise ValueError('取消记录已满，本次未开始，请联系维护人员')
+                number=self._validate_ticket_locked(data)
+                ticket=self.tickets.get(number)
+                if ticket is None or ticket['state']=='terminal':raise ValueError('开始票据已终止，不能重用')
+                if ticket['state']=='cancelling':raise ValueError('本次开始已取消')
+                if ticket['state'] in ('queued','executing','committed'):return
             if data.get('stop_protocol') != 'session-stop-v1':raise ValueError('页面版本已更新，请刷新后再开始')
             self.privacy.require_stop_protocol()
             if not self.camera_checks.approved():raise ValueError('请先完成全部相机同屏检查并确认画面方向')
@@ -390,29 +408,33 @@ class Dashboard:
                 if data.get('privacy_instance')!=self.privacy.instance:raise ValueError('控制器已变化，无法确认原请求')
                 if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
                     raise ValueError('采集模式已变化，请刷新页面后操作')
-                target=self.start_targets.get(request_id)
+                number=self._validate_ticket_locked(data)
+                ticket=self.tickets.get(number)
+                target=self.start_targets.get((number,request_id))
                 if target:
                     if self.privacy.snapshot()['phase']=='idle' and self.privacy.target_matches(target,allow_stopped=True):return
                     if not self.privacy.target_matches(target,allow_same_session=True):
                         raise ValueError('该请求的采集会话已变化，不能停止其他采集')
-                    self._queue_stop_locked(target,request_id)
+                    self._queue_stop_locked(target,request_id,number)
                     return
+                if ticket is None:return
+                if ticket['state']=='terminal':return
                 known_pending=(self.pending and self.pending.get('action')=='start' and self.pending.get('request_id')==request_id)
                 known_active=(getattr(self,'active_action',None)=='start' and self.active_request_id==request_id)
                 if not known_pending and not known_active and self.privacy.snapshot()['phase']!='idle':
                     raise ValueError('无法确认该请求属于当前采集，不能停止其他会话')
-                if request_id not in self.cancelled_starts and len(self.cancelled_starts)>=256 and not (known_pending or known_active):
-                    raise ValueError('取消记录已满，状态未确认，请联系维护人员')
-                self.cancelled_starts.add(request_id)
                 if known_pending:
                     self.pending=None
-                    self._terminal_locked(request_id,'start','本次开始已取消',False)
+                    self._finish_ticket_locked(number,'cancelled')
+                    self._terminal_locked(request_id,'start','本次开始已取消',False,number)
                 elif known_active:
+                    ticket['state']='cancelling'
                     p=self.privacy.snapshot()
                     if p['phase']=='arming' and p['nonce']:
                         self.privacy.cancel_request({k:p[k] for k in ('instance','session_id','nonce','generation')})
-                elif not any(r['request_id']==request_id for r in self.terminal_results):
-                    self._terminal_locked(request_id,'start','本次开始已取消',False)
+                elif ticket['state']=='issued':
+                    self._finish_ticket_locked(number,'cancelled')
+                    self._terminal_locked(request_id,'start','本次开始已取消',False,number)
                 return
         if data.get('action')=='stop':
             # STOP is session-bound; unrelated status revisions must not make
@@ -437,7 +459,12 @@ class Dashboard:
             if data.get('action') not in ('collection_mode','stop') and data.get('revision')!=self.snapshot.get('revision'):
                 raise ValueError('流程已变化，请刷新后操作')
             if data.get('action') not in snapshot_actions(dict(self.snapshot,privacy=self.privacy.snapshot())):raise ValueError('当前步骤不允许这个操作')
-            if data.get('action')=='start' and request_id in self.cancelled_starts:raise ValueError('本次开始已取消')
+            if data.get('action')=='start':
+                number=self._validate_ticket_locked(data)
+                ticket=self.tickets.get(number)
+                if ticket is None or ticket['state']=='terminal':raise ValueError('开始票据已终止，不能重用')
+                if ticket['state']=='cancelling':raise ValueError('本次开始已取消')
+                if ticket['state'] in ('queued','executing','committed'):return
             if request_id and (request_id==self.active_request_id or any(r['request_id']==request_id for r in self.terminal_results)):
                 raise ValueError('请求已处理，请查询状态')
             if data['action']=='collection_mode' and data.get('value') not in ('emg','eeg'):
@@ -497,6 +524,7 @@ class Dashboard:
                 target=self.privacy.stopping(data.get('privacy_target'),allow_same_session=True)
                 data=dict(data,privacy_target=target)
             self.pending=dict(data);self.result=None
+            if data['action']=='start':self.tickets[number]['state']='queued'
             self.events.emit('action_submitted', action=data['action'] if data['action'] in ('start','stop','impedance_start','impedance_end','impedance_review','rescan') else 'other', request_id=data.get('request_id'), revision=data.get('revision'))
 
     def set_prompting(self,active):
@@ -505,37 +533,61 @@ class Dashboard:
     def has_pending(self):
         with self.lock:return self.pending is not None or self.pending_stop is not None
 
-    def _terminal_locked(self,request_id,action,error,committed):
-        self.terminal_results.append(dict(request_id=request_id,action=action,ok=not bool(error),error=error,
+    def _ticket_proof(self,number,request_id):
+        return hmac.new(self.ticket_secret,(self.privacy.instance+':'+str(number)+':'+request_id).encode(), 'sha256').hexdigest()
+
+    def _validate_ticket_locked(self,data):
+        number=data.get('start_ticket');request_id=data.get('request_id');proof=data.get('ticket_proof')
+        if (type(number) is not int or not 1<=number<self.ticket_next or not request_id
+                or not isinstance(proof,str) or not hmac.compare_digest(proof,self._ticket_proof(number,request_id))):
+            raise ValueError('开始票据无效或未签发，请刷新后重试')
+        ticket=self.tickets.get(number)
+        if ticket is not None and ticket['request_id']!=request_id:raise ValueError('开始票据不匹配')
+        if ticket is None and number>self.ticket_watermark:raise ValueError('开始票据状态未知')
+        return number
+
+    def _finish_ticket_locked(self,number,reason='ok'):
+        ticket=self.tickets.get(number)
+        if ticket is None:return
+        self.events.emit('ticket_terminal',request_id=ticket['request_id'],ticket_number=number,reason=reason)
+        ticket['state']='terminal'
+        while self.tickets.get(self.ticket_watermark+1,{}).get('state')=='terminal':
+            self.ticket_watermark+=1;self.tickets.pop(self.ticket_watermark)
+
+    def _terminal_locked(self,request_id,action,error,committed,number=None):
+        self.terminal_results.append(dict(request_id=request_id,start_ticket=number,action=action,ok=not bool(error),error=error,
             publish_seq=self.publish_seq,commit_state='committed' if committed else 'not_committed'))
         self.terminal_results=self.terminal_results[-64:]
         retained={r['request_id'] for r in self.terminal_results}
-        self.start_targets={k:v for k,v in self.start_targets.items() if k in retained or k==self.active_request_id}
+        self.start_targets={k:v for k,v in self.start_targets.items() if k[1] in retained or k[1]==self.active_request_id}
 
-    def _queue_stop_locked(self,target,request_id=None):
+    def _queue_stop_locked(self,target,request_id=None,number=None):
         target=self.privacy.stopping(target,allow_same_session=True)
         if self.pending_stop:
             if not self.privacy.target_matches(self.pending_stop.get('privacy_target'),allow_same_session=True):
                 raise ValueError('已有其他停止请求等待执行')
-            if request_id and not self.pending_stop.get('request_id'):self.pending_stop['request_id']=request_id
+            if request_id and not self.pending_stop.get('request_id'):
+                self.pending_stop['request_id']=request_id;self.pending_stop['start_ticket']=number
             return
-        self.pending_stop=dict(action='stop',revision=self.snapshot.get('revision'),privacy_target=target,request_id=request_id)
+        self.pending_stop=dict(action='stop',revision=self.snapshot.get('revision'),privacy_target=target,request_id=request_id,start_ticket=number)
 
     def arm_start(self,session,**owner):
         with self.lock:
-            if self.active_request_id in self.cancelled_starts:return False
+            if getattr(self,'active_action',None)=='start' and self.tickets.get(getattr(self,'active_start_ticket',None),{}).get('state')!='executing':return False
             self.privacy.arm(session,**owner)
             return True
 
     def commit_start(self):
         with self.lock:
-            if self.active_request_id in self.cancelled_starts:raise ValueError('本次开始已取消')
+            ticket=self.tickets.get(getattr(self,'active_start_ticket',None))
+            if getattr(self,'active_action',None)=='start' and (not ticket or ticket['state']!='executing'):raise ValueError('本次开始已取消')
             proof=self.privacy.commit()
             if self.active_action=='start':
+                ticket['state']='committed'
                 self.active_start_committed=True
                 if self.active_request_id:
                     p=self.privacy.snapshot()
-                    self.start_targets[self.active_request_id]={k:p[k] for k in ('instance','session_id','nonce','generation')}
+                    self.start_targets[(self.active_start_ticket,self.active_request_id)]={k:p[k] for k in ('instance','session_id','nonce','generation')}
             return proof
 
     def take(self):
@@ -544,6 +596,8 @@ class Dashboard:
             else:job=self.pending;self.pending=None
             if job:
                 self.busy=True;self.active_action=job.get('action');self.active_request_id=job.get('request_id');self.active_start_committed=False
+                self.active_start_ticket=job.get('start_ticket')
+                if self.active_action=='start' and self.active_start_ticket is not None:self.tickets[self.active_start_ticket]['state']='executing'
                 self.events.emit('action_taken', action=self.active_action if self.active_action in ('start','stop','impedance_start','impedance_end','impedance_review','rescan') else 'other', request_id=job.get('request_id'), revision=job.get('revision'))
             return job
 
@@ -553,9 +607,14 @@ class Dashboard:
             action=getattr(self,'active_action',None)
             request_id=self.active_request_id
             if request_id:
-                self._terminal_locked(request_id,action,error,self.active_start_committed if action=='start' else False)
+                self._terminal_locked(request_id,action,error,self.active_start_committed if action=='start' else False,self.active_start_ticket)
+            if action=='start' and getattr(self,'active_start_ticket',None) is not None:
+                ticket=self.tickets.get(self.active_start_ticket,{})
+                reason='cancelled' if ticket.get('state')=='cancelling' else 'failed' if error else 'ok'
+                self._finish_ticket_locked(self.active_start_ticket,reason)
             self.active_request_id=None
             self.events.emit('action_complete', action=action if action in ('start','stop','impedance_start','impedance_end','impedance_review','rescan') else 'other', request_id=request_id, ok=not bool(error), reason='failed' if error else 'ok')
+            self.active_action=None;self.active_start_ticket=None
 
     def note_start_commit(self):
         with self.lock:
@@ -569,6 +628,7 @@ class Dashboard:
             value['result']=copy.deepcopy(self.result)
             value['terminal_results']=copy.deepcopy(self.terminal_results)
             value['publish_seq']=self.publish_seq
+            value['next_start_ticket']=self.ticket_next
             value['publish_age_ms']=max(0,round((time.monotonic()-self.published_monotonic)*1000))
             value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state')}
         value['privacy']=self.privacy.snapshot()
@@ -578,6 +638,7 @@ class Dashboard:
         with self.lock:
             data=copy.deepcopy(self.snapshot);data.update(busy=self.busy or self.pending is not None or self.pending_stop is not None,result=self.result,
                 terminal_results=copy.deepcopy(self.terminal_results),publish_seq=self.publish_seq,
+                next_start_ticket=self.ticket_next,
                 publish_age_ms=max(0,round((time.monotonic()-self.published_monotonic)*1000)))
             review_root=self.review_root
             data['speaking']=self.prompting
