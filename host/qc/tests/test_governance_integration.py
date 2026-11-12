@@ -7,19 +7,25 @@ import copy
 import gzip
 import hashlib
 import io
+import importlib
 import json
 import os
 import socket
+import sqlite3
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import unittest
+import uuid
+from datetime import datetime, timezone
 from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
 from host.common.strict_json import canonical_json, strict_json_loads
+from host.common.device_registry import select_devices,upload_allowed
 from host.common.governance_contract import COMPONENT_IDS
 from host.qc.fleet_monitor import governance_cli as cli
 from host.qc.tests.governance_fixtures import (sample_evidence, sample_probe_policy,
@@ -271,11 +277,126 @@ class CliPremergeTests(unittest.TestCase):
         factory.assert_not_called()
 
 
+class MainAIntegrationTests(unittest.TestCase):
+    """Actual merged A implementations; no production service/SSH/Queue construction."""
+    def setUp(self):
+        self.service = importlib.import_module('services.headring-qc.service')
+        self.addCleanup(importlib.reload, self.service)
+        self.temp = tempfile.TemporaryDirectory(prefix='governance-A-main-')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.registry = sample_registry()
+
+    def configure(self, registry=None, config=None):
+        self.service.configure_runtime(config=config or {'data_root': str(self.root / 'data'), 'devices': []},
+            registry=self.registry if registry is None else registry, app_root=self.root,
+            agent_source='# synthetic agent source, never executed', identity_file='/synthetic/software-key',
+            known_hosts='/synthetic/known_hosts', config_path=self.root / 'explicit.json')
+
+    def test_service_import_and_configuration_do_not_open_runtime(self):
+        with (patch('builtins.open', side_effect=AssertionError('runtime open')),
+              patch.object(Path, 'read_text', side_effect=AssertionError('runtime read')),
+              patch.object(Path, 'read_bytes', side_effect=AssertionError('runtime read')),
+              patch.object(sqlite3, 'connect', side_effect=AssertionError('DB opened')),
+              patch.object(subprocess, 'Popen', side_effect=AssertionError('process launched')),
+              patch.object(threading.Thread, 'start', side_effect=AssertionError('thread started')),
+              patch.object(socket, 'socket', side_effect=AssertionError('network'))):
+            importlib.reload(self.service)
+            self.configure()
+        self.assertIs(self.service.REGISTRY, self.registry)
+
+    def test_service_help_and_missing_registry_zero_reads_or_starts(self):
+        for args, code in ((['--help'], 0), ([], 2)):
+            with (patch.object(Path, 'read_text') as read, patch.object(subprocess, 'Popen') as process,
+                  contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO())):
+                with self.assertRaises(SystemExit) as error:
+                    self.service.main(args)
+                self.assertEqual(error.exception.code, code)
+                read.assert_not_called()
+                process.assert_not_called()
+
+    def test_only_registry_change_adds42_to_actual_handoff_discovery(self):
+        before = sample_registry(tuple(d.device_id for d in self.registry.devices if d.device_id != 'cp_0042'))
+        config = {'data_root': str(self.root / 'data'), 'devices': [], 'minimum_capture_date': '2026-11-01'}
+        self.assertNotIn('cp_0042', {d['id'] for d in self.service.transport_config(config, before)['devices']})
+        self.configure(config=config)
+        with patch.object(sys, 'path', [str(ROOT / 'services/headring-qc'),
+                     str(ROOT / 'orangepi/src/orangepi_collect/common'), *sys.path]):
+            receiver_class = importlib.import_module('services.headring-qc.handoff_receiver').HandoffReceiver
+            receiver = receiver_class(self.service, registry=self.registry)
+        self.assertIs(receiver.registry, self.registry)
+        self.assertIs(receiver.store.registry, self.registry)
+        self.assertIn('cp_0042', receiver.devices)
+        receiver.store.set_control(True, 0, uuid.uuid4().hex)
+        session = 'L3-2026-11-13-40177'
+        calls = []
+        def synthetic_rpc(device, action, **kwargs):
+            calls.append((device, action))
+            self.assertEqual(action, 'scan')
+            return {'device_id': device, 'state': 'idle', 'items': [
+                {'session_id': session, 'day': '2026-11-13', 'native_sha256': 'a' * 64,
+                 'path': '/synthetic/capture/' + session, 'bytes': 1}]}
+        receiver.rpc = synthetic_rpc  # Transport-only stand-in, never authentication/receipt verification.
+        receiver._scan_one(receiver.devices['cp_0042'])
+        jobs = receiver.store.jobs()
+        self.assertEqual([(row['device'], row['session']) for row in jobs], [('cp_0042', session)])
+        self.assertEqual(calls, [('cp_0042', 'scan')])
+        self.assertEqual(select_devices(self.registry, ['cp_0042'], purpose='monitor')[0].device_id, 'cp_0042')
+        self.assertEqual(self.service.CONFIG['registry_digest'], self.registry.digest)
+        self.assertFalse(upload_allowed(self.registry, 'cp_0042', destination='EGOL2',
+                                       now_utc=datetime(2026, 11, 13, tzinfo=timezone.utc)))
+
+    def test_transport_identity_comes_only_from_frozen_registry(self):
+        config = {'data_root': str(self.root / 'data'), 'devices': [
+            {'id': 'cp_0042', 'address': '203.0.113.99', 'ssh_alias': 'untrusted-old-alias',
+             'enabled': False, 'minimum_stop_time': 123}, {'id': 'cp_0043'}]}
+        self.configure(config=config)
+        self.assertNotIn('cp_0043', self.service.DEVICES)
+        self.assertEqual(self.service.DEVICES['cp_0042']['minimum_stop_time'], 123)
+        device = select_devices(self.registry, ['cp_0042'], purpose='receive')[0]
+        self.service.DEVICES['cp_0042']['address'] = '203.0.113.98'
+        argv = self.service.ssh('cp_0042', 'synthetic-command')
+        self.assertEqual(argv[-2:], [device.ssh_alias, 'synthetic-command'])
+        self.assertIn('-oHostName=' + device.address, argv)
+        self.assertIn('-oHostKeyAlias=' + device.host_key_alias, argv)
+        self.assertIn('-oUser=' + device.ssh_user, argv)
+        self.assertIn('-oStrictHostKeyChecking=yes', argv)
+        self.assertEqual(argv[argv.index('-F') + 1], '/dev/null')
+        with self.assertRaises(ValueError):
+            self.service.ssh('cp_0043', 'synthetic')
+        self.configure(registry=sample_registry(receive=()))
+        with self.assertRaises(ValueError):
+            self.service.ssh('cp_0042', 'synthetic')
+
+    def test_real_signed_standardizer42_uses_same_registry_and_rejects_bad_signature(self):
+        from host.standardizer.tests.test_registry_adapter import context_at,signed_archive
+        from host.standardizer import worker
+        context = context_at(self.root, registry=self.registry)
+        path, source, _ = signed_archive(context)
+        self.assertIs(context.registry, self.registry)
+        self.assertEqual(worker.verify_receipt(path, context=context)[1], source)
+        value = strict_json_loads(path.read_text())
+        value['signature'] = '0' * 64
+        path.write_text(canonical_json(value))
+        with self.assertRaises(ValueError):
+            worker.verify_receipt(path, context=context)
+
+    def test_service_strict_json_entry_rejects_duplicate_before_agent_or_store(self):
+        registry_path = self.root / 'registry.json'
+        registry_path.write_text('{"schema_version":1,"schema_version":1,"devices":[]}')
+        with (patch.object(sqlite3, 'connect') as db, patch.object(subprocess, 'Popen') as process):
+            with self.assertRaises(ValueError):
+                self.service.main(['--registry', str(registry_path), '--config', '/synthetic/config',
+                                   '--identity-file', '/synthetic/key', '--known-hosts', '/synthetic/trust'])
+            db.assert_not_called()
+            process.assert_not_called()
+
+
 class LintPremergeTests(unittest.TestCase):
     def scope(self, paths):
         return {'schema_version': 1, 'files': [
             {'path': name, 'category': 'runtime', 'reason': 'synthetic lint adversary'} for name in paths],
-                'exceptions': [], 'exception_sources': {}}
+                'exceptions': [], 'exception_sources': {}, 'exception_reviews': {}}
 
     def test_detect_specific_compare_generated_list_default_and_ip(self):
         text = """TARGETS=frozenset('cp_'+str(n).zfill(4) for n in range(7,12))
@@ -327,11 +448,16 @@ p.add_argument('--targets', default=['cp_0007'])
             scope['exceptions'] = [{'path': 'test.py', 'rule': 'DEVICE_TABLE', 'symbol': 'TARGETS',
                                     'category': 'fixture', 'reason': 'exact synthetic example only'}]
             scope['exception_sources'] = {'test.py': hashlib.sha256((root / 'test.py').read_bytes()).hexdigest()}
+            scope['exception_reviews'] = {'test.py': {'owner': 'synthetic-reviewer', 'reason': 'fixture only',
+                'reviewed_at': '2026-11-01T00:00:00Z', 'expiry': '2099-01-01T00:00:00Z'}}
             result = lint.scan_scope(root, scope)
             self.assertEqual(len(result['classified']), 1)
             self.assertEqual(len(result['findings']), 1)
             self.assertEqual(result['findings'][0]['symbol'], 'OTHER')
             self.assertNotIn('cp_004', canonical_json(result))
+            expired = lint.scan_scope(root, scope, now_utc=datetime(2099, 1, 1, tzinfo=timezone.utc))
+            self.assertEqual(expired['classified'], [])
+            self.assertEqual(len(expired['findings']), 2)
             (root / 'test.py').write_text("TARGETS=['cp_0042','cp_0043']\n")
             changed = lint.scan_scope(root, scope)
             self.assertEqual(changed['classified'], [])

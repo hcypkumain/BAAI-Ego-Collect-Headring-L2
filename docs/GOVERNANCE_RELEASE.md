@@ -1,5 +1,54 @@
 # Governance RC — main premerge scaffolding, not G2 ready
 
+## M1 review repair and A integration checkpoint
+
+M1 renderer now preserves B's actual `verified_files` source state and valid
+file-set hashes (unknown or malformed hashes stay unknown); it never promotes
+source to installed/runtime. Candidate integrity reconstructs the exact release
+key set and every value from the hashed embedded manifest and BOM build_commit.
+Tests first reproduced the two failures, then verify all metadata mutations,
+including coordinated release_id/router change and unknown fields, are rejected.
+Candidate integrity is not production approval.
+
+A original plus expiry fix are integrated only after explicit main permission.
+Original standalone service suite's eight newly introduced constructor errors
+were reproduced, then closed by **only** injecting shared fixture Registry inputs
+in test_receiver_http/test_handoff_receiver; original assertions/authentication/
+QC/deletion/retention behavior remain unchanged. Service configuration and agent
+source loading moved to explicit main arguments; module import/setup do not read
+live config, open DB, create workers or connect. `--registry`, `--config`,
+`--identity-file`, `--known-hosts` are required. Minimal root import setup is owned
+by the application, not a live Q path.
+
+Service DEVICES/CONFIG.devices derive from enrolled receive members in the same
+Registry, including SSH alias/address/user/host-key alias. Legacy lists contribute
+only restrictive per-device cutoff/history metadata, never membership/identity.
+Adding 42 to that one registry populates actual Handoff scanner definitions with
+no second-list edit. RPC SSH uses registry identity directly, `/dev/null` config,
+explicit software identity and strict pinned known-host options. These are code
+changes only, not real trust admission or production migration.
+
+**Additional G2 blocker registered, not silently patched in A core:** Handoff's
+reviewed `_transfer` still hardcodes the legacy SSH config and canonical device ID
+for rsync. Service RPC's registry alias is therefore not sufficient to prove the
+complete arbitrary-alias data transfer path. Main/Astra must route this minimal
+adapter fix to A or explicitly approve its scope; this owner leaves reviewed A
+core unchanged. Current main tests prove actual Handoff discovery/enqueue, real
+signed standardizer verification and upload denial, **not** completed rsync/QC
+conversion for a newly aliased device.
+
+Lint exceptions now require owner/reason/reviewed_at/expiry as well as exact
+path/rule/symbol/source hash. Expired exceptions do not suppress findings. Metadata
+is validated before any allowed source is opened; excluded decoy reads remain zero.
+Public provenance retains original source SHA and C0 artifact/selection history,
+and separately records selected A artifact hashes/ref. No hash claims installation
+or runtime. Converter/SDK/video tools/catalog remain unbundled and unverified.
+
+B's newly approved fix is queued for a separate authorized merge/caller checkpoint;
+its **nine** legacy migration errors (original eight plus direct stage_apply)
+must all close. C remains unmerged/blocked. Full G2/G3/host-runnable readiness is
+still false; this checkpoint does not relax any gate below.
+
 This release is a **candidate**, host-only/read-only. The original services,
 stable refs, frozen WIP and real inventory/trust are unchanged. No START/impedance
 repair, production pipeline migration, live read, deployment or device writes are

@@ -1,27 +1,72 @@
 #!/usr/bin/env python3
 """LAN QC queue: verified copies, unchanged checker rules, acknowledged cleanup."""
-import collections,concurrent.futures,contextlib,datetime,hashlib,hmac,http.server,json,os,re,shlex,shutil,sqlite3,subprocess,sys,threading,time,traceback,uuid
+import argparse,collections,concurrent.futures,contextlib,datetime,hashlib,hmac,http.server,importlib,json,os,re,shlex,shutil,sqlite3,subprocess,sys,threading,time,traceback,uuid
 from pathlib import Path
-from host_storage import require_storage, storage_path
 ROOT=Path(__file__).resolve().parent
-CONFIG=json.loads((ROOT/'config.json').read_text())
-DATA=Path(CONFIG['data_root']);DB=DATA/'state/queue.sqlite3'
+if __package__ in (None,'') and __name__=='__main__':sys.path.insert(0,str(ROOT.parents[1]))
+from host.common.device_registry import parse_registry,receive_ids
+from host.common.strict_json import canonical_json,strict_json_loads,require
+_storage_module=importlib.import_module('services.headring-qc.host_storage')
+require_storage=_storage_module.require_storage;storage_path=_storage_module.storage_path
+CONFIG=None;DATA=None;DB=None;REGISTRY=None;IDENTITY_FILE=None;KNOWN_HOSTS=None;CONFIG_PATH=None
 STOP=threading.Event();QC_LOCK=threading.Lock();CLAIM_LOCK=threading.Lock()
 RECEIVER=None
 WORK_CHANGED=threading.Condition();WORK_VERSION=0
-TRANSFER_PARALLELISM=max(1,min(8,int(CONFIG.get('transfer_parallelism',4))))
-TRANSFER_KIB_S=max(0,int(CONFIG.get('transfer_kib_s',0)))
-MAX_ACTIVE_PER_DEVICE=max(1,min(3,int(CONFIG.get('active_per_device',2))))
+TRANSFER_PARALLELISM=4;TRANSFER_KIB_S=0;MAX_ACTIVE_PER_DEVICE=2
 TRANSFER=threading.Semaphore(TRANSFER_PARALLELISM)
-DEVICES={d['id']:d for d in CONFIG['devices']}
-PI_IO={d:threading.BoundedSemaphore(2) for d in DEVICES}
+DEVICES={};PI_IO={}
 # Execute the current protocol so reconnecting devices do not retain a stale scan cutoff.
-AGENT='python3 -c '+shlex.quote((ROOT/'pi_agent.py').read_text())
+AGENT=None
 ACTIVE=('copying','verifying','waiting_qc','qc','applying','final_sync','archiving','cleaning')
 UPLOAD_ACTIVE=('copying','verifying')
 PROCESS_ACTIVE=('waiting_qc','qc','applying','final_sync','archiving','cleaning')
 NET_LOCK=threading.Lock();NET_SAMPLES=collections.deque(maxlen=40)
-NET_COUNTERS=Path('/sys/class/net')/CONFIG.get('network_interface','enp4s0')/'statistics'
+NET_COUNTERS=None
+
+def transport_config(config,registry):
+    """Pure transport metadata from one registry; old per-device cutoffs only restrict."""
+    value=strict_json_loads(canonical_json(config));members=receive_ids(registry)
+    old={}
+    for row in value.get('devices',[]):
+        require(type(row) is dict and type(row.get('id')) is str and row['id'] not in old,
+                'Invalid legacy metadata')
+        old[row['id']]=row
+    devices=[]
+    for d in registry.devices:
+        if d.device_id not in members:continue
+        row=dict(id=d.device_id,ssh_alias=d.ssh_alias,address=d.address,ssh_user=d.ssh_user,
+                 host_key_alias=d.host_key_alias,enabled=True)
+        metadata=old.get(d.device_id,{})
+        if 'minimum_stop_time' in metadata:
+            cutoff=metadata['minimum_stop_time']
+            require(type(cutoff) in (int,float) and cutoff>=0,'Invalid per-device cutoff')
+            row['minimum_stop_time']=cutoff
+        if 'historical_only' in metadata:
+            require(type(metadata['historical_only']) is bool,'Invalid historical metadata')
+            row['historical_only']=metadata['historical_only']
+        devices.append(row)
+    return dict(value,devices=devices,registry_digest=registry.digest)
+
+def _opaque_file(value):
+    require(type(value) is str and re.fullmatch(r'/[A-Za-z0-9_./-]+',value) is not None and
+            '..' not in Path(value).parts and str(Path(value))==value,'Invalid explicit trust path')
+    return value
+
+def configure_runtime(*,config,registry,app_root,agent_source,identity_file,known_hosts,config_path):
+    """Explicit setup only; no file, DB, process, thread or network operations."""
+    global ROOT,CONFIG,DATA,DB,REGISTRY,DEVICES,PI_IO,AGENT,NET_COUNTERS,IDENTITY_FILE,KNOWN_HOSTS,CONFIG_PATH
+    global TRANSFER_PARALLELISM,TRANSFER_KIB_S,MAX_ACTIVE_PER_DEVICE,TRANSFER
+    ROOT=Path(app_root);REGISTRY=registry;CONFIG=transport_config(config,registry)
+    require(ROOT.is_absolute() and '..' not in ROOT.parts,'Explicit absolute application root required')
+    DATA=Path(CONFIG['data_root']);DB=DATA/'state/queue.sqlite3';CONFIG_PATH=Path(config_path)
+    IDENTITY_FILE=_opaque_file(identity_file);KNOWN_HOSTS=_opaque_file(known_hosts)
+    DEVICES={d['id']:d for d in CONFIG['devices']};PI_IO={d:threading.BoundedSemaphore(2) for d in DEVICES}
+    AGENT='python3 -c '+shlex.quote(agent_source)
+    TRANSFER_PARALLELISM=max(1,min(8,int(CONFIG.get('transfer_parallelism',4))))
+    TRANSFER_KIB_S=max(0,int(CONFIG.get('transfer_kib_s',0)))
+    MAX_ACTIVE_PER_DEVICE=max(1,min(3,int(CONFIG.get('active_per_device',2))))
+    TRANSFER=threading.Semaphore(TRANSFER_PARALLELISM)
+    NET_COUNTERS=Path('/sys/class/net')/CONFIG.get('network_interface','enp4s0')/'statistics'
 
 def atomic(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True);temp=path.with_name('.'+path.name+'.'+uuid.uuid4().hex+'.tmp')
@@ -34,7 +79,7 @@ def sync_dir(path):
     finally:os.close(fd)
 
 def load(path,default=None):
-    try:return json.loads(Path(path).read_text())
+    try:return strict_json_loads(Path(path).read_text())
     except FileNotFoundError:return default
 
 @contextlib.contextmanager
@@ -76,7 +121,18 @@ def wake_workers():
     with WORK_CHANGED:
         WORK_VERSION+=1;WORK_CHANGED.notify_all()
 
-def ssh(device,command):return ['ssh','-q','-F',str(ROOT/'ssh/config'),device,command]
+def ssh(device,command):
+    if REGISTRY is None or device not in receive_ids(REGISTRY):raise ValueError('Unknown/denied transport device')
+    d=next(d for d in REGISTRY.devices if d.device_id==device)
+    return ['ssh','-q','-F','/dev/null','-i',IDENTITY_FILE,'-oBatchMode=yes',
+            '-oStrictHostKeyChecking=yes','-oUserKnownHostsFile='+KNOWN_HOSTS,
+            '-oGlobalKnownHostsFile=/dev/null','-oUpdateHostKeys=no','-oVerifyHostKeyDNS=no',
+            '-oKnownHostsCommand=none','-oIdentitiesOnly=yes','-oIdentityAgent=none',
+            '-oPreferredAuthentications=publickey','-oPasswordAuthentication=no',
+            '-oKbdInteractiveAuthentication=no','-oControlMaster=no','-oControlPersist=no',
+            '-oProxyCommand=none','-oProxyJump=none','-oPermitLocalCommand=no','-oClearAllForwardings=yes',
+            '-oHostName='+d.address,'-oHostKeyAlias='+d.host_key_alias,
+            '-oUser='+d.ssh_user,d.ssh_alias,command]
 
 def friendly_error(exc):
     text=str(exc)
@@ -133,13 +189,15 @@ def scanner():
         STOP.wait(60)
 
 def claim(stage='upload'):
+    members=tuple(DEVICES)
+    if not members:return None
     with CLAIM_LOCK,db() as c:
         c.execute('BEGIN IMMEDIATE')
         states=UPLOAD_ACTIVE if stage=='upload' else PROCESS_ACTIVE
         allowed="j.ingested=0 AND j.state IN ('queued','waiting') AND j.device IN (SELECT id FROM devices WHERE status='online')" if stage=='upload' else "j.ingested=1 AND j.state IN ('raw_ready','waiting') AND (j.device IN (SELECT id FROM devices WHERE status='online') OR (j.mode='qc' AND j.level IS NULL))"
         counts="(SELECT COUNT(*) FROM jobs a WHERE a.device=j.device AND a.state IN (%s))" % ','.join('?' for _ in states)
-        sql="SELECT j.* FROM jobs j WHERE "+allowed+" AND j.available<=? AND "+counts+"<? ORDER BY CASE WHEN archive_path IS NOT NULL THEN 0 ELSE 1 END,priority DESC,"+counts+" ASC,attempts,bytes,id LIMIT 1"
-        row=c.execute(sql,(time.time(),*states,MAX_ACTIVE_PER_DEVICE,*states)).fetchone()
+        sql="SELECT j.* FROM jobs j WHERE "+allowed+" AND j.device IN ("+','.join('?' for _ in members)+") AND j.available<=? AND "+counts+"<? ORDER BY CASE WHEN archive_path IS NOT NULL THEN 0 ELSE 1 END,priority DESC,"+counts+" ASC,attempts,bytes,id LIMIT 1"
+        row=c.execute(sql,(*members,time.time(),*states,MAX_ACTIVE_PER_DEVICE,*states)).fetchone()
         if not row:return None
         c.execute("UPDATE jobs SET state=?,updated=?,attempts=attempts+1,error=NULL WHERE id=?",('copying' if stage=='upload' else 'waiting_qc',time.time(),row['id']))
         return dict(row)
@@ -181,11 +239,12 @@ def rsync(job,source,destination,push=False,delete=False):
         resolved=destination.resolve()
         if DATA.resolve() not in resolved.parents or resolved==DATA.resolve():raise ValueError('Rsync destination outside managed data root')
         if delete and DATA.joinpath('work').resolve() not in resolved.parents:raise ValueError('Only a dedicated QC work tree may use --delete')
-    command=['rsync','-a','--partial','--partial-dir=.rsync-partial','--protect-args','--info=progress2','--stats','--no-inc-recursive','-e','ssh -q -F '+str(ROOT/'ssh/config')]
+    transport=ssh(job['device'],'');alias=transport[-2]
+    command=['rsync','-a','--partial','--partial-dir=.rsync-partial','--protect-args','--info=progress2','--stats','--no-inc-recursive','-e',shlex.join(transport[:-2])]
     if TRANSFER_KIB_S:command.append('--bwlimit='+str(TRANSFER_KIB_S))
     if delete:command.append('--delete')
-    if push:command.extend([str(source).rstrip('/')+'/',job['device']+':'+str(destination).rstrip('/')+'/'])
-    else:command.extend([job['device']+':'+str(source).rstrip('/')+'/',str(destination).rstrip('/')+'/'])
+    if push:command.extend([str(source).rstrip('/')+'/',alias+':'+str(destination).rstrip('/')+'/'])
+    else:command.extend([alias+':'+str(source).rstrip('/')+'/',str(destination).rstrip('/')+'/'])
     log=DATA/'logs'/('%s-%s-transfer.log'%(job['device'],job['session']))
     with PI_IO[job['device']],TRANSFER,log.open('w') as stream:
         require_idle(job['device'])
@@ -254,7 +313,7 @@ def qc_run(job,work,output):
 def finish_cleanup(job,records,receipt):
     # Re-read the actual committed server files before issuing any deletion request.
     verify_tree(storage_path(receipt['archive_path'],CONFIG),receipt['manifest'],durable=True)
-    if not load(ROOT/'config.json',CONFIG).get('cleanup_enabled',False):
+    if not load(CONFIG_PATH,CONFIG).get('cleanup_enabled',False):
         update(job,state='verified_hold',progress=100,error='已归档校验并回传；等待清理链路验收')
         return
     require_idle(job['device']);update(job,state='cleaning',progress=0)
@@ -452,7 +511,7 @@ def snapshot():
         value=json.loads(device['details']);device['details']={k:value.get(k) for k in ['state','current_session','task_list']}
     disk=shutil.disk_usage(DATA)
     return dict(historical_rechecks=rechecks,standardized=standardized_summary(),historical_devices=[d['id'] for d in CONFIG['devices'] if d.get('historical_only')],continuous_ingestion=CONFIG.get('continuous_ingestion',False),day=CONFIG['day'],cutoff=CONFIG['cutoff'],server_id=CONFIG['server_id'],data_root=str(DATA),
-                cleanup_enabled=load(ROOT/'config.json',CONFIG).get('cleanup_enabled',False),transfer_parallelism=TRANSFER_PARALLELISM,transfer_kib_s=TRANSFER_KIB_S,active_per_device=MAX_ACTIVE_PER_DEVICE,pipeline_workers=CONFIG.get('upload_workers',4)+CONFIG.get('processor_workers',2),upload_workers=CONFIG.get('upload_workers',4),processor_workers=CONFIG.get('processor_workers',2),counts=counts,jobs=jobs,devices=devices,events=events,
+                cleanup_enabled=load(CONFIG_PATH,CONFIG).get('cleanup_enabled',False),transfer_parallelism=TRANSFER_PARALLELISM,transfer_kib_s=TRANSFER_KIB_S,active_per_device=MAX_ACTIVE_PER_DEVICE,pipeline_workers=CONFIG.get('upload_workers',4)+CONFIG.get('processor_workers',2),upload_workers=CONFIG.get('upload_workers',4),processor_workers=CONFIG.get('processor_workers',2),counts=counts,jobs=jobs,devices=devices,events=events,
                 qc_video_backend=CONFIG.get('qc_video_backend','cv2'),qc_workers=CONFIG['qc_workers'],network=network_metrics(),disk=dict(total=disk.total,used=disk.used,free=disk.free),now=time.time())
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -493,13 +552,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             send(self,503,dict(error='control_unavailable',message='控制账本暂不可用，未执行新的删除授权'))
     def log_message(self,*args):pass
 
-def main():
+def main(argv=None):
     global RECEIVER
+    parser=argparse.ArgumentParser(description=__doc__)
+    for option in ('registry','config','identity-file','known-hosts'):parser.add_argument('--'+option,required=True,type=Path)
+    parser.add_argument('--app-root',type=Path,default=ROOT)
+    args=parser.parse_args(argv)
+    registry=parse_registry(strict_json_loads(args.registry.read_text()))
+    config=strict_json_loads(args.config.read_text())
+    configure_runtime(config=config,registry=registry,app_root=args.app_root.absolute(),
+                      agent_source=(args.app_root/'pi_agent.py').read_text(),identity_file=str(args.identity_file),
+                      known_hosts=str(args.known_hosts),config_path=args.config)
+    # Legacy sibling imports have one application-owned startup path, never a live Q path.
+    for path in (Path(__file__).resolve().parent,Path(__file__).resolve().parents[2]/'orangepi/src/orangepi_collect/common'):
+        if str(path) not in sys.path:sys.path.insert(0,str(path))
     import faulthandler,signal
     faulthandler.register(signal.SIGUSR1,all_threads=True)
     if CONFIG.get('receive_strategy')=='manual_handoff_v1':
         from handoff_receiver import HandoffReceiver
-        RECEIVER=HandoffReceiver(sys.modules[__name__]);RECEIVER.start()
+        RECEIVER=HandoffReceiver(sys.modules[__name__],registry=registry);RECEIVER.start()
     else:
         initialize()
         threading.Thread(target=scanner,daemon=True).start()

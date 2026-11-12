@@ -7,12 +7,13 @@ import os
 import re
 import stat
 import sys
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 if __package__ in (None, ''):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from host.common.strict_json import canonical_json, exact_fields, require, strict_json_loads
+from host.common.strict_json import canonical_json, exact_fields, require, strict_json_loads, utc_timestamp
 
 _RULES = frozenset(('DEVICE_COMPARE', 'DEVICE_TABLE', 'DEVICE_DEFAULT', 'RUNTIME_IP'))
 _EXCLUDED = frozenset(('state', 'runtime', 'private', 'secrets', 'keys', 'images',
@@ -33,9 +34,9 @@ def _excluded(parts):
                or part.lower() == 'integrations' for part in parts)
 
 
-def _enumerate(root, scope):
+def _enumerate(root, scope, now_utc):
     """Metadata-only phase. No file contents opened until the whole scope is checked."""
-    exact_fields(scope, ('schema_version', 'files', 'exceptions', 'exception_sources'))
+    exact_fields(scope, ('schema_version', 'files', 'exceptions', 'exception_sources', 'exception_reviews'))
     require(type(scope['schema_version']) is int and scope['schema_version'] == 1, 'Invalid scope')
     require(type(scope['files']) is list and len(scope['files']) <= 128 and
             type(scope['exceptions']) is list, 'Invalid scope arrays')
@@ -70,6 +71,14 @@ def _enumerate(root, scope):
     require(type(scope['exception_sources']) is dict and all(
         path in seen and type(sha) is str and re.fullmatch('[0-9a-f]{64}', sha)
         for path, sha in scope['exception_sources'].items()), 'Invalid exception source bindings')
+    require(type(scope['exception_reviews']) is dict and
+            set(scope['exception_reviews']) == set(scope['exception_sources']), 'Missing exception review')
+    for review in scope['exception_reviews'].values():
+        exact_fields(review, ('owner', 'reason', 'reviewed_at', 'expiry'))
+        require(all(type(review[key]) is str and bool(review[key].strip()) for key in ('owner', 'reason')),
+                'Review owner/reason required')
+        reviewed, expiry = utc_timestamp(review['reviewed_at']), utc_timestamp(review['expiry'])
+        require(reviewed <= now_utc and reviewed < expiry, 'Invalid review interval')
     exceptions = {}
     for entry in scope['exceptions']:
         exact_fields(entry, ('path', 'rule', 'symbol', 'category', 'reason'))
@@ -81,7 +90,9 @@ def _enumerate(root, scope):
                 type(entry['reason']) is str and bool(entry['reason'].strip()), 'Invalid exception')
         key = (entry['path'], entry['rule'], entry['symbol'])
         require(key not in exceptions, 'Duplicate exception')
-        exceptions[key] = {**entry, 'sha256': scope['exception_sources'][entry['path']]}
+        review = scope['exception_reviews'][entry['path']]
+        exceptions[key] = {**entry, 'sha256': scope['exception_sources'][entry['path']],
+                           'review': review, 'valid': utc_timestamp(review['expiry']) > now_utc}
     return chosen, excluded, exceptions
 
 
@@ -181,10 +192,13 @@ def _findings(text):
     return sorted(found, key=lambda item: (item[1], item[0], item[2]))
 
 
-def scan_scope(root, scope):
+def scan_scope(root, scope, *, now_utc=None):
     root = Path(root).absolute()
     require(not any(p.is_symlink() for p in (root, *root.parents)), 'Symlink root prohibited')
-    chosen, excluded, exceptions = _enumerate(root, scope)
+    now_utc = datetime.now(timezone.utc) if now_utc is None else now_utc
+    require(isinstance(now_utc, datetime) and now_utc.utcoffset() == timezone.utc.utcoffset(now_utc),
+            'Aware UTC audit clock required')
+    chosen, excluded, exceptions = _enumerate(root, scope, now_utc)
     findings, debts = [], []
     for entry in chosen:
         text = _read_source(root, entry['path'])
@@ -193,8 +207,9 @@ def scan_scope(root, scope):
         for rule, line, name in _findings(text):
             row = {'path': entry['path'], 'rule': rule, 'line': line, 'symbol': name}
             exception = exceptions.get((entry['path'], rule, name))
-            if exception and exception['sha256'] == hashlib.sha256(text.encode('utf-8')).hexdigest():
-                debts.append({**row, 'category': exception['category'], 'reason': exception['reason']})
+            if exception and exception['valid'] and exception['sha256'] == hashlib.sha256(text.encode('utf-8')).hexdigest():
+                debts.append({**row, 'category': exception['category'], 'reason': exception['reason'],
+                              'review': exception['review']})
             else:
                 findings.append(row)
     return {'schema_version': 1, 'scope': 'explicit governance paths only',

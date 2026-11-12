@@ -1,49 +1,61 @@
 {
   "schema_version": 1,
   "baseline_commit": "10bd2e2c2eb150b4cf548c4f8a36e9e556b30e0a",
-  "stage": "C0_contract_only_not_installed",
+  "stage": "A_integrated_registry_adapters_not_installed",
+  "selected_artifact_ref": "9788fac523ff16e3fd7295a38a8ede4c1a038f0d",
+  "selection_update": "Original reviewed source hashes and C0 decisions retained. Current artifact hashes select immutable A adaptations, not Q-live synchronization or installed/runtime evidence. Catalog/converter/SDK remain external/unverified.",
   "source_path_policy": "Logical labels only. Private absolute mapping is local-only. No recursive source scan.",
   "artifacts": [
     {
       "source": "Q/receiver_state.py",
       "source_sha256": "d8dc0389a7a242f0d766ebe0b6a14b9e2970aa5389b7e654d0a9f9b290292423",
       "artifact": "services/headring-qc/receiver_state.py",
-      "artifact_sha256": "477a64980aa93021efc24fcc60956e8ab2f4704e159ac9be23ada04738b40689",
-      "selection": "certified_retained_not_synced",
-      "reason": "Keep certified base. Q fixed-list expansion is not enrollment policy; A will inject registry. Q busy_devices receive claim protection reviewed and deferred to A; no C0 pipeline implementation."
+      "C0_artifact_sha256": "477a64980aa93021efc24fcc60956e8ab2f4704e159ac9be23ada04738b40689",
+      "artifact_sha256": "f12ddd4b019425f91aa5b6d705d5bbb50edf14a5e5492356317aa24094c96764",
+      "C0_selection": "certified_retained_not_synced",
+      "selection": "certified_base_registry_adapted_not_Q_live_synced",
+      "C0_reason": "Keep certified base. Q fixed-list expansion is not enrollment policy; A will inject registry. Q busy_devices receive claim protection reviewed and deferred to A; no C0 pipeline implementation."
     },
     {
       "source": "Q/handoff_receiver.py",
       "source_sha256": "f5ba6e9774125082ebdfd7904c57e528e84d87c020f8af98a656c8a1b1d8bd3d",
       "artifact": "services/headring-qc/handoff_receiver.py",
-      "artifact_sha256": "df0d5b19e1a79bb3c9ff9e1e41f2793dd193bd456d34f7d0604d3206b4e386f3",
-      "selection": "Q_older_guard_differences_rejected_certified_retained_not_synced",
-      "reason": "Q would remove _handoff_binding, _ensure_work_pending, source-QC input signatures, required-device v2 custody binding, qualification and artifact guards. Retain certified bytes and all signature/deletion/retention protections."
+      "C0_artifact_sha256": "df0d5b19e1a79bb3c9ff9e1e41f2793dd193bd456d34f7d0604d3206b4e386f3",
+      "artifact_sha256": "c3b92e02cc8a30010fb70b8f190217236458dbcd629a16a0224155b694a1e1dd",
+      "C0_selection": "Q_older_guard_differences_rejected_certified_retained_not_synced",
+      "selection": "certified_QC_guards_retained_registry_injected_not_Q_live_synced",
+      "C0_reason": "Q would remove _handoff_binding, _ensure_work_pending, source-QC input signatures, required-device v2 custody binding, qualification and artifact guards. Retain certified bytes and all signature/deletion/retention protections."
     },
     {
       "source": "Q/host_storage.py",
       "source_sha256": "7739cafa927daa1e60e18fd423a8178fb2c1a57a1abee87dc3eac7bba83c94da",
       "artifact": "services/headring-qc/host_storage.py",
-      "artifact_sha256": "7739cafa927daa1e60e18fd423a8178fb2c1a57a1abee87dc3eac7bba83c94da",
-      "selection": "identical_no_copy",
-      "reason": "Source and certified content already equal."
+      "C0_artifact_sha256": "7739cafa927daa1e60e18fd423a8178fb2c1a57a1abee87dc3eac7bba83c94da",
+      "artifact_sha256": "a804e0b737fd8430898efdc6477f364888677ee844a62cbcbd26722b315246f8",
+      "C0_selection": "identical_no_copy",
+      "selection": "certified_storage_adapted_to_explicit_configuration",
+      "C0_reason": "Source and certified content already equal."
     },
     {
       "source": "Q/adapter/cloud_upload_cli.py",
       "source_sha256": "a01a6c8509d769f54b9cd3612d5724e1926dcea1aa7101a6affcb07f5817a554",
       "artifact": "services/headring-qc/cloud_upload_cli.py",
-      "artifact_sha256": "0b5ed4fb499390e64609daff0bd3a67d8801233050941595e8af570221fd44f8",
-      "selection": "certified_retained_not_synced",
-      "reason": "Q introduces independent four-device upload scope plus performance/file_upload_pool/private configuration dependencies. Do not copy dependency-incomplete live adapter. A must explicitly migrate four-device grants and gate all paths using shared registry; no live authorization migration has happened in C0."
+      "C0_artifact_sha256": "0b5ed4fb499390e64609daff0bd3a67d8801233050941595e8af570221fd44f8",
+      "artifact_sha256": "94a996a33b5561e6e3bedd83c59960d77b87d40046a1a1f508c36d9bc3014c21",
+      "C0_selection": "certified_retained_not_synced",
+      "selection": "certified_base_independent_registry_grants_expiry_guard_not_Q_live_synced",
+      "C0_reason": "Q introduces independent four-device upload scope plus performance/file_upload_pool/private configuration dependencies. Do not copy dependency-incomplete live adapter. A must explicitly migrate four-device grants and gate all paths using shared registry; no live authorization migration has happened in C0."
     },
     {
       "source": "standardizer/worker.py",
       "source_sha256": "f69610bf39c09d879f4e513575f65b4e94cfe7c47ea0d5b81bc1b0206ce7cc20",
       "artifact": "host/standardizer/worker.py",
-      "artifact_sha256": "cb35538ff486e354af93512fc241abd386003e46c71e126d1a9ce82dc9b8b86f",
-      "selection": "derived_archive_not_importable",
-      "transform": "Single private QC absolute path replaced with /UNCONFIGURED/headring-qc; all other bytes unchanged. No DATA default invented.",
-      "reason": "Archive only; still has import-time configuration/data reads and legacy defaults. C0 only AST-compiles it, never imports or runs it. A must purify initialization. Converter/SDK/venv remain external, unbundled and unverified."
+      "C0_artifact_sha256": "cb35538ff486e354af93512fc241abd386003e46c71e126d1a9ce82dc9b8b86f",
+      "artifact_sha256": "f87c17b57f23a09891445548c5c230804ed2f58b6ca1798aa9bf878817e1c213",
+      "C0_selection": "derived_archive_not_importable",
+      "selection": "derived_archive_purified_explicit_registry_context_catalog_unverified",
+      "C0_transform": "Single private QC absolute path replaced with /UNCONFIGURED/headring-qc; all other bytes unchanged. No DATA default invented.",
+      "C0_reason": "Archive only; still has import-time configuration/data reads and legacy defaults. C0 only AST-compiles it, never imports or runs it. A must purify initialization. Converter/SDK/venv remain external, unbundled and unverified."
     }
   ],
   "runtime_claims": {"installed": "unknown", "running": "unknown", "production_pipeline_migrated": false}

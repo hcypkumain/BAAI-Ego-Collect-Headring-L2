@@ -9,6 +9,7 @@ from raw_handoff import sha_value
 from required_capture_fixture import write_session
 from capture_qc_receipt import portable_input_signature
 from required_device_contract import resolve_selection
+from host.qc.tests.governance_fixtures import sample_registry
 
 @unittest.skipIf(os.name=='nt','Linux copy/fsync receiver tests')
 class Tests(unittest.TestCase):
@@ -30,7 +31,7 @@ class Tests(unittest.TestCase):
         legacy=types.SimpleNamespace(ROOT=self.app,DATA=self.data,STOP=threading.Event(),CONFIG={'devices':[{'id':'cp_0020'}],
             'server_id':'fixture-server','storage_uuid':'TEST','qc_workers':1},require_storage=lambda cfg:None,hash_file=digest,
             verify_tree=verify,sync_dir=lambda path:None,atomic=lambda path,value:self.write_json(path,value))
-        self.receiver=HandoffReceiver(legacy);self.receiver.store.set_control(True,0,uuid.uuid4().hex);self.rpc_calls=[]
+        self.receiver=HandoffReceiver(legacy,registry=sample_registry(('cp_0020',),grants={}));self.receiver.store.set_control(True,0,uuid.uuid4().hex);self.rpc_calls=[]
         def rpc(device,action,**values):
             self.rpc_calls.append(action)
             if action=='status':return {'device_id':device,'state':'device_confirm','session':None,'worker':{}}

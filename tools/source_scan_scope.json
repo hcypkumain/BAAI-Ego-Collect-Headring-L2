@@ -9,6 +9,7 @@
     {"path":"host/qc/fleet_monitor/isolated_transport.py","category":"runtime","reason":"C resource isolation, absent before merge"},
     {"path":"tools/fleet_maintenance/component_bom.py","category":"runtime","reason":"B source/installed/runtime separation, absent before merge"},
     {"path":"tools/fleet_maintenance/release_registry.py","category":"runtime","reason":"B release/resource/router binding, absent before merge"},
+    {"path":"services/headring-qc/service.py","category":"runtime","reason":"Main explicit registry entrypoint and single-source legacy transport definitions"},
     {"path":"services/headring-qc/receiver_state.py","category":"legacy","reason":"A registry adapter, certified algorithm list remains before merge"},
     {"path":"services/headring-qc/handoff_receiver.py","category":"legacy","reason":"A receive locks/filtering and preservation of certified guards"},
     {"path":"services/headring-qc/host_storage.py","category":"legacy","reason":"A shared storage enrollment integration"},
@@ -24,13 +25,24 @@
     {"path":"docs/GOVERNANCE_RELEASE.md","category":"docs","reason":"Main scope, debt and release limitations"}
   ],
   "exception_sources": {
+    "services/headring-qc/service.py":"f58e7d33ecb8baaf2ce3493e9be200a7c49ffd55fe7915e7e7a3e4f8c1825379",
     "services/headring-qc/receiver_state.py":"477a64980aa93021efc24fcc60956e8ab2f4704e159ac9be23ada04738b40689",
     "tools/fleet_maintenance/fleet.py":"a32874525a802531f7f3145e8eb671afa00ed6af2a973e25daf33ee14803dfeb",
     "tools/fleet_maintenance/delta_release.py":"1cade505dd8c42422bfc4b40679bebf09b91ffc1b49688b70b8bd7077e4b9f4b",
     "tools/fleet_maintenance/web_config.py":"a14d35fc8079c14ada63bbb4f56e7cff957c6a3b8f5c89252193fb2c081fd8f1",
     "host/qc/tests/governance_fixtures.py":"918cd6cb1459dd6a77814e6850d086006ddb5650b2fe32bd5292be41fa043b77"
   },
+  "exception_reviews": {
+    "services/headring-qc/service.py":{"owner":"main/M1","reason":"Historical recheck identity guard and unchanged HTTP wildcard bind are not device targeting; no service was started","reviewed_at":"2026-11-12T19:22:00Z","expiry":"2026-11-20T00:00:00Z"},
+    "services/headring-qc/receiver_state.py":{"owner":"main/M1","reason":"Certified source-bound debt; never authorizes changed code","reviewed_at":"2026-11-12T00:00:00Z","expiry":"2026-11-20T00:00:00Z"},
+    "tools/fleet_maintenance/fleet.py":{"owner":"main/M1","reason":"Certified premerge default targets awaiting B migration","reviewed_at":"2026-11-12T00:00:00Z","expiry":"2026-11-20T00:00:00Z"},
+    "tools/fleet_maintenance/delta_release.py":{"owner":"main/M1","reason":"Certified premerge identity cache and host bind debt awaiting B review","reviewed_at":"2026-11-12T00:00:00Z","expiry":"2026-11-20T00:00:00Z"},
+    "tools/fleet_maintenance/web_config.py":{"owner":"main/M1","reason":"Certified premerge default configuration awaiting B migration","reviewed_at":"2026-11-12T00:00:00Z","expiry":"2026-11-20T00:00:00Z"},
+    "host/qc/tests/governance_fixtures.py":{"owner":"main/M1","reason":"Frozen C0 synthetic fixture and explicit historical upload scope, no production authority","reviewed_at":"2026-11-12T00:00:00Z","expiry":"2026-11-20T00:00:00Z"}
+  },
   "exceptions": [
+    {"path":"services/headring-qc/service.py","rule":"DEVICE_COMPARE","symbol":"historical_recheck_jobs","category":"historical_scope","reason":"Retain certified historical batch identity safety guard; not a new enrollment default"},
+    {"path":"services/headring-qc/service.py","rule":"RUNTIME_IP","symbol":"server","category":"config","reason":"Unchanged legacy HTTP listen wildcard, not a device endpoint or network change; service not run in acceptance"},
     {"path":"services/headring-qc/receiver_state.py","rule":"DEVICE_TABLE","symbol":"TARGETS","category":"legacy_debt","reason":"Certified premerge code only; A must replace via explicit registry. Not authorization for new fixed lists."},
     {"path":"tools/fleet_maintenance/fleet.py","rule":"DEVICE_DEFAULT","symbol":"main","category":"legacy_debt","reason":"Certified premerge defaults; B must require explicit targets. Final G2 must re-evaluate surviving debt."},
     {"path":"tools/fleet_maintenance/delta_release.py","rule":"DEVICE_TABLE","symbol":"DEFAULT_INVENTORY","category":"legacy_debt","reason":"Certified premerge inventory; B owns registry replacement."},

@@ -4,11 +4,12 @@ import sys,tempfile,threading,types,unittest,urllib.error,urllib.request,uuid
 ROOT=Path(__file__).resolve().parents[3];sys.path.insert(0,str(ROOT/'services/headring-qc'))
 from receiver_state import ReceiverStore
 import receiver_http
+from host.qc.tests.governance_fixtures import sample_registry
 
 class Tests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.store=ReceiverStore(Path(self.temp.name)/'ledger');receiver=types.SimpleNamespace(store=self.store,wake=threading.Event(),snapshot=lambda:{'control':self.store.control(),'jobs':[]})
+        self.store=ReceiverStore(Path(self.temp.name)/'ledger',registry=sample_registry());receiver=types.SimpleNamespace(store=self.store,wake=threading.Event(),snapshot=lambda:{'control':self.store.control(),'jobs':[]})
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(s):
                 if not receiver_http.get(s,receiver):s.send_error(404)
