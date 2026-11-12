@@ -118,3 +118,41 @@ device SSH, volume scan, service, route, ADB or upload is used by these tests.
 Local module tests are not full main integration or live evidence. Production
 pipeline migration, packaging/converter validation and live verification remain
 false/not performed; no START, impedance or automatic recording claim is made.
+
+## G2 handoff rsync identity correction
+
+The handoff transfer now uses `legacy.ssh(device, '')`, the same main-owned
+registry-to-SSH builder used by service RPC and service rsync. It does not build a
+second SSH identity policy or read a legacy SSH config. `_transfer_argv` checks
+receive authorization, matching receiver/runtime/config registry digests, legal
+session and job metadata, canonical absolute paths, and the builder's expected
+Registry device alias. A missing/incomplete builder, empty arguments, a nonempty
+remote command, alias drift or a legacy config fallback is rejected before idle
+RPC, transfer logging or Popen. No implicit canonical-device SSH target remains.
+
+Both pull and push use the builder alias as rsync's remote host and
+`shlex.join(transport[:-2])` as `-e`; opaque SSH argument quoting is preserved.
+The existing `--protect-args`, partial transfer, rate limit, STOP/idle/storage,
+process cleanup and timing behavior remain. Remote capture paths are canonical
+absolute safe paths ending in the job's legal session; reply destinations retain
+the existing device-side results root. Source-QC, signed receipts, required-device,
+archive, WARN ledger, retention and deletion logic were not modified.
+
+Synthetic tests use the real import-safe `service.ssh` after explicit
+`configure_runtime` with temporary application/data roots and synthetic trust
+references, not real config or credentials. For all six F09 devices, pull and push
+must preserve the builder's alias, address, user, independent HostKeyAlias and
+strict known-host/identity options. Unknown/denied devices, wrong job metadata,
+registry/config digest drift, alias drift, missing/incomplete helpers and malicious
+paths/sessions must start zero processes. Pure argv assembly is checked under
+file/resolve/process spies. Transfer execution uses only temporary logs, a real
+temporary Store and a completed Popen substitute; no SSH or rsync is launched.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m unittest discover -s services/headring-qc/tests -p test_governance_rsync_identity.py -v
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m unittest discover -s services/headring-qc/tests -p 'test_*.py'
+```
+
+This closes the local argv bypass only. It is not evidence of actual data transfer,
+production migration or device access; independent review and main integration
+are still required.

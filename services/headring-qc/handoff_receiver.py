@@ -4,6 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import sqlite3
 import signal
@@ -223,17 +224,62 @@ class HandoffReceiver:
             except Exception as error:print('MANUAL_SCAN_ERROR '+str(error)[-400:],flush=True)
             self.wake.wait(15);self.wake.clear()
 
-    def _transfer(self,job,target,push=False):
-        revision=self.store.control()['revision'];self._guard(revision);self._storage();self._idle(job['device'])
-        target.parent.mkdir(parents=True,exist_ok=True)
-        source=job['details']['path'] if not push else str(target)
-        destination=str(target) if not push else '/home/orangepi/maintenance/server-qc/results/'+job['session']
+    def _transfer_argv(self,job,target,push=False):
+        """Pure argv assembly using the same explicit SSH identity as device RPC."""
+        device=job.get('device');sid=job.get('session')
+        if device not in receive_ids(self.registry):raise ValueError('Device outside receive scope')
+        runtime_registry=getattr(self.legacy,'REGISTRY',None)
+        if (not isinstance(runtime_registry,Registry) or runtime_registry.digest!=self.registry.digest
+                or self.config.get('registry_digest')!=self.registry.digest):
+            raise ValueError('Transfer registry digest mismatch')
+        if not isinstance(sid,str) or not re.fullmatch(r'L[23]-[A-Za-z0-9_.-]{1,123}',sid):
+            raise ValueError('Unsafe transfer session')
+        details=job.get('details')
+        if (not isinstance(details,dict) or details.get('session_id')!=sid
+                or details.get('device_id',device)!=device):
+            raise ValueError('Transfer job identity mismatch')
+        target=Path(target)
+        if (not target.is_absolute() or '..' in target.parts or target.name!=sid
+                or any(ord(c)<32 or ord(c)==127 for c in str(target)) or '\\' in str(target)):
+            raise ValueError('Unsafe local transfer path')
+        if push:
+            source=str(target);destination='/home/orangepi/maintenance/server-qc/results/'+sid
+        else:
+            source=details.get('path')
+            if (not isinstance(source,str) or not re.fullmatch(r'/[A-Za-z0-9_./-]+',source)
+                    or '..' in Path(source).parts or str(Path(source))!=source
+                    or Path(source).name!=sid):
+                raise ValueError('Unsafe remote transfer path')
+            destination=str(target)
+        builder=getattr(self.legacy,'ssh',None)
+        if not callable(builder):raise ValueError('Explicit SSH transport builder required')
+        transport=builder(device,'')
+        definition=next(d for d in self.registry.devices if d.device_id==device)
+        if (not isinstance(transport,(list,tuple)) or len(transport)<6
+                or any(not isinstance(arg,str) or not arg or any(ord(c)<32 or ord(c)==127 for c in arg)
+                       for arg in transport[:-1])
+                or transport[0]!='ssh' or transport[-1]!='' or transport[-2]!=definition.ssh_alias):
+            raise ValueError('SSH transport argv/alias mismatch')
+        # Validate a complete explicit builder result, never fall back to a local
+        # SSH config or reconstruct a second registry-to-SSH identity algorithm.
+        prefix=transport[:-2]
+        if (prefix.count('-F')!=1 or prefix.index('-F')+1>=len(prefix)
+                or prefix[prefix.index('-F')+1]!='/dev/null'
+                or prefix.count('-i')!=1 or prefix.index('-i')+1>=len(prefix)):
+            raise ValueError('Incomplete explicit SSH transport')
         command=['rsync','-a','--partial','--partial-dir=.rsync-partial','--protect-args','--stats',
-                 '--no-inc-recursive','-e','ssh -q -F '+str(self.root/'ssh/config')]
+                 '--no-inc-recursive','-e',shlex.join(prefix)]
         limit=int(self.config.get('transfer_kib_s',0))
         if limit:command.append('--bwlimit='+str(limit))
-        if push:command.extend([source+'/',job['device']+':'+destination+'/'])
-        else:command.extend([job['device']+':'+source+'/',destination+'/'])
+        if push:command.extend([source+'/',definition.ssh_alias+':'+destination+'/'])
+        else:command.extend([definition.ssh_alias+':'+source+'/',destination+'/'])
+        return command
+
+    def _transfer(self,job,target,push=False):
+        command=self._transfer_argv(job,target,push=push)
+        target=Path(target)
+        revision=self.store.control()['revision'];self._guard(revision);self._storage();self._idle(job['device'])
+        target.parent.mkdir(parents=True,exist_ok=True)
         log=self.data/'logs'/('handoff-'+job['device']+'-'+job['session']+('-reply.log' if push else '-receive.log'))
         log.parent.mkdir(parents=True,exist_ok=True)
         began=time.monotonic();last_idle=began
