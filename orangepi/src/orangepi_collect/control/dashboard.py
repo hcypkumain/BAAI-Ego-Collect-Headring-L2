@@ -379,11 +379,34 @@ class Dashboard:
                 existing=self.tickets.get(number)
                 if existing and existing['request_id']==request_id:
                     return {'start_ticket':number,'ticket_proof':self._ticket_proof(number,request_id)}
+                if number<=self.ticket_watermark and any(r.get('request_id')==request_id and r.get('start_ticket')==number and r.get('action')=='start' for r in self.terminal_results):
+                    return {'start_ticket':number,'ticket_proof':self._ticket_proof(number,request_id)}
                 if number!=self.ticket_next:raise ValueError('票据序号已变化，请刷新后重试')
                 if len(self.tickets)>=self.ticket_window:raise ValueError('未决开始票据已满，请结束其他页面的操作后重试')
                 self.tickets[number]={'request_id':request_id,'state':'issued'};self.ticket_next+=1
                 self.events.emit('ticket_issued',request_id=request_id,ticket_number=number)
                 return {'start_ticket':number,'ticket_proof':self._ticket_proof(number,request_id)}
+        if data.get('action')=='recover_start_tickets':
+            with self.lock:
+                if data.get('privacy_instance')!=self.privacy.instance:raise ValueError('控制器已变化，请人工核实')
+                if self.snapshot.get('collection_context') and data.get('collection_context')!=self.snapshot['collection_context']:
+                    raise ValueError('采集模式已变化，请人工核实')
+                privacy=self.privacy.snapshot();worker=self.snapshot.get('worker') or {}
+                if (self.busy or self.pending is not None or self.pending_stop is not None
+                        or self.snapshot.get('state') not in ('device_confirm','idle','ready','failed_wait','exhausted')
+                        or privacy.get('phase')!='idle' or privacy.get('required') is not False
+                        or privacy.get('stop_confirmed') is not True or worker.get('recording_active') is True):
+                    raise ValueError('设备正在操作或停止状态未知，无法回收未提交票据')
+                selected=data.get('start_ticket')
+                if selected is not None and (type(selected) is not int or selected<1 or selected>=self.ticket_next or not request_id):
+                    raise ValueError('未签发的票据不能撤销')
+                retired=[]
+                for number,ticket in list(self.tickets.items()):
+                    if ticket['state']=='issued' and (selected is None or number==selected and ticket['request_id']==request_id):
+                        rid=ticket['request_id'];self._finish_ticket_locked(number,'cancelled')
+                        self._terminal_locked(rid,'start','未提交的开始票据已安全撤销',False,number)
+                        retired.append(number)
+                return {'retired_count':len(retired),'next_start_ticket':self.ticket_next}
         if data.get('action')=='start':
             if not request_id:raise ValueError('页面版本已更新，请刷新后再开始')
             with self.lock:

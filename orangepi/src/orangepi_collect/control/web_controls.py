@@ -199,11 +199,6 @@ class WebControls:
     def voice_prompt_changed(self,active):
         dashboard=getattr(self,'dashboard',None)
         if dashboard is None:return
-        events=getattr(dashboard,'events',None)
-        if events:
-            now=time.monotonic();previous=getattr(self,'_diagnostic_tick',now);self._diagnostic_tick=now
-            lag=max(0,(now-previous)*1000)
-            if lag>1000:events.emit('loop_lag',lag_ms=lag)
         # Speaker.tick dispatches this on the controller thread. Keep it safe
         # and limited to the dashboard's own thread-safe prompting flag.
         dashboard.set_prompting(active)
@@ -457,6 +452,11 @@ class WebControls:
         except OSError:pass
 
     def dashboard_tick(self):
+        events=getattr(getattr(self,'dashboard',None),'events',None)
+        if events:
+            now=time.monotonic();previous=getattr(self,'_diagnostic_tick',now);self._diagnostic_tick=now
+            lag=max(0,(now-previous)*1000)
+            if lag>1000:events.emit('loop_lag',lag_ms=lag)
         reference_tick=getattr(self,'reference_tick',None)
         if callable(reference_tick):reference_tick()
         dashboard=getattr(self,'dashboard',None)

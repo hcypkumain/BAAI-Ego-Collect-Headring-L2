@@ -1,5 +1,6 @@
 """Exercise real dashboard queue and privacy gate without hardware or device I/O."""
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -42,6 +43,20 @@ class StartCancelLifecycle(unittest.TestCase):
         with self.assertRaises(ValueError):self.start()
         self.assertIsNone(self.ui.take())
         self.assertFalse(self.ui.display_state()['terminal_results'][-1]['ok'])
+    def test_actual_browser_act_lost_issue_replies_and_reload_recovers(self):
+        for scenario in ('click','reload','storage'):
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as root:
+                base=Path(root);(base/'runtime').mkdir()
+                ui=dashboard.Dashboard(base,base,{'host':'127.0.0.1','port':0})
+                try:
+                    ui.camera_checks.approved=lambda:True;ui.publish({'state':'ready','revision':7})
+                    env=dict(os.environ,TEST_SCENARIO=scenario,TEST_DASHBOARD_URL='http://127.0.0.1:'+str(ui.server.server_port),TEST_DASHBOARD_TOKEN=ui.token)
+                    result=subprocess.run(['node',str(Path(__file__).with_name('test_ticket_actual_act.cjs'))],env=env,text=True,capture_output=True,timeout=20)
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    self.assertIn('actual act + real Dashboard',result.stdout)
+                    if scenario=='storage':self.assertIsNone(ui.pending)
+                    else:self.assertEqual(ui.pending['action'],'start')
+                finally:ui.close()
     def test_old_controller_start_cannot_arrive_after_restart(self):
         with self.assertRaisesRegex(ValueError,'控制器已变化'):
             self.ui.submit(dict(action='start',revision=7,request_id=self.rid,stop_protocol='session-stop-v1',privacy_instance='old'))
@@ -116,6 +131,39 @@ class StartCancelLifecycle(unittest.TestCase):
         self.cancel()
         self.assertEqual(self.ui.ticket_watermark,1)
         self.assertEqual(self.issue('f'*32)['start_ticket'],65)
+    def test_single_lost_issue_plus_63_terminal_recovers_without_ttl(self):
+        first=dict(self.ticket);first_id=self.rid
+        for i in range(1,64):
+            rid=format(i,'032x');ticket=self.issue(rid)
+            self.ui.submit(dict(action='cancel_start',request_id=rid,privacy_instance=self.ui.privacy.instance,**ticket))
+        self.assertEqual(self.ui.ticket_watermark,0)
+        with self.assertRaisesRegex(ValueError,'票据已满'):self.issue('f'*32)
+        result=self.ui.submit(dict(action='recover_start_tickets',request_id=first_id,start_ticket=1,privacy_instance=self.ui.privacy.instance))
+        self.assertEqual(result['retired_count'],1);self.assertEqual(self.ui.ticket_watermark,64)
+        with self.assertRaises(ValueError):
+            self.ui.submit(dict(action='start',revision=7,request_id=first_id,stop_protocol='session-stop-v1',privacy_instance=self.ui.privacy.instance,**first))
+        self.rid='f'*32;self.ticket=self.issue(self.rid);self.start();self.assertEqual(self.ui.take()['request_id'],self.rid)
+    def test_other_page_can_explicitly_revoke_orphan_but_not_active_start(self):
+        orphan=dict(self.ticket)
+        result=self.ui.submit(dict(action='recover_start_tickets',privacy_instance=self.ui.privacy.instance))
+        self.assertEqual(result['retired_count'],1)
+        with self.assertRaises(ValueError):self.start()
+        recovered=self.ui.submit(dict(action='start_ticket',request_id=self.rid,start_ticket=orphan['start_ticket'],privacy_instance=self.ui.privacy.instance))
+        self.assertEqual(recovered,orphan)
+        self.rid='b'*32;self.ticket=self.issue(self.rid);self.start()
+        with self.assertRaisesRegex(ValueError,'正在操作'):self.ui.submit(dict(action='recover_start_tickets',privacy_instance=self.ui.privacy.instance))
+        self.ui.take();self.assertTrue(self.arm())
+        with self.assertRaisesRegex(ValueError,'正在操作'):self.ui.submit(dict(action='recover_start_tickets',privacy_instance=self.ui.privacy.instance))
+        self.commit()
+        with self.assertRaisesRegex(ValueError,'正在操作'):self.ui.submit(dict(action='recover_start_tickets',privacy_instance=self.ui.privacy.instance))
+        self.assertTrue(self.ui.privacy.committed);self.assertIsNone(self.ui.pending_stop)
+    def test_targeted_recovery_does_not_revoke_other_page_or_create_unknown_tombstone(self):
+        other_id='b'*32;other=self.issue(other_id)
+        answer=self.ui.submit(dict(action='recover_start_tickets',request_id='c'*32,start_ticket=other['start_ticket'],privacy_instance=self.ui.privacy.instance))
+        self.assertEqual(answer['retired_count'],0);self.assertEqual(self.ui.tickets[other['start_ticket']]['state'],'issued')
+        with self.assertRaises(ValueError):
+            self.ui.submit(dict(action='recover_start_tickets',request_id='c'*32,start_ticket=999,privacy_instance=self.ui.privacy.instance))
+        self.assertEqual(len(self.ui.tickets),2)
     def test_unissued_wrong_proof_and_repeated_posts(self):
         with self.assertRaises(ValueError):
             self.ui.submit(dict(action='cancel_start',request_id=self.rid,privacy_instance=self.ui.privacy.instance,start_ticket=999,ticket_proof='0'*64))

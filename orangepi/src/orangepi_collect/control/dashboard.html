@@ -67,7 +67,7 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
    const p=latest?.privacy;
    const canStop=authenticated&&!!latest&&!stopPending&&!stopAccepted&&(!!localStart||valid(p)&&
     (p.required||['recording','countdown'].includes(latest.state)||latest.worker?.recording_active===true));
-   return {snapshot:latest,canStop,localStart:!!localStart,stopPending:stopPending||stopAccepted,stopError,
+   return {snapshot:latest,canStop,localStart:!!localStart||!!options.recovering?.(),stopPending:stopPending||stopAccepted,stopError,
     stale:!trustedStatus||now()-lastStatusAt>TRUTH_DEADLINE||now()-registeredAt>=REGISTRATION_DEADLINE};
   }
   function notify(){if(options.onState)options.onState(presentation())}
@@ -166,7 +166,9 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
      const stopped=terminal?.commit_state==='committed'&&p.generation>localStart.generation;
      const rejected=terminal?.commit_state==='not_committed'&&terminal.ok===false;
      if(fresh&&!snapshot.busy&&snapshot.worker?.recording_active===false
-       &&!['recording','countdown','arming'].includes(snapshot.worker?.state)&&(rejected||stopped))localStart=null;
+       &&!['recording','countdown','arming'].includes(snapshot.worker?.state)&&(rejected||stopped)){
+      const resolved=localStart;localStart=null;options.onStartResolved?.(resolved);
+     }
     }
     if(localStart){
      const stopResult=(snapshot.terminal_results||[]).slice().reverse().find(r=>r.request_id===localStart.requestId&&r.start_ticket===localStart.ticket?.start_ticket&&r.action==='stop');
@@ -196,8 +198,8 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
    notify();
    return true;
   }
-   async function beforeStart(requestId,ticket,instance){
-    localStart={instance:instance||seenInstance,generation:seenGeneration,requestId,ticket};
+   async function beforeStart(requestId,ticket,instance,generation){
+    localStart={instance:instance||seenInstance,generation:Number.isSafeInteger(generation)?generation:seenGeneration,requestId,ticket};
    showLogin(false);lock();
    await painted();
   }
@@ -312,6 +314,14 @@ let wristPolicyDirty=false,wristPolicyPending=null,privacyScreen=null,phoneCompa
 const settingsDraft=window.createDashboardSettingsDraft();
 let token=accessCodeRequired?(accessFragment||sessionStorage.getItem('pi-access')||''):'',status=null,inFlight=false,lastReference='',lastResult=0,online=false,lastBoot='',lastController=null;
 let collectionContext=null;
+const START_INTENT_KEY='pi-start-intent-v2';
+let startIntent=null,startStorageUsable=true,startRecoveryBusy=false,startRecoveryRestored=false;
+try{
+ const raw=sessionStorage.getItem(START_INTENT_KEY);
+ if(raw){const value=JSON.parse(raw);if(!value||!['issuing','submitted'].includes(value.stage)||!Number.isSafeInteger(value.start_ticket)||value.start_ticket<1||!Number.isSafeInteger(value.generation)||value.generation<0||!/^[0-9a-f]{32}$/.test(value.request_id)||typeof value.privacy_instance!=='string'||typeof value.collection_context!=='string')throw Error('invalid saved start');startIntent=value;}
+}catch{startStorageUsable=false}
+function saveStartIntent(value){sessionStorage.setItem(START_INTENT_KEY,JSON.stringify(value));startIntent=value;}
+function clearStartIntent(){sessionStorage.removeItem(START_INTENT_KEY);startIntent=null;startRecoveryRestored=false;}
 const MODE_INTENT_KEY='pi-mode-switch-intent-v1';
 let modeIntent=null,modeReloadQueued=false,latestDisplayTruth=null;
 try{const saved=JSON.parse(sessionStorage.getItem(MODE_INTENT_KEY)||'null');if(saved&&['emg','eeg'].includes(saved.target)&&Date.now()-saved.started<120000)modeIntent=saved;else sessionStorage.removeItem(MODE_INTENT_KEY);}catch{}
@@ -341,6 +351,42 @@ async function boundedJson(url,config={},milliseconds=5000){
  const deadline=new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(new DOMException('连接读取超时，将自动重试','TimeoutError'));},milliseconds);});
  const work=(async()=>{const response=await fetch(url,{...config,signal:controller.signal,cache:'no-store'});const value=await response.json();return {response,value};})();
  try{return await Promise.race([work,deadline]);}finally{clearTimeout(timer);controller.abort();}
+}
+async function postStartControl(payload){
+ const result=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify(payload)},4000);
+ if(!result.response.ok){const error=Error(result.value.error||'开始操作状态未确认');error.status=result.response.status;throw error}
+ return result.value;
+}
+async function recoverIssuedTickets(instance,context,identity){
+ return postStartControl({action:'recover_start_tickets',privacy_instance:instance,collection_context:context,...(identity?{request_id:identity.request_id,start_ticket:identity.start_ticket}:{})});
+}
+async function recoverSavedStart(interactive=false){
+ if(!startIntent||startRecoveryBusy||!status||!online||startRecoveryRestored)return;
+ const intent=startIntent;
+ if(status.privacy?.instance!==intent.privacy_instance||(status.collection_context||'')!==intent.collection_context)return;
+ startRecoveryBusy=true;
+ try{
+  const issue={action:'start_ticket',request_id:intent.request_id,start_ticket:intent.start_ticket,privacy_instance:intent.privacy_instance,collection_context:intent.collection_context};
+  let ticket;
+  try{ticket=await postStartControl(issue)}catch(error){
+   if(intent.stage!=='issuing')throw error;
+   if(interactive&&String(error.message||'').includes('票据已满')&&confirm('撤销其他页面遗留的未提交开始票据？正在执行或已开始的采集不会被撤销。')){
+    await recoverIssuedTickets(intent.privacy_instance,intent.collection_context);
+    ticket=await postStartControl(issue);
+   }else{
+    const fresh=await readDisplayState();
+    if(fresh.privacy?.instance!==intent.privacy_instance||!Number.isSafeInteger(fresh.next_start_ticket)||fresh.next_start_ticket<=intent.start_ticket)throw error;
+   }
+  }
+  if(intent.stage==='issuing'){
+   await recoverIssuedTickets(intent.privacy_instance,intent.collection_context,intent);
+   clearStartIntent();await poll();
+  }else{
+   if(!ticket||ticket.start_ticket!==intent.start_ticket||typeof ticket.ticket_proof!=='string')throw Error('开始状态未确认');
+   await privacyScreen.beforeStart(intent.request_id,{start_ticket:intent.start_ticket,ticket_proof:ticket.ticket_proof},intent.privacy_instance,intent.generation);
+   startRecoveryRestored=true;
+  }
+ }catch(error){toast('正在核实未完成的开始请求：'+error.message)}finally{startRecoveryBusy=false}
 }
 function reloadModePage(){if(!modeReloadQueued){modeReloadQueued=true;suspendVisibleMedia();location.reload();}}
 async function requestCollectionMode(target){
@@ -734,26 +780,34 @@ function render(s){
 async function act(action,value){
  if(action==='collection_mode')return requestCollectionMode(value);
  if(modeIntent)return false;
+ if(action==='start'&&(!startStorageUsable||startIntent)){toast('正在核实先前的开始请求，暂不能开始新采集。');if(startIntent)await recoverSavedStart(true);return false}
  if(inFlight||!online||!status?.actions?.includes(action)||privacyScreen?.isLocked())return;
  if(action==='start'&&phoneCompanion?.beforeStart&&!phoneCompanion.beforeStart())return;
  if(action==='assign_emg_roles'&&(!emgCanAssign(status)||!emgLeftSlot||emgDraftKey!==emgContextKey(status)||value?.left_slot!==emgLeftSlot||value?.session_id!==status.emg_assignment?.session_id||value?.preview_id!==status.emg_assignment?.preview_id)){renderEmg(status);return}
  if(['retry','discard_recording'].includes(action)&&!confirm('放弃并删除本段录制文件？清理完成后返回总览，由您手动准备。本段文件将不再保留。'))return;
  const requestId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
- const previousResultTime=status.result?.time,requestRevision=status.revision,requestInstance=status.privacy?.instance,requestTicket=status.next_start_ticket;let accepted=false;inFlight=true;$$('button[data-action],button[data-impedance-action]').forEach(b=>b.disabled=true);$('#set-volume').disabled=true;$('#eeg-filter').disabled=true;$('#set-eeg-filter').disabled=true;renderEmg(status);
+ const previousResultTime=status.result?.time,requestRevision=status.revision,requestInstance=status.privacy?.instance,requestGeneration=status.privacy?.generation,requestTicket=status.next_start_ticket;let accepted=false;inFlight=true;$$('button[data-action],button[data-impedance-action]').forEach(b=>b.disabled=true);$('#set-volume').disabled=true;$('#eeg-filter').disabled=true;$('#set-eeg-filter').disabled=true;renderEmg(status);
  const actionController=new AbortController();let actionTimer=null;
  let startTicket=null;
  try{if(action==='start'){
-   if(!Number.isSafeInteger(requestTicket)||requestTicket<1)throw Error('页面版本已更新，请刷新后重试');
+   if(!Number.isSafeInteger(requestTicket)||requestTicket<1||!Number.isSafeInteger(requestGeneration)||requestGeneration<0)throw Error('页面版本已更新，请刷新后重试');
+   saveStartIntent({stage:'issuing',request_id:requestId,start_ticket:requestTicket,privacy_instance:requestInstance,generation:requestGeneration,collection_context:collectionContext||''});
    const payload={action:'start_ticket',request_id:requestId,start_ticket:requestTicket,privacy_instance:requestInstance,collection_context:collectionContext};
    let issued;for(let attempt=0;attempt<2;attempt++){
     try{issued=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify(payload)},4000);break}
     catch(error){if(attempt)throw error}
    }
+   if(!issued.response.ok&&String(issued.value.error||'').includes('票据已满')&&confirm('有其他页面遗留的未提交开始票据。仅在设备空闲时撤销这些票据并继续？')){
+    await recoverIssuedTickets(requestInstance,collectionContext);
+    issued=await boundedJson('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify(payload)},4000);
+   }
    if(!issued.response.ok)throw Error(issued.value.error||'开始票据未确认，请刷新后重试');
    if(issued.value.start_ticket!==requestTicket||typeof issued.value.ticket_proof!=='string')throw Error('开始票据无效，请刷新后重试');
    startTicket={start_ticket:requestTicket,ticket_proof:issued.value.ticket_proof};
-   await privacyScreen.beforeStart(requestId,startTicket,requestInstance);
+   await privacyScreen.beforeStart(requestId,startTicket,requestInstance,requestGeneration);
    if(!online||!status?.actions?.includes('start')||status.revision!==requestRevision||status.privacy?.instance!==requestInstance){await privacyScreen.requestStop();return}
+   saveStartIntent({...startIntent,stage:'submitted'});
+   startRecoveryRestored=true;
   }
   actionTimer=setTimeout(()=>actionController.abort(),6000);
   const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value,request_id:requestId,revision:requestRevision,collection_context:collectionContext,...(['impedance_end','impedance_review'].includes(action)?{measurement_epoch:status.eeg_impedance?.measurement_epoch}:{}),...(action==='start'?{stop_protocol:'session-stop-v1',privacy_instance:requestInstance,...startTicket}:{})}),signal:actionController.signal});const data=await res.json();if(!res.ok){const error=Error(data.error||'操作失败');error.status=res.status;throw error}accepted=true;if(action==='wrist_camera_settings')wristPolicyPending={value,previousResultTime};}
@@ -864,7 +918,8 @@ function suspendVisibleMedia(){
  const video=$('#review-video');video.pause();video.removeAttribute('src');video.load();video.classList.add('hidden');playingKey='';
 }
 privacyScreen=createPrivacyScreen({
- post:privacyPost,stop:privacyStop,readStatus,readDisplayState,integratedRegistration:true,refresh:poll,holdReveal:()=>!!modeIntent,
+ post:privacyPost,stop:privacyStop,readStatus,readDisplayState,integratedRegistration:true,refresh:poll,holdReveal:()=>!!modeIntent||!startStorageUsable||!!startIntent,recovering:()=>!startStorageUsable||!!startIntent,
+ onStartResolved:resolved=>{if(startIntent?.request_id===resolved.requestId&&startIntent?.start_ticket===resolved.ticket?.start_ticket){try{clearStartIntent()}catch{startStorageUsable=false;privacyScreen.lock()}}},
  visible:()=>!document.hidden,needsLogin:()=>accessCodeRequired&&!token,
  setLocked:locked=>{document.body.classList.toggle('privacy-locked',locked);document.documentElement.classList.toggle('privacy-open',!locked);$('#privacy-cover').hidden=!locked},
  setLogin:shown=>{document.body.classList.toggle('privacy-login',shown);if(shown)$('#login').classList.remove('hidden')},
@@ -880,6 +935,6 @@ phoneCompanion=window.createPhoneCompanion({status:()=>status,unlocked:()=>onlin
  protection:()=>privacyScreen.presentation(),pending:()=>inFlight||!!modeIntent,modeReady:modeActionReady,requiresCode:accessCodeRequired,refresh:poll,
  acceptToken:value=>{if(accessCodeRequired&&typeof value==='string'&&value.length>=24&&value.length<=511){token=value;sessionStorage.setItem('pi-access',token)}poll()},
  beforeSwitch:()=>{privacyScreen.disconnected();online=false},drawSignal:name=>drawSignal(name,status?.signals?.[name]||{}),renderWrist:()=>renderWrist(status)});
-async function statusLoop(){if(!document.hidden)await poll();setTimeout(statusLoop,status?.state==='countdown'||status?.privacy?.phase==='arming'?100:750)}
+async function statusLoop(){if(!document.hidden){await poll();await recoverSavedStart()}setTimeout(statusLoop,status?.state==='countdown'||status?.privacy?.phase==='arming'?100:750)}
 if(!phoneCompanion?.managesPreview)setInterval(frames,500);setInterval(()=>{if(!document.hidden&&!privacyScreen.isLocked()&&status?.state==='emg_manual'&&$('#emg-card').getClientRects().length)renderEmg(status)},500);statusLoop();
 </script><!-- PI_CAPTURE_STATUS_FIX=20261105.4 --></body></html>

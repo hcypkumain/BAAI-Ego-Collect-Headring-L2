@@ -75,7 +75,7 @@
    else if(!view?.stale&&p?.phase==='fault')value='采集异常 · 停止状态待确认';
    else if(view?.localStart)value='正在确认开始请求';
    if(modeTarget&&p?.required===false&&s?.worker?.recording_active!==true&&!['recording','countdown'].includes(s?.state))value='正在切换到'+(modeTarget==='eeg'?'脑电版':'肌电版')+'\n正在重新连接，请稍候。';
-   if(view?.stopError&&!truth.stopped)value='停止未确认 · 请长按重试\n'+view.stopError;
+   if(view?.stopError&&(!truth.stopped||view?.localStart))value='停止未确认 · 请长按重试\n'+view.stopError;
    if(renderFault)value='页面显示异常 · 请刷新网页\n'+truth.title;
    cover.dataset.captureState=truth.title;
    cover.dataset.renderFault=renderFault?'true':'false';

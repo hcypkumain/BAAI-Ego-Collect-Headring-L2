@@ -27,6 +27,7 @@ async function run(){
  {const h=await fixture();h.s.disconnected();const x=snapshot(3);x.result={action:'start',ok:false,error:'500'};await show(h,x);assert(h.locked(),'lost/500 response without terminal proof');}
  {const h=await fixture();const x=snapshot(4);x.privacy={...x.privacy,generation:2,phase:'stopping',required:true,stop_confirmed:false,nonce:'n',session_id:'s'};x.terminal_results=[terminal(2,'committed',true),{request_id:id,start_ticket:1,action:'stop',ok:false,error:'STOP failed'}];x.result={action:'volume',ok:true};await show(h,x);assert.match(h.s.presentation().stopError,/STOP failed/);assert(h.locked());}
  {const h=await fixture();const x=snapshot(4);x.terminal_results=[{...terminal(2),start_ticket:2}];await show(h,x);assert(h.locked(),'same request id with another ticket cannot release');}
- console.log('11/11 START lifecycle screen cases passed');
+ {const h=await fixture();const x=snapshot(4);x.privacy.generation=4;await h.s.beforeStart(id,{start_ticket:1,ticket_proof:'private'},'pi',0);x.terminal_results=[terminal(2,'committed',true)];await show(h,x);assert(!h.locked(),'restored original generation permits proven stopped result');}
+ console.log('12/12 START lifecycle screen cases passed');
 }
 run().catch(error=>{console.error(error);process.exitCode=1});
