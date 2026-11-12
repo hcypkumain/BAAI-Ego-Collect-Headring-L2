@@ -130,10 +130,10 @@ def _render_comparison(comparison):
             sha = value.get('sha256')
             valid_hash = type(sha) is str and re.fullmatch('[0-9a-f]{64}', sha) is not None
             status = value.get('status', 'unknown')
-            known = valid_hash and (status == 'observed' or phase == 'source' and
-                                    status in ('verified', 'known'))
+            known = valid_hash and (status == 'verified_files' if phase == 'source'
+                                    else status == 'observed')
             output[phase] = {'sha256': sha if known else None,
-                             'status': 'observed' if known else 'unknown',
+                             'status': status if known else 'unknown',
                              'scope': 'selected-file-set' if phase == 'source' else 'file-evidence-only'}
         result[name] = output
     return result

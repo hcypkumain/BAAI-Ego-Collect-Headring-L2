@@ -37,7 +37,7 @@ def synthetic_resource_digest(resources):
 
 
 def synthetic_comparison(bom=None, observation=None):
-    return {'components': [{'component_id': name, 'source': {'sha256': 'a' * 64, 'status': 'verified'},
+    return {'components': [{'component_id': name, 'source': {'sha256': 'a' * 64, 'status': 'verified_files'},
                              'installed': {'sha256': None, 'status': 'unknown'},
                              'runtime': {'sha256': None, 'status': 'unknown'}} for name in COMPONENT_IDS]}
 
@@ -76,6 +76,22 @@ class FakeScheduler:
 
 
 class CliPremergeTests(unittest.TestCase):
+    def test_real_B_verified_files_and_unknown_or_malformed_hash(self):
+        comparison = synthetic_comparison()
+        output = cli._render_comparison(comparison)
+        for row in output.values():
+            self.assertEqual(row['source'], {'sha256': 'a' * 64, 'status': 'verified_files',
+                                            'scope': 'selected-file-set'})
+            for phase in ('installed', 'runtime'):
+                self.assertIsNone(row[phase]['sha256'])
+                self.assertEqual(row[phase]['status'], 'unknown')
+        for status, sha in (('unknown', None), ('unknown', 'a' * 64),
+                            ('verified_files', 'bad'), ('verified_files', True),
+                            ('verified_files', 'A' * 64)):
+            comparison['components'][0]['source'] = {'status': status, 'sha256': sha}
+            row = cli._render_comparison(comparison)['collector']['source']
+            self.assertEqual((row['sha256'], row['status']), (None, 'unknown'))
+
     def setUp(self):
         self.unclosed_patch = patch.object(cli, '_UNCLOSED', [])
         self.unclosed_patch.start()
@@ -380,6 +396,25 @@ class BuilderPremergeTests(unittest.TestCase):
             changed[name] = b'{}' if name.endswith('.json') else b'tampered-synthetic'
             with self.subTest(name=name), self.assertRaises((ValueError, KeyError, tarfile.TarError)):
                 builder.verify_candidate(changed, resource_digest=synthetic_resource_digest)
+
+    def test_every_release_metadata_field_is_bound_to_payload(self):
+        files = self.assemble()
+        self.assertTrue(builder.verify_candidate(files, resource_digest=synthetic_resource_digest))
+        mutations = {'base_commit': 'b' * 40, 'scope': ['upload'], 'reason': 'tampered',
+                     'expiry': '2099-01-01T00:00:00Z', 'overlay_ids': ['unregistered'],
+                     'release_id': 'different-candidate', 'unexpected': True,
+                     'approval': {'status': 'approved'}, 'component_BOM': {},
+                     'resource_digest': 'f' * 64}
+        for field, value in mutations.items():
+            with self.subTest(field=field):
+                changed = dict(files)
+                release = json.loads(files['release.json'])
+                release[field] = value
+                changed['release.json'] = canonical_json(release).encode()
+                if field == 'release_id':
+                    changed['router.json'] = canonical_json({value: release['resource_digest']}).encode()
+                with self.assertRaises(ValueError):
+                    builder.verify_candidate(changed, resource_digest=synthetic_resource_digest)
 
     def test_clean_synthetic_export_help_and_missing_targets(self):
         # Real main/C0 files, explicitly fake absent B/C adapters: parser proof only.

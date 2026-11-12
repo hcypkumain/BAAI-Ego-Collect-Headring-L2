@@ -112,6 +112,11 @@ Build outputs:
   `verify_candidate` rejects mismatched router/resource/BOM/payload members. This
   is integrity checking, not production approval. The builder additionally calls
   B's actual validator and reports its blocking codes without suppressing them.
+  Integrity validation reconstructs every exact release field from the hashed
+  embedded manifest and BOM build_commit; unknown fields and metadata mutations
+  (even a release ID changed together with router) are rejected. Source output
+  preserves B's `verified_files` file-set status/hash, never installation/runtime
+  or whole-component approval. Integrity is not a signature or production approval.
 
 Canonical payload/BOM bytes reproduce for the same immutable inputs, BOM API and
 exact Python runtime. Build/observation are locked to tested **CPython 3.14.4** on

@@ -107,12 +107,17 @@ def verify_candidate(files, *, resource_digest):
     envelope = strict_json_loads(files['BOM.json'].decode())
     resources = _candidate_resources(files)
     digest = resource_digest(resources)
-    require(router == {release['release_id']: digest} and release['resource_digest'] == digest and
-            release['component_BOM'] == envelope['component_BOM'] and
-            release['approval'] == envelope['approval'] and
-            release['approval']['status'] == 'candidate', 'Candidate binding mismatch')
     for name in PAYLOAD_PATHS:
         require(_sha(resources[name]) == envelope['files'][name]['sha256'], 'Payload member digest mismatch')
+    manifest = strict_json_loads(resources[_MANIFEST].decode())
+    expected = {key: manifest[key] for key in
+                ('release_id', 'overlay_ids', 'scope', 'reason', 'expiry', 'approval')}
+    expected.update(base_commit=envelope['build_commit'], component_BOM=envelope['component_BOM'],
+                    resource_digest=digest)
+    require(type(release) is dict and set(release) == set(expected) and release == expected and
+            router == {expected['release_id']: digest} and
+            envelope['approval'] == manifest['approval'] and
+            manifest['approval']['status'] == 'candidate', 'Candidate binding mismatch')
     return True
 
 
