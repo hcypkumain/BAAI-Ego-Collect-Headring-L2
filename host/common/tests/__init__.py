@@ -1,0 +1,1 @@
+"""Pure governance contract tests."""

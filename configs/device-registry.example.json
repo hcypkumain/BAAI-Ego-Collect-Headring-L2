@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "devices": [
+    {
+      "device_id": "cp_0042",
+      "ssh_alias": "example-cp-0042",
+      "address": "192.0.2.42",
+      "ssh_user": "example",
+      "host_key_alias": "example-key-cp-0042",
+      "capabilities": ["probe", "receive"],
+      "enrolled": false,
+      "receive_member": false,
+      "monitor_enabled": false,
+      "upload_grants": []
+    }
+  ]
+}
