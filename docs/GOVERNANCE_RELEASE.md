@@ -12,10 +12,13 @@ upstream hashes plus C0 decisions and separately records immutable A artifacts.
 
 The actual full service suite passes 71/71 (all eight constructor errors closed),
 standardizer 10/10, fleet 157/157 (all nine new migration errors closed), common
-16/16, full host/qc 76/76. These path-disjoint suites total **330 distinct test
-cases**, not repeated counts of C0 or tests invoked through imports. The host/qc
+16/16, full host/qc 76/76. These path-disjoint suites total **330 unittest IDs**,
+not repeated counts of C0 or tests invoked through imports. The host/qc
 total includes 37 main-owned tests, 28 real C tests and 11 older regressions.
-Counts are command outputs at this checkpoint; final report records the final run.
+These are 330 unique unittest IDs and **326 unique method implementations**:
+four intentional A constructor-wrapper cases repeat the four original Handoff
+methods. C0 is counted once, not once per module run. Counts are command outputs
+at this checkpoint; final report records the final run and implementation IDs.
 
 Real integration tests use actual HMAC verification, actual temporary Store and
 Handoff discovery, real C local child domains/fixed reader/strict IPC, actual B

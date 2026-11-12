@@ -470,6 +470,21 @@ class RealG2Tests(unittest.TestCase):
         self.assertIsNone(compared['installed']['sha256']);self.assertIsNone(compared['runtime']['sha256'])
         with self.assertRaises(ValueError):
             cli._bind_file_evidence(result,policy=policy,bom=bom,bindings=[{**bindings[0],'relative_path':'wrong.py'}])
+        # Actual fixed reader stages RAM before an explicitly synthetic disk hang.
+        from host.qc.fleet_monitor.readonly_probe import _REMOTE_SCRIPT,_ssh_argv
+        def disk_hang(device,digest,generation,policy):
+            _ssh_argv(device,policy)
+            script='import os,time\nos.statvfs=lambda path:time.sleep(60)\nexec('+repr(_REMOTE_SCRIPT)+')'
+            return subprocess.Popen([sys.executable,'-I','-S','-c',script],stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,close_fds=True)
+        disk_policy=replace(policy,disk_mount=str(self.root),timeout_ms=1500)
+        staged=cli.observe((device,),registry_digest=self.registry.digest,policy=disk_policy,
+            scheduler_factory=self.scheduler_factory(disk_hang),compare_components=compare_components,
+            bom=bom,evidence_bindings=bindings)
+        self.assertTrue(staged['observations'][0]['identity_verified'])
+        self.assertGreaterEqual(staged['observations'][0]['fields']['ram_available_bytes']['value'],0)
+        self.assertIsNone(staged['observations'][0]['fields']['disk_available_bytes']['value'])
+        self.assertTrue(staged['cleanup_required']);self.assertIn('DEVICE_QUARANTINED',staged['warning_codes'])
 
     def test_actual_six_local_namespaces_same_session_A_signatures_and_digest(self):
         from host.standardizer.tests.test_registry_adapter import context_at,signed_archive
