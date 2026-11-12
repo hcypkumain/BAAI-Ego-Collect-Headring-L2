@@ -11,7 +11,7 @@ from impedance_estimator import (ALGORITHM, SDK_REFERENCE, WINDOW_SECONDS,
     estimate_channel_reference, select_recent_positions,
     series_resistance_kohm)
 from impedance_record import append_event, save_preflight, fingerprint
-from impedance_quality import assess_impedance, acceptance_policy, quality_allows_recording
+from impedance_quality import assess_impedance, acceptance_policy, quality_allows_recording, review_eligibility
 
 PHASES = ('starting','measuring','restoring','resuming')
 
@@ -31,7 +31,8 @@ class Preflight:
             impedance_acceptance_policy=acceptance_policy(config),
             phase='not_checked' if required else 'unavailable',can_record=not required,
             active=False,pending=False,error=None,reviewed=False,request_id=None,
-            measurement_epoch=None,completed_at=None,updated_at=None,
+            owner_id=uuid.uuid4().hex, measurement_epoch=None,completed_at=None,updated_at=None,
+            completed_persisted=False,saved_measurement_epoch=None,saved_owner_id=None,saved_config_fingerprint=None,
             loff_off_confirmed=False if required else None,
             frontend_restored=True if required else None,
             deadline_monotonic=None,
@@ -184,6 +185,7 @@ class Preflight:
     def _refresh_quality(self):
         self.state['expected_channel_mask'] = self.mask
         self.state['quality'] = assess_impedance(self.state, expected_mask=self.mask)
+        self.state.update(review_eligibility(self.state))
         if self.required and not quality_allows_recording(self.state):
             self.state['can_record'] = False
 
@@ -193,13 +195,15 @@ class Preflight:
             append_event(self.output, self.state, event, durable=durable, stream=stream)
         except Exception as exc:
             self.storage_error = str(exc)
-            self.state.update(can_record=False, reviewed=False, phase='fault', error=str(exc))
+            self.state.update(can_record=False, reviewed=False, completed_persisted=False, phase='fault', error=str(exc))
             self.publish()
             if strict:
                 raise RuntimeError('impedance evidence write failed: '+str(exc)) from exc
 
     def _save(self, event='snapshot'):
-        if not self.output: return
+        if not self.output:
+            if event=='completed':raise RuntimeError('阻抗结果无法持久化，不能确认')
+            return
         frontend=asdict(self.board.get_config())
         self.state['config_fingerprint']=fingerprint(frontend)
         self._event(event, durable=True)
@@ -210,11 +214,14 @@ class Preflight:
                  'firmware_identity_readback_available':False})
         except Exception as exc:
             self.storage_error = str(exc)
-            self.state.update(can_record=False,reviewed=False,phase='fault',error=str(exc))
+            self.state.update(can_record=False,reviewed=False,completed_persisted=False,phase='fault',error=str(exc))
             self.publish()
             raise RuntimeError('impedance evidence write failed: '+str(exc)) from exc
         self.state.update(config_fingerprint=value['config_fingerprint'],
                           schema_version=value['schema_version'],session_id=value['session_id'])
+        if event=='completed':
+            self.state.update(completed_persisted=True,saved_measurement_epoch=self.state['measurement_epoch'],
+                saved_owner_id=self.state['owner_id'],saved_config_fingerprint=value['config_fingerprint'])
 
     def handle(self, job):
         if not self.required: raise RuntimeError('impedance backend is unavailable')
@@ -230,6 +237,7 @@ class Preflight:
             self.state.update(phase='starting',can_record=False,reviewed=False,error=None,
                 channels=self._channels(),request_id=job.get('request_id'),
                 measurement_epoch=uuid.uuid4().hex,completed_at=None,
+                completed_persisted=False,saved_measurement_epoch=None,saved_owner_id=None,saved_config_fingerprint=None,
                 updated_at=None,last_sample_monotonic_ns=None,samples_seen=None,reviewed_at=None,
                 measurement_started_at=time.time(),measurement_started_monotonic_ns=time.monotonic_ns(),
                 completed_monotonic_ns=None,reviewed_monotonic_ns=None,
@@ -252,6 +260,8 @@ class Preflight:
                 except RuntimeError: pass
                 raise
         elif command=='IMPEDANCE_END':
+            if job.get('measurement_epoch')!=self.state.get('measurement_epoch'):
+                raise RuntimeError('阻抗测量已变化，请刷新后重试')
             if self.state['phase'] not in PHASES and not self.board.restore_required: return
             self._require_completed_window()
             self.state['last_command_error'] = None
@@ -274,16 +284,21 @@ class Preflight:
                 except RuntimeError: pass
                 raise
         elif command=='IMPEDANCE_REVIEW':
-            if (self.state['phase']!='completed' or not self.state['loff_off_confirmed']
-                    or not self.state['frontend_restored'] or self.state['error']
-                    or not self.state['window_ready'] or not self.state['normal_frame_confirmed']):
-                raise RuntimeError('measurement has not safely completed')
+            if job.get('measurement_epoch')!=self.state.get('measurement_epoch'):
+                raise RuntimeError('阻抗测量已变化，请刷新后重新确认')
+            frontend=asdict(self.board.get_config())
+            if (fingerprint(frontend)!=self.state.get('saved_config_fingerprint')
+                    or frontend.get('enabled_mask')!=self.mask):
+                self.state.update(completed_persisted=False,reviewed=False,can_record=False)
+                self.publish()
+                raise RuntimeError('脑电配置已变化，请重新检测')
             self._refresh_quality()
-            if not quality_allows_recording(self.state):
+            eligibility=review_eligibility(self.state)
+            if not eligibility['can_review']:
                 self.state.update(reviewed=False, can_record=False)
                 self.publish()
-                raise RuntimeError('脑电阻抗不通过：所有启用通道均须有效且低于60 kΩ，请调整接触后重新检测')
-            self.state.update(reviewed=True,reviewed_at=time.time(),
+                raise RuntimeError('阻抗结果暂不可确认：'+','.join(eligibility['reason_codes']))
+            self.state.update(last_command_error=None,reviewed=True,reviewed_at=time.time(),
                 reviewed_monotonic_ns=time.monotonic_ns(),can_record=True)
             try: self._save('review')
             except Exception:
@@ -330,6 +345,17 @@ class Preflight:
         self._estimate_window()
         self._event('measurement', stream='samples')
         self.publish()
+
+    def check_completed_binding(self, batch):
+        """Invalidate frozen evidence on a changed live owner/configuration generation."""
+        if self.state.get('phase')!='completed' or not self.state.get('completed_persisted'):return
+        frontend=asdict(self.board.get_config())
+        if (fingerprint(frontend)!=self.state.get('saved_config_fingerprint')
+                or frontend.get('enabled_mask')!=self.mask
+                or getattr(batch,'generation',None)!=self.state.get('normal_frame_generation')):
+            self.state.update(completed_persisted=False,reviewed=False,can_record=False,
+                phase='interrupted',error='脑电连接或配置已变化，请重新检测')
+            self.publish()
 
     def stale(self):
         if self.state['phase']=='measuring':

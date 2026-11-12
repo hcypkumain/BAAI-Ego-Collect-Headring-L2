@@ -70,8 +70,8 @@ def impedance_required(value=None):
 def impedance_allows_recording(value=None):
     value = value or {}
     if not impedance_required(value): return True
-    from impedance_quality import quality_allows_recording
-    if not quality_allows_recording(value):return False
+    from impedance_quality import review_eligibility
+    if not review_eligibility(value)['can_review']:return False
     return (value.get('supported') is True and value.get('can_record') is True
         and not value.get('active') and not value.get('pending') and not value.get('error')
             and value.get('loff_off_confirmed') is True and value.get('frontend_restored') is True
@@ -116,7 +116,7 @@ def _base_actions_for(state, impedance=None):
             restored = value.get('loff_off_confirmed') is True and value.get('frontend_restored') is True
             if restored and not value.get('error'):
                 actions = actions + ['impedance_start'] if impedance_allows_recording(value) else ['impedance_start'] + actions
-                if value.get('completed_at') and not value.get('can_record'):
+                if value.get('can_review') is True and not value.get('can_record'):
                     actions = ['impedance_review'] + actions
             elif value.get('phase') == 'not_checked':
                 actions = ['impedance_start'] + actions
@@ -476,6 +476,10 @@ class Dashboard:
                 raise ValueError('音量应在 20 到 120 之间')
             if data['action']=='eeg_filter' and data.get('value') not in PRESETS:
                 raise ValueError('无效的脑电滤波选项')
+            if data['action'] in ('impedance_end','impedance_review'):
+                expected=(self.snapshot.get('eeg_impedance') or {}).get('measurement_epoch')
+                if not isinstance(expected,str) or data.get('measurement_epoch')!=expected:
+                    raise ValueError('阻抗测量已变化，请刷新后重试')
             if data['action']=='wrist_camera_settings' and ('value' not in data or
                     (data['value'] is not None and type(data['value']) is not bool)):
                 raise ValueError('请选择保持当前设置、允许或不允许自动曝光改变帧率')

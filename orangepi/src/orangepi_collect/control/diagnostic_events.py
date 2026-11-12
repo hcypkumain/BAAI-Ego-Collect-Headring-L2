@@ -13,10 +13,13 @@ EVENTS = frozenset(('action_submitted', 'action_taken', 'action_complete', 'impe
                     'scan_deferred', 'scan_start', 'scan_end', 'lock_wait', 'loop_lag'))
 WORDS = {
     'action': frozenset(('start', 'stop', 'impedance_start', 'impedance_end', 'impedance_review', 'rescan', 'other')),
-    'phase': frozenset(('idle', 'arming', 'recording', 'stopping', 'fault', 'unknown')),
+    'phase': frozenset(('idle', 'arming', 'recording', 'stopping', 'fault', 'unknown',
+                        'not_checked', 'starting', 'measuring', 'restoring', 'resuming', 'completed')),
     'reason': frozenset(('ok', 'failed', 'cancelled', 'busy', 'owner_active', 'incomplete_window',
                          'missing_valid_channels', 'normal_recovery_unconfirmed', 'persist_failed',
-                         'owner_changed', 'measurement_changed', 'capture_armed', 'unknown')),
+                         'owner_changed', 'measurement_changed', 'configuration_changed', 'capture_armed',
+                         'measurement_not_completed', 'threshold_exceeded', 'stale', 'measurement_error',
+                         'measurement_unavailable', 'unknown')),
 }
 NUMBERS = frozenset(('revision', 'generation', 'publish_seq', 'enabled_count', 'valid_count',
                      'duration_ms', 'lag_ms', 'publish_age_ms', 'dropped'))

@@ -1,5 +1,6 @@
 """Advisory impedance keeps true measurements while allowing reviewed START."""
 import copy
+from dataclasses import make_dataclass
 import json
 from pathlib import Path
 import sys
@@ -29,7 +30,8 @@ def fixture(number=270., policy='advisory', reviewed=True):
     frontend=dict(verified=True,enabled_mask=255,mode='eeg',reference='srb1')
     state=dict(required=True,supported=True,impedance_acceptance_policy=policy,
         phase='completed',active=False,pending=False,error=None,reviewed=reviewed,can_record=reviewed,
-        measurement_epoch='epoch',measurement_started_at=100.,completed_at=101.,reviewed_at=102.,
+        measurement_epoch='epoch',owner_id='owner',saved_owner_id='owner',saved_measurement_epoch='epoch',
+        completed_persisted=True,saved_config_fingerprint=record.fingerprint(frontend),measurement_started_at=100.,completed_at=101.,reviewed_at=102.,
         measurement_started_monotonic_ns=100_000_000_000,completed_monotonic_ns=101_000_000_000,
         reviewed_monotonic_ns=102_000_000_000,channels=channels,algorithm=ALGORITHM,
         sdk_reference=copy.deepcopy(SDK_REFERENCE),series_kohm=9.98,input_side='srb1',
@@ -68,12 +70,13 @@ class AdvisoryTests(unittest.TestCase):
 
     def test_review_persist_failure_revokes_gate(self):
         state,_=fixture(reviewed=False);owner=self.owner(state);owner._save.side_effect=RuntimeError('disk error')
-        with self.assertRaises(RuntimeError):owner.handle(dict(command='IMPEDANCE_REVIEW'))
+        with self.assertRaises(RuntimeError):owner.handle(dict(command='IMPEDANCE_REVIEW',measurement_epoch='epoch'))
         self.assertFalse(owner.state['reviewed']);self.assertFalse(owner.state['can_record'])
 
     def test_old_impedance_evidence_cannot_authorize_new_eight_channel_start(self):
         state,frontend=fixture();frontend['enabled_mask']=254
         state['expected_channel_mask']=254
+        state['config_fingerprint']=state['saved_config_fingerprint']=record.fingerprint(frontend)
         for i,row in enumerate(state['channels']):row['label']=LEGACY_LAYOUT[i]
         state['channels'][0].update(enabled=False,value_kohm=None,reason='disabled',accepted_samples=0)
         old=config();old.update(labels=list(LEGACY_LAYOUT),disabled_channels=[1])
@@ -107,24 +110,27 @@ class AdvisoryTests(unittest.TestCase):
     def owner(self,state):
         owner=eeg_impedance.Preflight.__new__(eeg_impedance.Preflight)
         owner.state=state;owner.required=True;owner.mask=255;owner.emit=Mock();owner._save=Mock()
+        frontend=dict(verified=True,enabled_mask=255,mode='eeg',reference='srb1')
+        Frontend=make_dataclass('Frontend',[(key,type(value)) for key,value in frontend.items()])
+        owner.board=Mock();owner.board.get_config.return_value=Frontend(**frontend)
         return owner
 
     def test_owner_review_accepts_high_values_without_falsifying_quality(self):
         state,_=fixture(reviewed=False);owner=self.owner(state)
-        owner.handle(dict(command='IMPEDANCE_REVIEW'))
+        owner.handle(dict(command='IMPEDANCE_REVIEW',measurement_epoch='epoch'))
         self.assertTrue(owner.state['can_record']);self.assertTrue(owner.state['reviewed'])
         self.assertFalse(owner.state['quality']['passed']);self.assertEqual(owner.state['channels'][1]['value_kohm'],270.)
         owner.publish();self.assertTrue(owner.state['can_record'])
 
     def test_strict_owner_review_still_rejects_high_values(self):
         state,_=fixture(policy='strict',reviewed=False);owner=self.owner(state)
-        with self.assertRaises(RuntimeError):owner.handle(dict(command='IMPEDANCE_REVIEW'))
+        with self.assertRaises(RuntimeError):owner.handle(dict(command='IMPEDANCE_REVIEW',measurement_epoch='epoch'))
         self.assertFalse(owner.state['can_record'])
 
     def test_owner_review_still_requires_completed_normal_recovery(self):
         for key,value in (('normal_frame_confirmed',False),('phase','measuring'),('window_ready',False)):
             state,_=fixture(reviewed=False);state[key]=value
-            with self.assertRaises(RuntimeError):self.owner(state).handle(dict(command='IMPEDANCE_REVIEW'))
+            with self.assertRaises(RuntimeError):self.owner(state).handle(dict(command='IMPEDANCE_REVIEW',measurement_epoch='epoch'))
 
     def save(self,root,state,frontend):
         return record.save_preflight(root,state,frontend,dict(port='/dev/test-eeg',configured_usb_serial='test-serial'))

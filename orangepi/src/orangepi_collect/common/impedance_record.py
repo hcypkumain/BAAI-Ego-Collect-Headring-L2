@@ -228,7 +228,8 @@ def _validate_preflight(root, expected_state=None, expected_eeg_config=None,
         raise ImpedanceRecordError('impedance wall-clock phase times are out of order')
     frontend = value.get('restored_frontend')
     if (not isinstance(frontend, dict) or frontend.get('verified') is not True
-            or frontend.get('enabled_mask') not in (254, 255) or frontend.get('mode') not in ('eeg', 'both_bias')
+            or type(frontend.get('enabled_mask')) is not int or not 0 < frontend['enabled_mask'] <= 255
+            or frontend.get('mode') not in ('eeg', 'both_bias')
             or fingerprint(frontend) != value.get('config_fingerprint')):
         raise ImpedanceRecordError('impedance frontend fingerprint mismatch')
     channels = value.get('channels')
@@ -279,6 +280,16 @@ def _validate_preflight(root, expected_state=None, expected_eeg_config=None,
                 or expected_state.get('can_record') is not True
                 or expected_state.get('reviewed') is not True):
             raise ImpedanceRecordError('persisted impedance does not match current owner')
+        if value.get('owner_id') or expected_state.get('owner_id'):
+            if (not value.get('owner_id') or value.get('owner_id')!=expected_state.get('owner_id')
+                    or value.get('saved_owner_id')!=value.get('owner_id')
+                    or value.get('saved_measurement_epoch')!=epoch
+                    or value.get('saved_config_fingerprint')!=value.get('config_fingerprint')
+                    or value.get('completed_persisted') is not True
+                    or expected_state.get('saved_owner_id')!=value.get('owner_id')
+                    or expected_state.get('saved_measurement_epoch')!=epoch
+                    or expected_state.get('completed_persisted') is not True):
+                raise ImpedanceRecordError('impedance completed evidence does not match current owner')
         if require_project_quality:
             owner_quality = assess_impedance(expected_state, expected_mask=frontend['enabled_mask'])
             if ((not advisory and owner_quality['passed'] is not True)
@@ -289,9 +300,9 @@ def _validate_preflight(root, expected_state=None, expected_eeg_config=None,
         if not isinstance(config, dict):
             raise ImpedanceRecordError('recording EEG configuration must be an object')
         disabled = config.get('disabled_channels', [1])
-        if (config.get('sample_rate_hz', 250) != 250
-                or disabled not in ([], [1])
-                or frontend['enabled_mask'] != (255 if disabled == [] else 254)):
+        if (not isinstance(disabled,list) or any(type(i) is not int or not 1<=i<=8 for i in disabled)
+                or len(disabled)!=len(set(disabled)) or config.get('sample_rate_hz', 250) != 250
+                or frontend['enabled_mask'] != sum(1<<i for i in range(8) if i+1 not in disabled)):
             raise ImpedanceRecordError('recording EEG profile differs from impedance profile')
         if [c['label'] for c in channels] != config.get('labels'):
             raise ImpedanceRecordError('impedance channel labels differ from recording')

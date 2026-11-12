@@ -603,7 +603,7 @@ function impedanceDisplay(value,serverTime){
    &&phase==='completed'&&value.active===false&&value.pending===false&&!value.error&&value.window_ready===true
   &&value.loff_off_confirmed===true&&value.frontend_restored===true&&value.normal_frame_confirmed===true;
  if(advisory&&phase==='completed'){label='检测已结束 · 阻抗仅作参考';style='impedance-watch'}
- return {accepted,canContinue:accepted||advisory&&recovered,advisory,label,style,channels,stale};
+  return {accepted,canContinue:value.can_review===true,advisory,label,style,channels,stale};
 }
 function renderImpedance(s){
  const value=s.eeg_impedance||{},phase=value.phase||'unavailable',verdict=impedanceDisplay(value,s.server_time);
@@ -613,12 +613,16 @@ function renderImpedance(s){
  const phases={unavailable:'暂不可用',not_selected:'未选择脑电',awaiting_prepare:'先准备本段',initializing:'正在连接脑电',interrupted:'上次准备已中断',not_checked:'待检查',starting:'正在准备检测',measuring:'检测中',restoring:'正在恢复设备',resuming:'等待普通脑电',completed:'检查已完成',fault:'检查异常'};
  $('#impedance-phase').textContent=phases[phase]||'等待检查';
  $('#impedance-verdict').textContent=verdict.label;$('#impedance-verdict').className=verdict.style;
- $('#impedance-policy').textContent=verdict.advisory?'当前版本阻抗仅作参考，是否达到 60 kΩ 均可继续。结束检查并确认结果后进入参考图。':'所有启用通道须低于 60 kΩ；等于 60 kΩ 不通过。参考与偏置电极未单独测量。';
+  $('#impedance-policy').textContent=verdict.advisory?'高阻值仅作提示；所有启用通道仍须有效、恢复并完成保存，确认后才能继续。':'所有启用通道须低于 60 kΩ；等于 60 kΩ 不通过。参考与偏置电极未单独测量。';
  for(const button of $$('[data-impedance-action="impedance_review"]'))button.textContent=verdict.advisory?'确认结果，继续':'确认通过结果，继续';
  let note=value.message||value.error||({unavailable:'阻抗检查暂不可用。',not_selected:'本段未选择脑电设备。',awaiting_prepare:'请先准备本段，设备就绪后开始阻抗检查。',initializing:'正在准备本段并连接脑电设备。',interrupted:'上次准备已中断，请重新准备。',not_checked:'开始检查后调整电极接触，全部启用通道低于 60 kΩ 才能通过。',starting:'正在确认检测配置。',measuring:'调整电极接触并观察逐通道结果，等待完整检测窗口。',restoring:'正在关闭检测并恢复原配置。',resuming:'正在等待恢复后的普通脑电数据。',completed:verdict.accepted?(value.can_record?'阻抗已通过并确认，可开始正式录制。':'阻抗已通过，请确认结果后继续。'):'阻抗尚未通过，请调整不通过通道并重新检测。',fault:'检测或设备恢复未确认，请处理错误。'})[phase]||'等待设备状态';
- if(verdict.advisory&&phase==='not_checked')note='开始检查并记录阻抗；当前版本不按 60 kΩ 拦截采集。';
+  if(verdict.advisory&&phase==='not_checked')note='开始检查并记录阻抗；当前版本不按 60 kΩ 拦截采集。';
   if(verdict.advisory&&phase==='completed'&&!value.error)note=!verdict.canContinue?'缺少完整有效读数，请重新检测。':value.can_record?'阻抗结果已记录，普通脑电采样已恢复，可以继续。':'阻抗结果仅作参考，确认结果后继续查看参考图。';
- if(verdict.stale)note='检测数据已过期，请等待新的完整有效检测窗口。';
+  if(verdict.stale)note='检测数据已过期，请等待新的完整有效检测窗口。';
+  if(phase==='completed'&&!verdict.canContinue&&Array.isArray(value.reason_codes)&&value.reason_codes.length){
+   const reasons={incomplete_window:'检测窗口未完成',missing_valid_channels:'启用通道缺少有效读数',normal_recovery_unconfirmed:'普通脑电恢复尚未确认',persist_failed:'结果未确认落盘',owner_changed:'采集进程已变化',measurement_changed:'测量批次已变化',configuration_changed:'脑电配置已变化',capture_armed:'采集已准备启动',measurement_not_completed:'检测尚未安全结束',threshold_exceeded:'阻抗超过严格阈值',stale:'测量数据已过期',measurement_error:'检测发生错误',measurement_unavailable:'检测不可用'};
+   note=value.reason_codes.map(code=>reasons[code]||'状态未确认').join('；');
+  }
  $('#impedance-note').textContent=note;$('#impedance-note').classList.toggle('error',!!value.error||verdict.stale||!verdict.advisory&&value.quality?.state==='fail');
  if(s.state==='ready'&&value.required===true&&!value.can_record){$('#step-title').textContent='采集前阻抗检查';$('#instruction').textContent=note}
  $('#impedance-channels').replaceChildren();
@@ -737,7 +741,7 @@ async function act(action,value){
  const requestId=Array.from(crypto.getRandomValues(new Uint8Array(16)),x=>x.toString(16).padStart(2,'0')).join('');
  const previousResultTime=status.result?.time,requestRevision=status.revision,requestInstance=status.privacy?.instance;let accepted=false;inFlight=true;$$('button[data-action],button[data-impedance-action]').forEach(b=>b.disabled=true);$('#set-volume').disabled=true;$('#eeg-filter').disabled=true;$('#set-eeg-filter').disabled=true;renderEmg(status);
  const actionController=new AbortController(),actionTimer=setTimeout(()=>actionController.abort(),6000);
- try{if(action==='start'){await privacyScreen.beforeStart(requestId);if(!online||!status?.actions?.includes('start')||status.revision!==requestRevision||status.privacy?.instance!==requestInstance){privacyScreen.startRejected();return}}const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value,request_id:requestId,revision:requestRevision,collection_context:collectionContext,...(action==='start'?{stop_protocol:'session-stop-v1',privacy_instance:requestInstance}:{})}),signal:actionController.signal});const data=await res.json();if(!res.ok){const error=Error(data.error||'操作失败');error.status=res.status;throw error}accepted=true;if(action==='wrist_camera_settings')wristPolicyPending={value,previousResultTime};}
+ try{if(action==='start'){await privacyScreen.beforeStart(requestId);if(!online||!status?.actions?.includes('start')||status.revision!==requestRevision||status.privacy?.instance!==requestInstance){privacyScreen.startRejected();return}}const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders()},body:JSON.stringify({action,value,request_id:requestId,revision:requestRevision,collection_context:collectionContext,...(['impedance_end','impedance_review'].includes(action)?{measurement_epoch:status.eeg_impedance?.measurement_epoch}:{}),...(action==='start'?{stop_protocol:'session-stop-v1',privacy_instance:requestInstance}:{})}),signal:actionController.signal});const data=await res.json();if(!res.ok){const error=Error(data.error||'操作失败');error.status=res.status;throw error}accepted=true;if(action==='wrist_camera_settings')wristPolicyPending={value,previousResultTime};}
  catch(error){if(action==='start'&&error.status>=400&&error.status<500)await privacyScreen.requestStop();if(action==='assign_emg_roles')clearEmgDraft();toast(error.name==='AbortError'?'操作结果尚未确认，请等待 Pi 状态更新后再继续。':error.message)}finally{clearTimeout(actionTimer);inFlight=false;await poll();renderEmg(status)}
  return accepted;
 }

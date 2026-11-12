@@ -23,6 +23,7 @@ class EegProcess:
         self.summary = {}
         self.config = config
         self.state_lock = threading.RLock()
+        self.pending_impedance = None
         self.write_lock = threading.Lock()
         self.impedance = dict(required=os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT') == '1',
             supported=False, phase='unavailable', can_record=False, active=False, pending=False,
@@ -43,6 +44,15 @@ class EegProcess:
                     state = message.get('state')
                     if not isinstance(state,dict): raise ValueError('invalid impedance worker state')
                     with self.state_lock:
+                        pending=self.pending_impedance
+                        if pending:
+                            matches=(state.get('ack_request_id')==pending['request_id']
+                                and (pending['command']=='IMPEDANCE_START' or
+                                     state.get('ack_measurement_epoch')==pending.get('measurement_epoch')==state.get('measurement_epoch')))
+                            if matches:
+                                self.pending_impedance=None
+                                if state.get('ack_ok') is not True:state=dict(state,can_record=False)
+                            else:state=dict(state,pending=True,can_record=False)
                         self.impedance = copy.deepcopy(state)
                         if state.get('active') or state.get('pending'): self.ready = False
                         # A state snapshot retains the preceding check's sample
@@ -73,9 +83,12 @@ class EegProcess:
         with self.state_lock: return copy.deepcopy(self.impedance)
 
     def can_record(self):
+        if self.process.poll() is not None:return False
         state = self.impedance_snapshot()
         if state.get('required',os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT') == '1') is not True:
             return True
+        from impedance_quality import review_eligibility
+        if not review_eligibility(state)['can_review']:return False
         return (state.get('supported') is True and state.get('can_record') is True
             and not state.get('active') and not state.get('pending') and not state.get('error')
             and state.get('loff_off_confirmed') is True and state.get('frontend_restored') is True
@@ -89,18 +102,23 @@ class EegProcess:
             and not isinstance(deadline,bool) and math.isfinite(deadline) and 0 < deadline-now <= 12)
 
     def send_impedance(self, command):
-        if (not isinstance(command,dict) or set(command)-{'command','request_id'}
+        if (not isinstance(command,dict) or set(command)-{'command','request_id','measurement_epoch'}
                 or command.get('command') not in ('IMPEDANCE_START','IMPEDANCE_END','IMPEDANCE_REVIEW')
                 or not isinstance(command.get('request_id'),str) or not 0<len(command['request_id'])<=64):
             raise ValueError('invalid impedance command')
+        if command['command']!='IMPEDANCE_START' and (not isinstance(command.get('measurement_epoch'),str) or not 0<len(command['measurement_epoch'])<=64):
+            raise ValueError('invalid impedance measurement epoch')
         if self.process.poll() is not None: raise RuntimeError('EEG owner has exited')
-        state = self.impedance_snapshot()
-        if state.get('supported') is not True: raise ValueError('当前 EEG 后端不支持阻抗检查')
-        if command['command'] != 'IMPEDANCE_REVIEW':
-            with self.state_lock:
-                self.impedance=dict(self.impedance,can_record=False,pending=True,
-                    request_id=command['request_id'], deadline_monotonic=time.monotonic()+12)
-                self.ready=False
+        with self.state_lock:
+            state=self.impedance
+            if self.pending_impedance:raise ValueError('上一条阻抗操作尚未确认')
+            if state.get('supported') is not True: raise ValueError('当前 EEG 后端不支持阻抗检查')
+            if command['command']!='IMPEDANCE_START' and command.get('measurement_epoch')!=state.get('measurement_epoch'):
+                raise ValueError('阻抗测量已变化，请刷新后重试')
+            self.pending_impedance=dict(command)
+            self.impedance=dict(state,can_record=False,pending=True,
+                request_id=command['request_id'], deadline_monotonic=time.monotonic()+12)
+            self.ready=False
         with self.write_lock:
             self.process.stdin.write(json.dumps(command)+'\n');self.process.stdin.flush()
 

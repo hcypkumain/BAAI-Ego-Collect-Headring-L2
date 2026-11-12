@@ -497,6 +497,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if not self.worker or self.worker.poll() is not None or self.worker_status().get('state')!='ready':
             self.voice.say('设备尚未就绪，请先准备本段。')
             return False
+        pending_impedance=getattr(self,'impedance_command_pending',None)
+        if callable(pending_impedance) and pending_impedance():
+            self.voice.say('阻抗操作尚未确认，请等待设备回复。')
+            return False
         contract_error=self.required_capture_error(self.worker_status())
         if contract_error:
             self.voice.say(contract_error+'。请重新准备设备后再开始。')

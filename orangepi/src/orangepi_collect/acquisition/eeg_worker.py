@@ -71,6 +71,7 @@ class Pump:
                 publisher().eeg(batch.eeg_uv,batch.valid,self.preflight.config['labels'],'raw',time.time(),
                     sample_indices=batch.sample_indices,generation=int(batch.generation),mode='impedance',adc_counts=batch.raw_counts)
             return
+        if self.preflight:self.preflight.check_completed_binding(batch)
         item = (batch, begin, time.monotonic_ns(), time.time_ns(), self.epoch)
         try: self.jobs.put(item, timeout=.05)
         except queue.Full:
@@ -87,9 +88,9 @@ class Pump:
                 try: job=self.commands.get_nowait()
                 except queue.Empty: job=None
                 if job:
+                    command_error=None
                     if self.preflight and self.preflight.output and (Path(self.preflight.output)/'start_gate.json').exists():
-                        self.preflight.state['last_command_error']='录制中不能执行阻抗操作'
-                        self.preflight.publish()
+                        command_error='录制中不能执行阻抗操作'
                     else:
                         self.epoch+=1
                         while not self.jobs.empty():
@@ -98,9 +99,14 @@ class Pump:
                         try: self.preflight.handle(job)
                         except (ValueError,RuntimeError) as exc:
                             if self.preflight.state['phase']=='fault': raise
-                            self.preflight.state['last_command_error']=str(exc)
-                            self.preflight.publish()
+                            command_error=str(exc)
                         latest=time.monotonic()
+                    if self.preflight:
+                        if command_error:
+                            self.preflight.state.update(last_command_error=command_error,can_record=False,reviewed=False)
+                        self.preflight.state.update(ack_request_id=job.get('request_id'),
+                            ack_measurement_epoch=self.preflight.state.get('measurement_epoch'),ack_ok=command_error is None)
+                        self.preflight.publish()
                 begin = time.monotonic_ns()
                 try: batch = self.board.read(25, timeout=.25)
                 except PartialReadError as exc: batch = exc.partial

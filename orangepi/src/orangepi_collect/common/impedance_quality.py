@@ -35,6 +35,34 @@ def quality_allows_recording(state):
             and quality['valid_count'] == quality['expected_count'])
 
 
+def review_eligibility(state, capture_armed=False):
+    """One fail-closed review decision for the owner and its clients."""
+    state = state if isinstance(state, dict) else {}
+    q = assess_impedance(state)
+    reasons = []
+    if capture_armed:reasons.append('capture_armed')
+    if not state.get('owner_id') or state.get('saved_owner_id') != state.get('owner_id'):
+        reasons.append('owner_changed')
+    if not state.get('measurement_epoch') or state.get('saved_measurement_epoch') != state.get('measurement_epoch'):
+        reasons.append('measurement_changed')
+    if not state.get('config_fingerprint') or state.get('saved_config_fingerprint') != state.get('config_fingerprint'):
+        reasons.append('configuration_changed')
+    if state.get('completed_persisted') is not True:reasons.append('persist_failed')
+    if not q['window_ready']:reasons.append('incomplete_window')
+    if q['expected_count'] == 0 or q['valid_count'] != q['expected_count'] or q['reason']=='channel_mapping_mismatch':
+        reasons.append('missing_valid_channels')
+    if state.get('phase')!='completed' or state.get('active') is not False or state.get('pending') is not False or state.get('error'):
+        reasons.append('measurement_not_completed')
+    if any(state.get(k) is not True for k in ('loff_off_confirmed','frontend_restored','normal_frame_confirmed')):
+        reasons.append('normal_recovery_unconfirmed')
+    if not quality_allows_recording(state) and q['reason']=='channels_not_passed' and q['valid_count']==q['expected_count']:
+        reasons.append('threshold_exceeded')
+    if q['reason'] in ('stale','measurement_error','measurement_unavailable','no_expected_channels'):
+        reasons.append(q['reason'])
+    return dict(can_review=not reasons, reason_codes=list(dict.fromkeys(reasons)),
+                enabled_count=q['expected_count'], valid_count=q['valid_count'])
+
+
 def _number(value):
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return False

@@ -21,6 +21,19 @@ import wrist_camera_settings as wrist_settings
 
 
 class WebControls:
+    def impedance_command_pending(self, state=None):
+        pending=getattr(self,'_impedance_command_pending',None)
+        if not pending:return False
+        if pending['worker'] is not getattr(self,'worker',None):
+            self._impedance_command_pending=None
+            return False
+        if state is None:state=self.worker_status().get('eeg_impedance') or {}
+        if (state.get('ack_request_id')==pending['request_id']
+                and (pending['epoch'] is None or state.get('ack_measurement_epoch')==pending['epoch']==state.get('measurement_epoch'))):
+            self._impedance_command_pending=None
+            return False
+        return True
+
     def remember_pending_owner(self,error):
         self.scan_cleanup_pending=True
         run=getattr(error,'run',None);child=getattr(error,'child',None)
@@ -264,6 +277,24 @@ class WebControls:
         if calibration.get('warnings'):
             notices.append('头环标定文件的适用性待核对，请查看本段标定记录。')
         from project_paths import COLLECTION_MODE,COLLECTION_CONTEXT
+        impedance=impedance_presentation(self.state, self.selected_devices, worker,
+            getattr(self,'worker',None) is not None and self.worker.poll() is None)
+        if self.impedance_command_pending(worker.get('eeg_impedance') or {}):
+            impedance.update(pending=True,can_record=False,can_review=False)
+        if impedance.get('required') is True:
+            from impedance_quality import review_eligibility
+            armed=self.state!='ready' or bool(privacy and privacy.snapshot().get('required'))
+            impedance.update(review_eligibility(impedance,capture_armed=armed))
+            events=getattr(dashboard,'events',None)
+            signature=(impedance.get('measurement_epoch'),impedance.get('phase'),impedance.get('can_review'),
+                tuple(impedance.get('reason_codes') or ()),impedance.get('valid_count'),impedance.get('enabled_count'))
+            if events and signature!=getattr(self,'_diagnostic_impedance_signature',None):
+                self._diagnostic_impedance_signature=signature
+                events.emit('impedance_gate',measurement_epoch=impedance.get('measurement_epoch'),
+                    phase=impedance.get('phase'),reason=(impedance.get('reason_codes') or ['ok'])[0],
+                    enabled_count=impedance.get('enabled_count'),valid_count=impedance.get('valid_count'),
+                    recovered=impedance.get('normal_frame_confirmed') is True,persisted=impedance.get('completed_persisted') is True,
+                    ok=impedance.get('can_review') is True)
         dashboard.publish(dict(collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,mode_switch_target=getattr(self,'mode_switch_target',None),state=self.state,revision=getattr(self,'ui_revision',0),audio=audio,
             countdown=getattr(self,'countdown_status',None) if self.state=='countdown' else None,
             collector_id=getattr(self,'collector_id',''),preparation_cancelled_at=getattr(self,'preparation_cancelled_at',None),
@@ -279,8 +310,7 @@ class WebControls:
             eeg_config=cfg.get('eeg',{}),eeg_filter_presets=PRESETS,
             wrist_camera_settings=self.wrist_settings_status(),
             selected_devices=self.selected_devices,worker=worker,
-            eeg_impedance=impedance_presentation(self.state, self.selected_devices, worker,
-                getattr(self,'worker',None) is not None and self.worker.poll() is None),
+            eeg_impedance=impedance,
             last_voice=getattr(self.voice,'last_text',''),errors=notices,
             recording_since=getattr(self,'recording_since',None),
             keyboard_names=getattr(keyboard,'names',[]),storage=storage,
@@ -499,9 +529,19 @@ class WebControls:
                     if getattr(self,'worker',None):raise ValueError('请在新一段准备前切换质检模式')
                     __import__('qc_deferred').save(BASE,job['value']);self.state_write()
                 elif action in ('impedance_start','impedance_end','impedance_review'):
+                    epoch=job.get('measurement_epoch')
+                    if action!='impedance_start' and (not epoch or epoch!=impedance.get('measurement_epoch')):
+                        raise ValueError('阻抗测量已变化，请刷新后重试')
+                    if action=='impedance_review':
+                        from impedance_quality import review_eligibility
+                        eligibility=review_eligibility(impedance,capture_armed=privacy.get('required') is True)
+                        if not eligibility['can_review']:raise ValueError('阻抗结果暂不可确认：'+','.join(eligibility['reason_codes']))
                     command = {'impedance_start':'IMPEDANCE_START','impedance_end':'IMPEDANCE_END',
                                'impedance_review':'IMPEDANCE_REVIEW'}[action]
-                    self.command(json.dumps(dict(command=command,request_id=job.get('request_id') or uuid.uuid4().hex)))
+                    payload=dict(command=command,request_id=job.get('request_id') or uuid.uuid4().hex)
+                    if action!='impedance_start':payload['measurement_epoch']=epoch
+                    self._impedance_command_pending=dict(worker=getattr(self,'worker',None),request_id=payload['request_id'],epoch=epoch)
+                    self.command(json.dumps(payload))
                     self.state_write()
                 elif action=='wrist_camera_settings':
                     output=run_scan([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'control/wrist_settings_worker.py')],

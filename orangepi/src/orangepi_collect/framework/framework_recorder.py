@@ -26,9 +26,10 @@ def impedance_request(line):
     if not isinstance(line,str) or not line.startswith('{') or len(line)>512:return None
     try:value=json.loads(line)
     except ValueError:return None
-    if (not isinstance(value,dict) or set(value)-{'command','request_id'}
+    if (not isinstance(value,dict) or set(value)-{'command','request_id','measurement_epoch'}
             or value.get('command') not in ('IMPEDANCE_START','IMPEDANCE_END','IMPEDANCE_REVIEW')
             or not isinstance(value.get('request_id'),str) or not 0<len(value['request_id'])<=64):return None
+    if value['command']!='IMPEDANCE_START' and (not isinstance(value.get('measurement_epoch'),str) or not 0<len(value['measurement_epoch'])<=64):return None
     return json.dumps(value)
 
 def publish_capture_completion(path, process, summary):
