@@ -1,0 +1,25 @@
+[Unit]
+Description=Read-only qualified USB phone tether observer
+After=systemd-udevd.service
+
+[Service]
+Type=simple
+User=orangepi
+Group=orangepi
+ExecCondition=/usr/bin/python3 /opt/headring-phone-transport/transport_config.py --require usb_tether
+ExecStart=/usr/bin/python3 /opt/headring-phone-transport/tether_link.py monitor
+RuntimeDirectory=headring-phone-tether
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
