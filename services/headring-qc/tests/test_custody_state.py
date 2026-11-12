@@ -14,6 +14,9 @@ from receiver_state import ReceiverStore,Conflict
 from raw_handoff import (signed,sha_value,validate_raw_receipt,pc_cleanup_eligible,
                          pc_retention_deadline,RAW_PURPOSE)
 import cloud_scope
+from host.qc.tests.governance_fixtures import sample_registry
+
+REGISTRY=sample_registry(('cp_0014','cp_0015','cp_0018','cp_0020','cp_0022','cp_0042'))
 
 KEY=b'synthetic-unit-test-key-not-a-credential'
 
@@ -74,12 +77,12 @@ class ProtocolTests(unittest.TestCase):
 class StoreTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
-        self.store=ReceiverStore(Path(self.temp.name)/'inner-ledger',clock=lambda:1000)
+        self.store=ReceiverStore(Path(self.temp.name)/'inner-ledger',clock=lambda:1000,registry=REGISTRY)
     def operation(self):return uuid.uuid4().hex
     def test_manual_default_stop_and_persistent_start(self):
         self.assertFalse(self.store.control()['receiving'])
         self.store.set_control(True,0,self.operation())
-        other=ReceiverStore(self.store.root,clock=lambda:1000)
+        other=ReceiverStore(self.store.root,clock=lambda:1000,registry=REGISTRY)
         self.assertTrue(other.control()['receiving'])
     def test_duplicate_start_after_stop_returns_current_stop_not_old_start(self):
         operation=self.operation();self.store.set_control(True,0,operation)
@@ -94,7 +97,7 @@ class StoreTests(unittest.TestCase):
     def test_auth_sessions_survive_restart_without_plaintext_token_in_db(self):
         token,csrf=self.store.login(self.store.admin_key,'test-client')
         self.assertTrue(self.store.authorized(token));self.assertEqual(csrf,self.store.csrf(token))
-        self.assertTrue(ReceiverStore(self.store.root,clock=lambda:1000).authorized(token))
+        self.assertTrue(ReceiverStore(self.store.root,clock=lambda:1000,registry=REGISTRY).authorized(token))
         with self.store.db() as c:self.assertNotEqual(c.execute('SELECT digest FROM auth_sessions').fetchone()[0],token)
     def test_login_throttling(self):
         for _ in range(8):
@@ -112,7 +115,7 @@ class StoreTests(unittest.TestCase):
         self.assertIsNotNone(self.store.claim('process'))
     def test_restart_recovers_running_jobs_not_deletion_proofs(self):
         identifier=self.job();self.store.set_control(True,0,self.operation())
-        self.store.claim('receive');other=ReceiverStore(self.store.root)
+        self.store.claim('receive');other=ReceiverStore(self.store.root,registry=REGISTRY)
         self.assertEqual(other.job(identifier)['receive_state'],'retry_wait')
         self.assertFalse(other.job(identifier).get('raw_receipt'))
     def test_bad_job_is_visible_and_cannot_be_claimed(self):

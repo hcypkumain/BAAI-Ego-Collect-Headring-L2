@@ -16,9 +16,18 @@ import sqlite3
 import sys
 import time
 import threading
+from datetime import datetime,timezone
+from host.common.device_registry import Registry,parse_registry,upload_allowed as grant_allowed
+from host.common.strict_json import strict_json_loads
 
 from cloud_client import ScopedUploader,digest_file,SERVER
 from cloud_scope import dataset_path,expected_standard_files
+
+def upload_allowed(target,*,registry,now_utc,device_id=None):
+    parts=dataset_path(target).split('/')
+    if len(parts)<3:raise ValueError('Dataset requires root/device/package')
+    if device_id is not None and parts[1]!=device_id:raise ValueError('Upload source/device mismatch')
+    return grant_allowed(registry,parts[1],destination=parts[0],now_utc=now_utc)
 
 def atomic(path,value):
     path=Path(path);path.parent.mkdir(parents=True,exist_ok=True);temp=path.with_name(path.name+'.tmp')
@@ -29,7 +38,7 @@ def atomic(path,value):
     finally:os.close(fd)
 
 def files_for_package(root,entry):
-    info=json.loads((root/'meta/info.json').read_text())
+    info=strict_json_loads((root/'meta/info.json').read_text())
     if root.is_symlink() or root.resolve()!=root:raise ValueError('Linked standard package')
     if info.get('codebase_version')!='v3.1' or info.get('pi_export',{}).get('profile')!=entry['base_profile']:
         raise ValueError('Standard package identity/profile mismatch')
@@ -48,21 +57,36 @@ def files_for_package(root,entry):
     return files
 
 class UploadQueue:
-    def __init__(self,app_root,state_root,proxy):
+    def __init__(self,app_root,state_root,proxy,*,registry:Registry):
+        self.registry=registry
         self.app=Path(app_root);self.state=Path(state_root);self.state.mkdir(parents=True,exist_ok=True)
-        self.proxy=proxy;self.config=json.loads((self.app/'config.json').read_text());self.data=Path(self.config['data_root'])
+        self.proxy=proxy;self.config=strict_json_loads((self.app/'config.json').read_text());self.data=Path(self.config['data_root'])
         self.stop=threading.Event()
-        self.std=self.data/'standardized';self.credentials=json.loads((self.app/'private/cloud-uploader.json').read_text())
+        self.std=self.data/'standardized';self.credentials=strict_json_loads((self.app/'private/cloud-uploader.json').read_text())
         self.db=sqlite3.connect(self.state/'cloud-upload.sqlite3');self.db.execute('PRAGMA journal_mode=WAL');self.db.execute('PRAGMA synchronous=FULL')
         self.db.execute('CREATE TABLE IF NOT EXISTS uploads(target TEXT PRIMARY KEY,source TEXT NOT NULL,profile TEXT NOT NULL,manifest TEXT NOT NULL,state TEXT NOT NULL,task_id INTEGER,receipt TEXT,error TEXT)');self.db.commit()
 
+    def _authorized(self,target,source):
+        source=Path(source);base=self.std
+        if source.is_symlink() or source.resolve()!=source or base.resolve()!=base:
+            raise ValueError('Linked upload source')
+        relative=source.relative_to(base)
+        if len(relative.parts)<2:raise ValueError('Source requires device/package')
+        parts=dataset_path(target).split('/')
+        if parts[1:]!=list(relative.parts):raise ValueError('Upload target/source mismatch')
+        return upload_allowed(target,registry=self.registry,device_id=relative.parts[0],now_utc=datetime.now(timezone.utc))
+
+    def _require_allowed(self,target,source):
+        if not self._authorized(target,source):raise PermissionError('No active upload grant')
+
     def seed(self):
-        catalog=json.loads((self.std/'_catalog.json').read_text())
+        catalog=strict_json_loads((self.std/'_catalog.json').read_text())
         if catalog['root']!=str(self.std) or catalog.get('errors'):raise ValueError('Unverified standard package catalog')
         for entry in catalog['entries']:
             relative=entry['relative_path'];p=Path(relative)
             if p.is_absolute() or '..' in p.parts:raise ValueError('Unsafe catalog path')
             root=self.std/p;target=dataset_path(('EGOL2' if entry['base_profile']=='L2' else 'EGOL3_hand')+'/'+relative)
+            if not self._authorized(target,root):continue
             old=self.db.execute('SELECT manifest FROM uploads WHERE target=?',(target,)).fetchone()
             if old:continue
             manifest=files_for_package(root,entry)
@@ -70,22 +94,28 @@ class UploadQueue:
                 (target,str(root),entry['base_profile'],json.dumps(manifest), 'queued',None,None,None));self.db.commit()
         prepared=self.app/'integrations/robot-uploader-1.0.0/adapter/prepared-first-upload.json'
         if prepared.exists():
-            row=json.loads(prepared.read_text())
+            row=strict_json_loads(prepared.read_text())
             if row.get('upload_task_prepared'):
-                saved=self.db.execute('SELECT manifest FROM uploads WHERE target=?',(row['target'],)).fetchone()
-                if saved and json.loads(saved[0])==row['manifest']:
+                saved=self.db.execute('SELECT manifest,source FROM uploads WHERE target=?',(row['target'],)).fetchone()
+                if saved and self._authorized(row['target'],saved[1]) and strict_json_loads(saved[0])==row['manifest']:
                     self.db.execute('UPDATE uploads SET task_id=? WHERE target=? AND task_id IS NULL',
                         (row['upload_task_id'],row['target']));self.db.commit()
         self.status()
 
     def status(self):
-        counts=dict(self.db.execute('SELECT state,count(*) FROM uploads GROUP BY state'))
+        counts={};denied=0
+        for target,source,state in self.db.execute('SELECT target,source,state FROM uploads'):
+            try:allowed=self._authorized(target,source)
+            except (ValueError,OSError):allowed=False
+            if not allowed:denied+=1;continue
+            counts[state]=counts.get(state,0)+1
         value=dict(now=time.time(),counts=counts,total=sum(counts.values()),cloud_roots=['EGOL2','EGOL3_hand'],
-            old_cloud_data_retained=True,pc_cleanup_performed=False,retention_seconds=259200)
+            denied=denied,old_cloud_data_retained=True,pc_cleanup_performed=False,retention_seconds=259200)
         atomic(self.state/'status.json',value);return value
 
     def _safe_batch(self,sdk,source,target,manifest,task_id):
-        binding=json.loads((self.app/'private/project-scope.json').read_text()).get(target.split('/')[0],{})
+        self._require_allowed(target,source)
+        binding=strict_json_loads((self.app/'private/project-scope.json').read_text()).get(target.split('/')[0],{})
         if sdk.project_id!=binding.get('project_id') or binding.get('project_name')!=target.split('/')[0]:
             raise ValueError('CLI selected an unapproved project')
         client=ScopedUploader(self.app/'private/cloud-uploader.json',self.state/'sdk-state',
@@ -94,8 +124,10 @@ class UploadQueue:
             task_id=client.begin(source,target,manifest)
             self.db.execute('UPDATE uploads SET task_id=? WHERE target=?',(task_id,target));self.db.commit()
         for row in manifest:
+            self._require_allowed(target,source)
             if self.stop.is_set():raise RuntimeError('Cloud worker stopping; partial transfer and PC data retained')
             client.upload_file(source,target,row)
+        self._require_allowed(target,source)
         receipt=client.confirm(task_id,target,manifest)
         from pc_retention import Retention
         receipt=Retention(self.app/'state/pc-retention').seal(receipt,source,manifest,self.config['storage_uuid'])
@@ -104,10 +136,11 @@ class UploadQueue:
         atomic(self.state/'receipts'/(hashlib.sha256(target.encode()).hexdigest()+'.json'),receipt)
 
     def run_one(self,row):
-        from robot_data_uploader import uploader as cli,config
         target,source,profile,manifest_raw,state,task_id,previous_receipt,error=row
-        dataset_path(target);Path(source).resolve().relative_to(self.std.resolve())
-        manifest=json.loads(manifest_raw);root_name=target.split('/')[0]
+        self._require_allowed(target,source)
+        if {'L2':'EGOL2','L3':'EGOL3_hand'}.get(profile)!=target.split('/')[0]:raise ValueError('Queued profile/root mismatch')
+        from robot_data_uploader import uploader as cli,config
+        manifest=strict_json_loads(manifest_raw);root_name=target.split('/')[0]
         config.SERVER_URL=SERVER;config.ENDPOINT='ks3-cn-beijing.ksyuncs.com'
         captured=io.StringIO();menus=0;completed=False;prompt_counts={}
         original_input=builtins.input;original_projects=cli.RobotDataUploader.get_project_list
@@ -164,20 +197,25 @@ class UploadQueue:
         rows=self.db.execute('SELECT * FROM uploads WHERE state<>? ORDER BY task_id IS NULL,target',('remote_confirmed',)).fetchall()
         errors=[];consecutive_failures=0
         for row in rows:
-            try:self.run_one(row);consecutive_failures=0
+            try:
+                self._require_allowed(row[0],row[1])
+                self.run_one(row);consecutive_failures=0
             except Exception as error:
                 errors.append(dict(target=row[0],error_kind=type(error).__name__))
                 consecutive_failures+=1
                 if one or consecutive_failures>=3:break
             print('CLOUD_PROGRESS '+json.dumps(self.status()),flush=True)
             if one:break
-        return dict(self.status(),errors=errors,all_confirmed=not errors and self.status()['counts'].get('remote_confirmed',0)==self.status()['total'])
+        status=self.status()
+        return dict(status,errors=errors,all_confirmed=not errors and not status['denied'] and status['counts'].get('remote_confirmed',0)==status['total'])
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--app',type=Path,required=True)
     parser.add_argument('--state',type=Path,required=True);parser.add_argument('--proxy');parser.add_argument('--one',action='store_true')
+    parser.add_argument('--registry',type=Path,required=True)
     parser.add_argument('--scoped-dns',action='store_true');parser.add_argument('--watch',action='store_true')
     args=parser.parse_args()
+    registry=parse_registry(strict_json_loads(args.registry.read_text()))
     if args.scoped_dns:
         from scoped_dns import install
         install()
@@ -187,7 +225,7 @@ def main():
     try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     except BlockingIOError:
         print('CLOUD_RESULT '+json.dumps({'already_running':True,'new_upload_started':False}),flush=True);return
-    queue=UploadQueue(args.app,args.state,args.proxy)
+    queue=UploadQueue(args.app,args.state,args.proxy,registry=registry)
     signal.signal(signal.SIGTERM,lambda *a:queue.stop.set())
     signal.signal(signal.SIGINT,lambda *a:queue.stop.set())
     while not queue.stop.is_set():

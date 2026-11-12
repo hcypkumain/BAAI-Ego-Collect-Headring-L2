@@ -1,19 +1,20 @@
 """Configured host storage with explicit, signature-preserving legacy relocation."""
-import json
 import os
 import pathlib
 import subprocess
+from host.common.strict_json import strict_json_loads
 
-ROOT = pathlib.Path(__file__).resolve().parent
+ROOT = pathlib.Path(__file__).parent
 
-def configuration():
-    return json.loads((ROOT / 'config.json').read_text())
+def configuration(root=ROOT):
+    return strict_json_loads((pathlib.Path(root) / 'config.json').read_text())
 
-def data_root():
-    return pathlib.Path(configuration()['data_root'])
+def data_root(config=None, *, config_root=ROOT):
+    config = configuration(config_root) if config is None else config
+    return pathlib.Path(config['data_root'])
 
-def storage_path(value, config=None):
-    config = configuration() if config is None else config
+def storage_path(value, config=None, *, config_root=ROOT):
+    config = configuration(config_root) if config is None else config
     path = pathlib.Path(value)
     # Only fixed, administrator-configured prefixes may be relocated. Receipt
     # payloads and their signatures remain byte-for-byte unchanged.
@@ -28,8 +29,8 @@ def storage_path(value, config=None):
         return pathlib.Path(new) / relative
     return path
 
-def require_storage(config=None, write_paths=None):
-    config = configuration() if config is None else config
+def require_storage(config=None, write_paths=None, *, config_root=ROOT):
+    config = configuration(config_root) if config is None else config
     root = pathlib.Path(config['data_root'])
     if not root.is_absolute() or root.resolve() != root:
         raise RuntimeError('STORAGE_UNAVAILABLE: data root must be an ordinary absolute path')

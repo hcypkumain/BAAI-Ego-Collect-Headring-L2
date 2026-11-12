@@ -1,7 +1,6 @@
 """Manual raw custody queue. PC processing does not require Pi raw directories."""
 import concurrent.futures
 import hashlib
-import json
 import os
 from pathlib import Path
 import re
@@ -14,19 +13,22 @@ import threading
 import time
 import uuid
 
-from receiver_state import ReceiverStore,TARGETS
+from receiver_state import ReceiverStore
+from host.common.device_registry import Registry,receive_ids
+from host.common.strict_json import strict_json_loads
 from raw_handoff import canonical,signed,sha_value,validate_manifest,verify_signature,same_file_bytes,RAW_PURPOSE,RESULT_PURPOSE
 
 class Paused(RuntimeError):pass
 
 class HandoffReceiver:
-    def __init__(self,legacy):
+    def __init__(self,legacy,*,registry:Registry):
+        self.registry=registry;members=receive_ids(registry)
         self.legacy=legacy;self.root=legacy.ROOT;self.config=legacy.CONFIG;self.data=legacy.DATA
-        self.store=ReceiverStore(self.root/'state/receiver')
+        self.store=ReceiverStore(self.root/'state/receiver',registry=registry)
         self.stop=legacy.STOP;self.wake=threading.Event();self.qc_lock=threading.Lock()
-        self.pi_locks={d:threading.RLock() for d in TARGETS}
+        self.pi_locks={d:threading.RLock() for d in members}
         self.devices={d['id']:d for d in self.config['devices']
-                      if d['id'] in TARGETS and d.get('enabled',True) is not False}
+                       if d['id'] in members and d.get('enabled',True) is not False}
 
     def _storage(self):self.legacy.require_storage(self.config)
 
@@ -62,7 +64,7 @@ class HandoffReceiver:
                     break
                 except subprocess.TimeoutExpired:first=False
             if process.returncode:raise RuntimeError(err.decode(errors='replace')[-1800:] or 'Pi agent failed')
-            result=json.loads(out)
+            result=strict_json_loads(out.decode('utf-8'))
             if result.get('device_id') not in (None,device):raise ValueError('Unexpected Pi agent identity')
             return result
         finally:self._end_process(process)
@@ -103,12 +105,12 @@ class HandoffReceiver:
         from capture_qc_receipt import (verify_portable as verify_portable_qc_receipt,
             verify_portable_input_signature,portable_input_signature)
         path=Path(path);sid=job['session'];details=job['details']
-        selection=json.loads((path/'device_selection.json').read_text(encoding='utf-8'))
-        raw_meta=json.loads((path/'meta.json').read_text(encoding='utf-8'))
+        selection=strict_json_loads((path/'device_selection.json').read_text(encoding='utf-8'))
+        raw_meta=strict_json_loads((path/'meta.json').read_text(encoding='utf-8'))
         import yaml
         meta=yaml.safe_load((path/'meta.yaml').read_text(encoding='utf-8')) if (path/'meta.yaml').is_file() else {}
         meta=meta if isinstance(meta,dict) else {}
-        summary=json.loads((path/'capture_summary.json').read_text(encoding='utf-8'))
+        summary=strict_json_loads((path/'capture_summary.json').read_text(encoding='utf-8'))
         contract,errors,legacy=resolve_selection(selection.get('device_config'),selection)
         if errors or legacy or contract.get('version')!='required-devices-v1':
             raise ValueError('QC_HOST_UPGRADE_REQUIRED: frozen required-device contract is missing/invalid')
@@ -122,7 +124,7 @@ class HandoffReceiver:
             raise ValueError('Frozen native capture identity differs from custody manifest')
         pending_path=path/'qc_pending.json';pending=None
         if pending_path.is_file():
-            pending=json.loads(pending_path.read_text(encoding='utf-8'))
+            pending=strict_json_loads(pending_path.read_text(encoding='utf-8'))
         if isinstance(pending,dict) and pending.get('state')=='pending':
             if (pending.get('session_id')!=sid or pending.get('native_sha256')!=manifest.get('native_sha256')
                     or pending.get('request_id')!=details.get('request_id')
@@ -135,7 +137,7 @@ class HandoffReceiver:
             receipt_errors=verify_portable_qc_receipt(path)
             if receipt_errors:
                 raise ValueError('QC_HOST_UPGRADE_REQUIRED: source full-QC receipt is missing/invalid')
-            receipt=json.loads((path/'capture_qc_receipt.json').read_text(encoding='utf-8'))
+            receipt=strict_json_loads((path/'capture_qc_receipt.json').read_text(encoding='utf-8'))
             if (receipt.get('session_id')!=sid or receipt.get('contract_version')!=contract['version']
                     or receipt.get('required_devices')!=contract['required_devices']):
                 raise ValueError('Source full-QC receipt identity mismatch')
@@ -159,7 +161,7 @@ class HandoffReceiver:
         from required_device_contract import resolve_selection
         from capture_qc_receipt import verify_portable_input_signature
         work=Path(work);sid=job['session']
-        selection=json.loads((work/'device_selection.json').read_text(encoding='utf-8'))
+        selection=strict_json_loads((work/'device_selection.json').read_text(encoding='utf-8'))
         contract,errors,legacy=resolve_selection(selection.get('device_config'),selection)
         if errors or legacy:raise ValueError('QC_HOST_UPGRADE_REQUIRED: frozen device contract unavailable')
         if (receipt.get('qc_protocol_version')!=2 or receipt.get('session_id')!=sid
@@ -172,7 +174,7 @@ class HandoffReceiver:
             raise ValueError('Copied PC inputs differ from the signed Pi capture')
         pending_path=work/'qc_pending.json';existing=None
         if pending_path.is_file():
-            existing=json.loads(pending_path.read_text(encoding='utf-8'))
+            existing=strict_json_loads(pending_path.read_text(encoding='utf-8'))
         if isinstance(existing,dict) and existing.get('state')=='pending':
             if (existing.get('request_id')!=receipt.get('qc_request_id')
                     or existing.get('input_signature')!=receipt.get('input_signature')
@@ -320,7 +322,7 @@ class HandoffReceiver:
         output=self.data/'results'/job['device'];output.mkdir(parents=True,exist_ok=True)
         resultdir=output/job['session'];result_path=resultdir/'result.json'
         if result_path.is_file():
-            result=json.loads(result_path.read_text());self._validate_result(job,resultdir,result);return result
+            result=strict_json_loads(result_path.read_text());self._validate_result(job,resultdir,result);return result
         log=self.data/'logs'/('handoff-'+job['device']+'-'+job['session']+'-qc.log')
         command=[str(self.root/'.venv/bin/python'),str(self.root/'collector/orangepi/src/orangepi_collect/framework/qc_host.py'),
                  'run',str(work),'--results',str(output),'--workers',str(self.config.get('qc_workers',6))]
@@ -333,7 +335,7 @@ class HandoffReceiver:
                     if self.stop.wait(.3):raise Paused('QC service shutdown; PC originals retained')
                 if process.returncode:raise RuntimeError(log.read_text(errors='replace')[-1800:])
             finally:self._end_process(process)
-        result=json.loads(result_path.read_text());self._validate_result(job,resultdir,result);return result
+        result=strict_json_loads(result_path.read_text());self._validate_result(job,resultdir,result);return result
 
     def _validate_result(self,job,resultdir,result):
         common=self.root/'collector/orangepi/src/orangepi_collect/common'
@@ -370,7 +372,7 @@ class HandoffReceiver:
         allowed={'qc_report.json','qc_raw_report.json','qc_policy.json','qc_timing.json','qc.html'}
         selection_path=Path(job['raw_path'])/'device_selection.json'
         try:
-            selection=json.loads(selection_path.read_text(encoding='utf-8'))
+            selection=strict_json_loads(selection_path.read_text(encoding='utf-8'))
             contract,errors,legacy=resolve_selection(selection.get('device_config'),selection)
             if errors or legacy:raise ValueError('Invalid frozen device contract')
             streams=set(contract['required_devices'])|{'marker'}
@@ -387,7 +389,7 @@ class HandoffReceiver:
                 allowed_stream=True
             if relative not in allowed and not allowed_stream:raise ValueError('QC result contains a non-derived/identity artifact: '+relative)
             if self.legacy.hash_file(artifact)!=sha:raise ValueError('QC artifact checksum changed')
-        report=json.loads((resultdir/'artifacts/qc_report.json').read_text(encoding='utf-8'))
+        report=strict_json_loads((resultdir/'artifacts/qc_report.json').read_text(encoding='utf-8'))
         report_streams=report.get('streams') if isinstance(report,dict) else None
         if (not isinstance(report,dict) or report.get('level')!=result['level']
                 or report.get('scope','full')!='full'
@@ -403,14 +405,14 @@ class HandoffReceiver:
         self.legacy.verify_tree(raw,job['raw_receipt']['manifest'],durable=True)
         receipt_path=self.data/'receipts'/device/(sid+'.json')
         if receipt_path.is_file():
-            committed=json.loads(receipt_path.read_text())
+            committed=strict_json_loads(receipt_path.read_text())
             verify_signature(committed,(self.root/'secrets'/device).read_bytes(),'host_qc_archive_v1')
             if committed.get('raw_handoff_receipt_sha256')!=job['raw_receipt_sha256']:
                 raise ValueError('Existing archive belongs to another custody transaction')
             expected=self.data/('archive' if committed['passed'] else 'quarantine')/job['details']['day']/device/sid
             if committed.get('archive_path')!=str(expected):raise ValueError('Committed archive escaped job destination')
             self.legacy.verify_tree(Path(committed['archive_path']),committed['manifest'],durable=True)
-            resultdir=self.data/'results'/device/sid;result=json.loads((resultdir/'result.json').read_text())
+            resultdir=self.data/'results'/device/sid;result=strict_json_loads((resultdir/'result.json').read_text())
             self._validate_result(job,resultdir,result)
             if self.legacy.hash_file(resultdir/'result.json')!=committed['result_sha256']:raise ValueError('Committed result changed')
             self.store.update(identifier,process_state='complete',archive_path=committed['archive_path'],
@@ -424,7 +426,7 @@ class HandoffReceiver:
         if str(common) not in sys.path:sys.path.insert(0,str(common))
         from required_device_contract import resolve_selection,qualification_errors
         from capture_qc_receipt import verify_portable_input_signature,portable_input_signature,write as write_qc_receipt
-        source_selection=json.loads((raw/'device_selection.json').read_text(encoding='utf-8'))
+        source_selection=strict_json_loads((raw/'device_selection.json').read_text(encoding='utf-8'))
         source_contract,source_errors,source_legacy=resolve_selection(source_selection.get('device_config'),source_selection)
         if source_errors or source_legacy:raise ValueError('QC_HOST_UPGRADE_REQUIRED: frozen device contract unavailable')
         source_signature=job['raw_receipt'].get('input_signature')
@@ -462,13 +464,13 @@ class HandoffReceiver:
                 archive.mkdir(exist_ok=True);source.rename(target)
         self.store.update(identifier,result=result,result_sha256=self.legacy.hash_file(resultdir/'result.json'),
                           level=result['level'],raw_level=result.get('raw_level'))
-        summary=json.loads((work/'native_capture_summary.json').read_text());outcome='qc_error' if result['level']=='ERROR' else 'success'
+        summary=strict_json_loads((work/'native_capture_summary.json').read_text());outcome='qc_error' if result['level']=='ERROR' else 'success'
         if isinstance(summary.get('eeg'),dict) and isinstance(result.get('derived_counts'),dict):
             kept=result['derived_counts'].get('eeg_samples')
             if type(kept) is int and kept>0:summary['eeg']['samples']=kept
         summary.update(status=outcome,qc_state='completed',qc_level=result['level'],qc_raw_level=result.get('raw_level'),
                        qc_executor='linux_host',qc_elapsed_seconds=result['elapsed_seconds'])
-        report=json.loads((work/'qc_report.json').read_text(encoding='utf-8'))
+        report=strict_json_loads((work/'qc_report.json').read_text(encoding='utf-8'))
         if outcome=='success':
             qualification_errors_now=qualification_errors(work,summary,source_contract,report,legacy=False)
             if qualification_errors_now:
@@ -570,10 +572,10 @@ class HandoffReceiver:
                     if job.get('process_state')!='complete':continue
                     path=standard_state/'jobs'/job['device']/(job['session']+'.json')
                     if not path.is_file():continue
-                    status=json.loads(path.read_text());self.store.update(job['id'],standard_state=status.get('state'),standard_error=status.get('reason'))
+                    status=strict_json_loads(path.read_text());self.store.update(job['id'],standard_state=status.get('state'),standard_error=status.get('reason'))
                     if status.get('state')!='complete' or not cloud.is_file():continue
                     output=Path(status['output']);relative=output.relative_to(self.data/'standardized')
-                    info=json.loads((output/'meta/info.json').read_text());profile=info.get('pi_export',{}).get('profile')
+                    info=strict_json_loads((output/'meta/info.json').read_text());profile=info.get('pi_export',{}).get('profile')
                     if profile not in ('L2','L3'):continue
                     if info.get('pi_export',{}).get('source_digest')!=job.get('archive_receipt',{}).get('manifest',{}).get('digest'):
                         raise ValueError('Standard package does not bind this raw/QC archive')
@@ -582,7 +584,7 @@ class HandoffReceiver:
                     row=connection.execute('SELECT state,receipt FROM uploads WHERE target=?',(target,)).fetchone();connection.close()
                     if row is None:continue
                     if row[0]!='remote_confirmed':self.store.update(job['id'],cloud_state=row[0]);continue
-                    receipt=json.loads(row[1]);retention.verify(receipt)
+                    receipt=strict_json_loads(row[1]);retention.verify(receipt)
                     if receipt.get('source_path')!=str(output) or receipt.get('dataset')!=target:raise ValueError('Cloud lineage differs from standard output')
                     self.store.update(job['id'],cloud_state='remote_confirmed',cloud_confirmed_at=receipt['cloud_confirmed_at'],
                         pc_delete_after=receipt['pc_delete_after'],retention_hold=False,cloud_dataset=target)

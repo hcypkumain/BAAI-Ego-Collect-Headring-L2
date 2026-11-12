@@ -11,12 +11,14 @@ import sqlite3
 import threading
 import time
 
-TARGETS=frozenset('cp_'+str(n).zfill(4) for n in (13,14,15,17,18,19,20,21,22,23))
+from host.common.device_registry import Registry,receive_ids
+from host.common.strict_json import strict_json_loads
 
 class Conflict(ValueError):pass
 
 class ReceiverStore:
-    def __init__(self,root,clock=time.time):
+    def __init__(self,root,clock=time.time,*,registry:Registry):
+        self.registry=registry;self.receive_ids=receive_ids(registry)
         self.root=Path(root);self.clock=clock;self.lock=threading.RLock()
         if self.root.is_symlink():raise ValueError('Receiver ledger root must not be linked')
         self.root.mkdir(parents=True,exist_ok=True);self.path=self.root/'receiver.sqlite3'
@@ -72,7 +74,7 @@ class ReceiverStore:
         with self.db() as c:
             old=c.execute('SELECT response FROM operations WHERE id=?',(operation_id,)).fetchone()
             if old:
-                response=json.loads(old[0])
+                response=strict_json_loads(old[0])
                 if response['requested_receiving']!=receiving:raise Conflict('Operation id reused for another intent')
                 current=c.execute('SELECT * FROM control WHERE id=1').fetchone()
                 return dict(receiving=bool(current['receiving']),requested_receiving=receiving,
@@ -113,12 +115,12 @@ class ReceiverStore:
 
     def enqueue(self,device,details):
         sid=details.get('session_id','')
-        if device not in TARGETS or not re.fullmatch(r'L[23]-[A-Za-z0-9_.-]{1,123}',sid):
+        if device not in self.receive_ids or not re.fullmatch(r'L[23]-[A-Za-z0-9_.-]{1,123}',sid):
             raise ValueError('Device/session outside explicit receive scope')
         with self.db() as c:
             old=c.execute('SELECT id,details FROM jobs WHERE device=? AND session=?',(device,sid)).fetchone()
             if old:
-                if json.loads(old['details']).get('native_sha256')!=details.get('native_sha256'):
+                if strict_json_loads(old['details']).get('native_sha256')!=details.get('native_sha256'):
                     raise Conflict('Session name was reused for different native data')
                 return old['id']
             record=dict(receive_state='discovered',release_state='retained',process_state='waiting_raw',
@@ -130,8 +132,8 @@ class ReceiverStore:
             return cursor.lastrowid
 
     def _job(self,row):
-        return dict(json.loads(row['record']),id=row['id'],device=row['device'],session=row['session'],
-                    details=json.loads(row['details']))
+        return dict(strict_json_loads(row['record']),id=row['id'],device=row['device'],session=row['session'],
+                    details=strict_json_loads(row['details']))
 
     def jobs(self):
         values=[]
@@ -156,7 +158,7 @@ class ReceiverStore:
         with self.db() as c:
             row=c.execute('SELECT record FROM jobs WHERE id=?',(identifier,)).fetchone()
             if row is None:raise KeyError(identifier)
-            record=json.loads(row[0]);record.update(values,updated=self.clock())
+            record=strict_json_loads(row[0]);record.update(values,updated=self.clock())
             c.execute('UPDATE jobs SET record=? WHERE id=?',(self._encode(record),identifier))
 
     def authorize_release(self,identifier,revision):
@@ -166,20 +168,20 @@ class ReceiverStore:
             if not state['receiving'] or state['revision']!=revision:
                 raise Conflict('STOP won before raw handoff authorization')
             row=c.execute('SELECT record FROM jobs WHERE id=?',(identifier,)).fetchone()
-            record=json.loads(row[0])
+            record=strict_json_loads(row[0])
             if not record.get('raw_receipt') or not record.get('raw_receipt_sha256'):
                 raise ValueError('No committed raw custody receipt')
             record.update(release_decision_at=self.clock(),release_control_revision=revision)
             c.execute('UPDATE jobs SET record=? WHERE id=?',(self._encode(record),identifier))
 
     def device(self,identifier,**values):
-        if identifier not in TARGETS:raise ValueError('Device outside receive scope')
+        if identifier not in self.receive_ids:raise ValueError('Device outside receive scope')
         values.update(id=identifier,updated=self.clock())
         with self.db() as c:c.execute('INSERT OR REPLACE INTO devices VALUES(?,?)',
             (identifier,self._encode(values)))
 
     def devices(self):
-        with self.db() as c:return [json.loads(r[0]) for r in c.execute('SELECT record FROM devices ORDER BY id')]
+        with self.db() as c:return [strict_json_loads(r[0]) for r in c.execute('SELECT record FROM devices ORDER BY id')]
 
     def claim(self,stage):
         fields={'receive':'receive_state','release':'release_state','process':'process_state','reply':'reply_state'}
@@ -189,7 +191,19 @@ class ReceiverStore:
             receiving=bool(c.execute('SELECT receiving FROM control WHERE id=1').fetchone()[0])
             if stage in ('receive','reply') and not receiving:return None
             rows=c.execute('SELECT * FROM jobs ORDER BY id').fetchall()
+            # Same-device I/O is serialized in this durable claim transaction,
+            # including callers in another process. A paused device never blocks
+            # independent devices. Malformed persisted rows remain unclaimable.
+            busy_devices=set()
+            if stage in ('receive','release','reply'):
+                for row in rows:
+                    try:record=strict_json_loads(row['record'])
+                    except (ValueError,TypeError):continue
+                    if isinstance(record,dict) and any(record.get(f)=='running' for f in
+                            ('receive_state','release_state','reply_state')):
+                        busy_devices.add(row['device'])
             for row in rows:
+                if row['device'] not in self.receive_ids or row['device'] in busy_devices:continue
                 try:job=self._job(row);state=job[field]
                 except (ValueError,TypeError,KeyError):continue
                 eligible=(stage=='receive' and state in ('discovered','retry_wait','paused')
@@ -198,7 +212,7 @@ class ReceiverStore:
                     or stage=='reply' and state in ('queued','retry_wait') and job['release_state']=='deleted' and bool(job.get('result')))
                 if not eligible or job.get(stage+'_available',0)>now:continue
                 if stage=='release' and not receiving and not job.get('release_decision_at'):continue
-                record=json.loads(row['record']);record[field]='running';record[stage+'_attempts']=record.get(stage+'_attempts',0)+1
+                record=strict_json_loads(row['record']);record[field]='running';record[stage+'_attempts']=record.get(stage+'_attempts',0)+1
                 record['updated']=now;c.execute('UPDATE jobs SET record=? WHERE id=?',(self._encode(record),row['id']))
                 return dict(record,id=row['id'],device=row['device'],session=row['session'],details=job['details'])
             return None
@@ -206,7 +220,7 @@ class ReceiverStore:
     def recover(self):
         with self.db() as c:
             for row in c.execute('SELECT id,record FROM jobs').fetchall():
-                try:record=json.loads(row['record'])
+                try:record=strict_json_loads(row['record'])
                 except (ValueError,TypeError):continue
                 if not isinstance(record,dict):continue
                 changed=False
