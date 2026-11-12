@@ -57,6 +57,15 @@ is used. Synthetic SSH admission/process execution is **not** cryptographic SSH
 trust or live verification. Host candidate runtime capability, production
 approval and production pipeline migration remain separate acceptance claims.
 
+B's production approval enum intentionally accepts approved/unknown/rejected,
+not the host package's `candidate`. Therefore validating the actual candidate
+returns the coarse blocking code `malformed_or_missing_resource`; do not describe
+that as missing packaged bytes or approval. An explicitly test-only **unknown**
+approval view runs through all remaining real validator gates: valid nine-component
+shape is rejected only for missing approvals, while phone/helper omission, router
+tamper and source resource tamper add their exact blocking codes. The real
+candidate files are never rewritten or self-approved to obtain an empty tuple.
+
 ## Historical premerge and implementation detail
 
 ## M1 review repair and A integration checkpoint

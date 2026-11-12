@@ -530,6 +530,23 @@ class RealG2Tests(unittest.TestCase):
         reasons=validate_release(release=json.loads(files['release.json']),router=json.loads(files['router.json']),
                                  resources=builder._candidate_resources(files))
         self.assertTrue(reasons)  # Candidate integrity never grants production approval.
+        # B deliberately excludes candidate from its production approval enum. Use
+        # a TEST-ONLY nonapproved view to exercise all subsequent strict BOM gates;
+        # never rewrite or approve the actual candidate artifact.
+        view=json.loads(files['release.json']);view['approval']['status']='unknown'
+        resources=builder._candidate_resources(files);router=json.loads(files['router.json'])
+        checked=validate_release(release=view,router=router,resources=resources)
+        self.assertEqual(set(checked),{'release_approval','component_approval_scope'})
+        for component in ('phone_link','helper'):
+            missing=copy.deepcopy(view)
+            missing['component_BOM']['components']=[r for r in missing['component_BOM']['components']
+                                                    if r['component_id']!=component]
+            blocked=validate_release(release=missing,router=router,resources=resources)
+            self.assertIn('bom_schema',blocked);self.assertIn('component_coverage',blocked)
+        self.assertIn('router_resource_mismatch',validate_release(release=view,
+            router={view['release_id']:'f'*64},resources=resources))
+        damaged=dict(resources);damaged['host/common/device_registry.py']=b'tampered synthetic bytes'
+        self.assertIn('source_resource_mismatch',validate_release(release=view,router=router,resources=damaged))
         mutations={'base_commit':'b'*40,'scope':['collector'],'reason':'tampered','expiry':'2099-01-01T00:00:00Z',
                    'overlay_ids':['unregistered'],'release_id':'wrong','extra':True}
         for key,value in mutations.items():
@@ -537,6 +554,12 @@ class RealG2Tests(unittest.TestCase):
             changed['release.json']=canonical_json(release).encode()
             if key=='release_id':changed['router.json']=canonical_json({value:release['resource_digest']}).encode()
             with self.subTest(key=key),self.assertRaises(ValueError):
+                builder.verify_candidate(changed,resource_digest=resource_digest)
+        for version in (True,1.0):
+            changed=dict(files);release=json.loads(files['release.json'])
+            release['component_BOM']['schema_version']=version
+            changed['release.json']=canonical_json(release).encode()
+            with self.subTest(schema_version=version),self.assertRaises(ValueError):
                 builder.verify_candidate(changed,resource_digest=resource_digest)
 
     def test_real_process_wrong_tuples_and_reader_identity_are_unknown(self):

@@ -114,9 +114,10 @@ def verify_candidate(files, *, resource_digest):
                 ('release_id', 'overlay_ids', 'scope', 'reason', 'expiry', 'approval')}
     expected.update(base_commit=envelope['build_commit'], component_BOM=envelope['component_BOM'],
                     resource_digest=digest)
-    require(type(release) is dict and set(release) == set(expected) and release == expected and
+    require(type(release) is dict and set(release) == set(expected) and
+            canonical_json(release) == canonical_json(expected) and
             router == {expected['release_id']: digest} and
-            envelope['approval'] == manifest['approval'] and
+            canonical_json(envelope['approval']) == canonical_json(manifest['approval']) and
             manifest['approval']['status'] == 'candidate', 'Candidate binding mismatch')
     return True
 
