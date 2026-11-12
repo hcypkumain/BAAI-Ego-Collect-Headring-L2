@@ -342,6 +342,39 @@ class MainAIntegrationTests(unittest.TestCase):
         jobs = receiver.store.jobs()
         self.assertEqual([(row['device'], row['session']) for row in jobs], [('cp_0042', session)])
         self.assertEqual(calls, [('cp_0042', 'scan')])
+        # Complete the empty-legacy -> Registry -> actual RPC -> Store -> both
+        # transfer directions chain at the process boundary, never launching SSH.
+        receiver.rpc=receiver_class.rpc.__get__(receiver,receiver_class)
+        spawned=[];actions=[]
+        def boundary(argv,**kwargs):
+            spawned.append(argv)
+            process=Mock();process.returncode=0;process.poll.return_value=0
+            def communicate(input=None,timeout=None):
+                request=json.loads(input);actions.append(request['action'])
+                return canonical_json({'device_id':'cp_0042','state':'idle','items':[
+                    {'session_id':session,'day':'2026-11-13','native_sha256':'a'*64,
+                     'path':'/synthetic/capture/'+session,'bytes':1}]}).encode(),b''
+            process.communicate.side_effect=communicate
+            return process
+        with patch.object(subprocess,'Popen',side_effect=boundary):
+            receiver._scan_one(receiver.devices['cp_0042'])
+            job=receiver.store.job(jobs[0]['id'])
+            target=self.root/'transfer'/'cp_0042'/session
+            receiver._transfer(job,target)
+            receiver._transfer(job,target,push=True)
+        self.assertEqual(actions,['scan','status','status'])
+        device=select_devices(self.registry,['cp_0042'],purpose='receive')[0]
+        self.assertEqual(len(spawned),5)
+        for argv in spawned:
+            if argv[0]=='rsync':
+                import shlex
+                transport=shlex.split(argv[argv.index('-e')+1])
+                self.assertTrue(any(a.startswith(device.ssh_alias+':/') for a in argv))
+            else:
+                transport=argv[:-2];self.assertEqual(argv[-2],device.ssh_alias)
+            for option in ('-oHostName='+device.address,'-oHostKeyAlias='+device.host_key_alias,
+                           '-oUser='+device.ssh_user,'-oStrictHostKeyChecking=yes'):
+                self.assertIn(option,transport)
         self.assertEqual(select_devices(self.registry, ['cp_0042'], purpose='monitor')[0].device_id, 'cp_0042')
         self.assertEqual(self.service.CONFIG['registry_digest'], self.registry.digest)
         self.assertFalse(upload_allowed(self.registry, 'cp_0042', destination='EGOL2',

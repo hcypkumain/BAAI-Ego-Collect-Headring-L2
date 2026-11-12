@@ -1,8 +1,10 @@
 {
   "schema_version": 1,
   "baseline_commit": "10bd2e2c2eb150b4cf548c4f8a36e9e556b30e0a",
-  "stage": "A_integrated_registry_adapters_not_installed",
-  "selected_artifact_ref": "9788fac523ff16e3fd7295a38a8ede4c1a038f0d",
+  "stage": "A_integrated_registry_adapters_transfer_fixed_not_installed",
+  "selected_artifact_ref": "160ba6949268ba8ddcc15f2f3045930cce0ea358",
+  "previous_selected_artifact_ref": "9788fac523ff16e3fd7295a38a8ede4c1a038f0d",
+  "transfer_fix_source_ref": "a4a8ee181d73bfb78753512f14fb6605cb4ea502",
   "selection_update": "Original reviewed source hashes and C0 decisions retained. Current artifact hashes select immutable A adaptations, not Q-live synchronization or installed/runtime evidence. Catalog/converter/SDK remain external/unverified.",
   "source_path_policy": "Logical labels only. Private absolute mapping is local-only. No recursive source scan.",
   "artifacts": [
@@ -21,7 +23,8 @@
       "source_sha256": "f5ba6e9774125082ebdfd7904c57e528e84d87c020f8af98a656c8a1b1d8bd3d",
       "artifact": "services/headring-qc/handoff_receiver.py",
       "C0_artifact_sha256": "df0d5b19e1a79bb3c9ff9e1e41f2793dd193bd456d34f7d0604d3206b4e386f3",
-      "artifact_sha256": "c3b92e02cc8a30010fb70b8f190217236458dbcd629a16a0224155b694a1e1dd",
+      "artifact_sha256": "14426c9fbb262ddb7fc769217485d7950401c045d0f5b00c93ee712807a14549",
+      "previous_artifact_sha256": "c3b92e02cc8a30010fb70b8f190217236458dbcd629a16a0224155b694a1e1dd",
       "C0_selection": "Q_older_guard_differences_rejected_certified_retained_not_synced",
       "selection": "certified_QC_guards_retained_registry_injected_not_Q_live_synced",
       "C0_reason": "Q would remove _handoff_binding, _ensure_work_pending, source-QC input signatures, required-device v2 custody binding, qualification and artifact guards. Retain certified bytes and all signature/deletion/retention protections."

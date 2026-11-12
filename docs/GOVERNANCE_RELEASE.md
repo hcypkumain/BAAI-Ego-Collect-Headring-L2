@@ -3,9 +3,10 @@
 ## Status and scope
 
 This is a **non-production-approved host-only candidate**. A/B/C approved modules
-are integrated; main's metrics/imports caller corrections are included. The
-separately owned Handoff rsync correction and independent final G2 review remain
-pending. No live G3, deployment, publication or production administration is
+are integrated; main's metrics/imports caller corrections and A's reviewed Handoff
+rsync correction are included. All three recorded semantic caller gaps are closed
+in local tests; independent combined final G2 review remains pending.
+No live G3, deployment, publication or production administration is
 authorized by this guide. Green local tests do not authorize those actions.
 
 The host monitor package runs independently of the original QC service. It does
@@ -34,8 +35,9 @@ No pip install, system service or production database is needed for the monitor.
 component file sets. The derived release envelope avoids self-referential commit
 hash rewriting. Artifact SHA256 values and final test counts belong to the receipt
 for that exact commit, not fixed numbers in this guide. Old receipts must not be
-used to certify changed sources. After the reviewed Handoff pick, final G2 must
-rerun all suites, build twice and test a new clean export.
+used to certify changed sources. Final G2 reruns all suites, builds twice and tests
+a new clean export from one immutable final commit; its receipts certify that
+commit only.
 
 ## Monitor CLI and permission gate
 
@@ -126,6 +128,8 @@ No local result constitutes G3 or production approval.
 
 Historical checkpoints and exact commit-specific evidence are external handoff
 reports under `/tmp/opencode/8788-sol-governance-*.md/json`; they are not alternative
-runtime instructions. The current caller receipt is
-`/tmp/opencode/8788-sol-governance-callers-result.md/json`. Final release receipts
-must be regenerated only after the separately reviewed A transfer commit arrives.
+runtime instructions. The final local combined receipt is
+`/tmp/opencode/8788-sol-governance-G2-final.md/json`; the earlier caller receipt
+certifies its own intermediate commit, not the final package. Independent main
+signoff is not implied by either local receipt. START and impedance were neither
+fixed nor hardware-validated in this candidate; raw/disk scans are not performed.

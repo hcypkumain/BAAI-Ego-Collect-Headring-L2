@@ -1,4 +1,13 @@
-# Offline phase3 verification
+# Historical offline phase3 verification
+
+This document preserves the earlier phase3 baseline comparison below, not current
+governance RC acceptance. For the combined registry/transfer/callers candidate,
+exact immutable commit, fresh full-suite counts and deduplicated IDs, resource
+measurements, lint/privacy checks and rebuilt package SHA256 receipts are recorded
+in `/tmp/opencode/8788-sol-governance-G2-final.md/json`. The current operating guide
+is `docs/GOVERNANCE_RELEASE.md`. Historical 11/107 counts and mode-recovery errors
+below must not be substituted for the final governance suites or hidden as passing.
+No hardware START/impedance acceptance or production migration is claimed.
 
 Environment: Python 3.14.4, jsonschema 4.19.2, referencing 0.36.2, Node
 v26.13.0, all pre-existing. No dependencies installed. No hardware acceptance.

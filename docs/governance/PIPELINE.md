@@ -18,9 +18,10 @@ or migrated; all verification below uses temporary synthetic data.
   `running` jobs after restart).
 - `HandoffReceiver(legacy, *, registry)` passes the identical object to Store,
   builds locks from `receive_ids`, and filters legacy connection definitions by
-  that same set. It does not enroll legacy devices. Connection definitions must
-  already exist in the explicit legacy transport config; registry-only Store
-  enrollment does not manufacture legacy SSH configuration. Certified source-QC
+   that same set. It does not enroll legacy devices. Main's service adapter derives
+   connection definitions solely from the explicit Registry, including when the
+   legacy devices list is empty. Explicit software identity and known-host inputs
+   remain required; enrollment does not manufacture trust. Certified source-QC
   binding, portable signatures, required-device v2, archive verification and
   deletion guards are retained, not replaced by the weaker live source.
 - `make_context(*, registry, config, qc_root, data_root, state_root, log_root)`
@@ -72,17 +73,16 @@ the envelope's `registry` member before passing it to other registry consumers.
 Legacy SSH-derived identity fields must be explicitly prepared by main; the
 migrator will not infer trust from a hostname or inspect SSH configuration.
 
-## Main-owned integration still required
+## Main integration and external runtime boundary
 
-1. `services/headring-qc/service.py:502`: load one explicit registry with strict
-   JSON at the service entrypoint, then pass `registry=...` to HandoffReceiver.
-   Reconcile legacy transport definitions/`DEVICES` with that same inventory;
-   transport metadata is not enrollment authority. No implicit registry fallback.
-2. `services/headring-qc/tests/test_receiver_http.py:11`: pass a synthetic Registry
-   to Store. `services/headring-qc/tests/test_handoff_receiver.py:33`: pass a
-   synthetic Registry containing its test device. A does not own these files.
-   The A governance suite runs all four original handoff tests unchanged via a
-   constructor-only registry injection and generated temporary signing key.
+1. Main's service entrypoint loads one explicit registry with strict JSON and
+   passes the identical object to HandoffReceiver. DEVICES/transport metadata
+   derive from that Registry, not legacy inventory or observation caches.
+   RPC and rsync share the strict builder; there is no implicit registry fallback.
+2. Main's original HTTP and Handoff fixtures now supply explicit synthetic Registry
+   inputs. Original signature/QC/retention/deletion and HTTP authorization
+   assertions remain; constructor-only wrapper cases intentionally repeat the
+   original four Handoff methods and are reported separately from unique methods.
 3. Explicit worker runtime invocation now needs `--registry --config --qc-root
    --data-root --state-root --log-root`. External worker callers must pass context
    to verify/make/status/pass; the archived Python converter/venv/video tools are
@@ -90,9 +90,10 @@ migrator will not infer trust from a hostname or inspect SSH configuration.
 4. Explicit uploader invocation now requires `--registry`; external Queue callers
    must pass the identical registry. Private config reading remains in explicit
    runtime Queue construction, never in read-only governance orchestration.
-5. Packaging must include `host.common` and `services/headring-qc/host_storage.py`
-   under repository-root imports. Worker lazily imports that storage module, not
-   a local/runtime config module. No additional source or SDK was copied.
+5. A separately authorized pipeline distribution would need `host.common` and
+   `services/headring-qc/host_storage.py` under repository-root imports. The current
+   immutable host-monitor package does not bundle the worker, uploader, SDK or QC
+   service. Worker lazily imports explicit storage, not live runtime configuration.
 
 ## Offline regression commands
 
@@ -155,4 +156,4 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m unittest discover -s services/
 
 This closes the local argv bypass only. It is not evidence of actual data transfer,
 production migration or device access; independent review and main integration
-are still required.
+must still pass combined final G2. No real transfer or live approval is implied.
