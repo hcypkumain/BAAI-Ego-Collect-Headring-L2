@@ -157,9 +157,13 @@ class CacheTests(Fixtures):
             file.write_text(text)
             self.assertEqual(self.read(file, rows)['state'], 'stale')
         file.write_text(json.dumps(value))
-        file.chmod(0o666)
-        self.assertEqual(self.read(file, rows)['state'], 'stale')
+        for mode in (0o666, 0o644, 0o640):
+            file.chmod(mode)
+            self.assertEqual(self.read(file, rows)['state'], 'stale')
         file.chmod(0o600)
+        self.base.chmod(0o755)
+        self.assertEqual(self.read(file, rows)['state'], 'stale')
+        self.base.chmod(0o700)
         link = self.base / 'symlink'
         link.symlink_to(file)
         self.assertEqual(self.read(link, rows)['state'], 'stale')

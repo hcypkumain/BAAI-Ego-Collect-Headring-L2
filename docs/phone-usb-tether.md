@@ -63,6 +63,7 @@ Fields: `schema:1`, `boot_id`, `monotonic`, `observer_instance` (UUID), `mode`,
 `selector` (private, potentially serial), `state`, `reason`, `links` (kind,
 interface, address). Atomic replace, `0600`. Consumer requires matching config,
 boot, valid instance, age `0..5` monotonic seconds, safe owner/file permissions,
+cache file and parent owned by consumer UID with no group/other access,
 regular bounded JSON (32 KiB), no symlink path, validated IPv4/interfaces and
 matching current topology/addresses. Failures return `stale`, no links; no cache
 write on reads. Public fields are rebuilt from a whitelist, never raw cache.

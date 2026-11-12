@@ -38,7 +38,7 @@ class Observation(TypedDict):
     links: list[TetherLink]
 
 
-def private_read(path, limit=32768):
+def private_read(path, limit=32768, private=False):
     """Reject symlink components, nonregular files, oversized or writable data."""
     path = Path(path).absolute()
     # Walk using directory descriptors, not a check-then-open through symlinkable
@@ -49,6 +49,10 @@ def private_read(path, limit=32768):
             next_directory = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
             os.close(directory)
             directory = next_directory
+        if private:
+            info = os.fstat(directory)
+            if info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise ValueError('cache parent must be private and observer-owned')
         fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
     finally:
         os.close(directory)
@@ -58,6 +62,8 @@ def private_read(path, limit=32768):
             raise ValueError('unsafe file')
         if info.st_uid not in (0, os.getuid()):
             raise ValueError('unexpected owner')
+        if private and (info.st_uid != os.getuid() or info.st_mode & 0o077):
+            raise ValueError('cache must be private and observer-owned')
         data = os.read(fd, limit + 1)
         if len(data) > limit:
             raise ValueError('oversized file')
@@ -168,7 +174,7 @@ def read_cache(path: str | Path = CACHE, config: TransportConfig | None = None,
     """Never returns unvalidated cache fields or writes on a consumer read."""
     failure = {'state': 'stale', 'reason': 'cache_unavailable_or_invalid', 'links': []}
     try:
-        value = private_read(path)
+        value = private_read(path, private=True)
         now = time.monotonic() if now is None else now
         boot = boot_id() if boot is None else boot
         if type(value['schema']) is not int or value['schema'] != 1 or value['boot_id'] != boot or type(value['monotonic']) not in (int, float) or not 0 <= now - value['monotonic'] <= TTL:
