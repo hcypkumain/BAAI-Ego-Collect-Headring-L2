@@ -121,6 +121,7 @@ class UploadQueue:
         client=ScopedUploader(self.app/'private/cloud-uploader.json',self.state/'sdk-state',
             proxy=self.proxy,authenticated_sdk=sdk,retry_unverified=True)
         if task_id is None:
+            self._require_allowed(target,source)
             task_id=client.begin(source,target,manifest)
             self.db.execute('UPDATE uploads SET task_id=? WHERE target=?',(task_id,target));self.db.commit()
         for row in manifest:

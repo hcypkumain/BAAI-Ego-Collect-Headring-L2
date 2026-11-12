@@ -202,6 +202,71 @@ class EnrollmentTests(unittest.TestCase):
             self.assertEqual([asdict(g) for g in device.upload_grants], grants.get(device.device_id, []))
         self.assertFalse(upload_allowed('EGOL2/cp_0042/package', registry=parsed, now_utc=NOW))
 
+    def prepared_sdk_begin_case(self, *, expire_during_preparation):
+        """Exercise real batch/gates with synthetic SDK, clock, binding and DB."""
+        std = self.root / 'standardized'
+        source = std / 'cp_0007' / SESSION
+        source.mkdir(parents=True)
+        target = 'EGOL2/cp_0007/' + SESSION
+        grants = {'cp_0007': [dict(operation='upload', destination='EGOL2',
+                  reason='synthetic timed grant', owner='fixture-owner',
+                  expiry='2026-11-13T00:00:01Z')]}
+        adapter = types.SimpleNamespace(std=std, app=self.root / 'synthetic-app',
+                    state=self.root / 'synthetic-state', proxy=None, stop=threading.Event(),
+                    registry=sample_registry(grants=grants))
+        adapter.db = sqlite3.connect(':memory:')
+        self.addCleanup(adapter.db.close)
+        adapter.db.execute('CREATE TABLE uploads(target TEXT PRIMARY KEY,task_id INTEGER)')
+        adapter.db.execute('INSERT INTO uploads VALUES(?,NULL)', (target,))
+        adapter.db.commit()
+        adapter._authorized = lambda target, source: UploadQueue._authorized(adapter, target, source)
+        adapter._require_allowed = lambda target, source: UploadQueue._require_allowed(adapter, target, source)
+        current = [NOW]
+        begin_calls = []
+
+        class Clock:
+            @staticmethod
+            def now(tz):
+                return current[0]
+
+        class SyntheticClient:
+            def __init__(self, *args, **kwargs):
+                if expire_during_preparation:
+                    current[0] = datetime(2026, 11, 13, 0, 0, 2, tzinfo=timezone.utc)
+
+            def begin(self, source, target, manifest):
+                begin_calls.append((source, target))
+                return 99
+
+            def confirm(self, *args):
+                # Positive case stops before any cloud proof/retention activity.
+                raise RuntimeError('synthetic-stop-before-confirmation')
+
+        def binding_only(path, *args, **kwargs):
+            self.assertEqual(path, adapter.app / 'private/project-scope.json')
+            return '{"EGOL2":{"project_id":"synthetic-project","project_name":"EGOL2"}}'
+
+        expected = PermissionError if expire_during_preparation else RuntimeError
+        with patch('cloud_upload_cli.datetime', Clock), \
+             patch('cloud_upload_cli.ScopedUploader', SyntheticClient), \
+             patch.object(Path, 'read_text', autospec=True, side_effect=binding_only):
+            with self.assertRaises(expected) as caught:
+                UploadQueue._safe_batch(adapter, types.SimpleNamespace(project_id='synthetic-project'),
+                                       str(source), target, [], None)
+        if not expire_during_preparation:
+            self.assertEqual(str(caught.exception), 'synthetic-stop-before-confirmation')
+        task_id = adapter.db.execute('SELECT task_id FROM uploads WHERE target=?', (target,)).fetchone()[0]
+        return begin_calls, task_id
+
+    def test_sdk_preparation_expiry_blocks_begin_and_task_id_update(self):
+        begin_calls, task_id = self.prepared_sdk_begin_case(expire_during_preparation=True)
+        self.assertEqual((len(begin_calls), task_id), (0, None))
+
+    def test_sdk_preparation_valid_grant_allows_begin_and_task_id_update(self):
+        begin_calls, task_id = self.prepared_sdk_begin_case(expire_during_preparation=False)
+        self.assertEqual(len(begin_calls), 1)
+        self.assertEqual(task_id, 99)
+
 
 # Run the existing certified raw-signature/portable-input/deletion recovery tests
 # unchanged, adapting only construction in this A-owned suite. No auth is mocked.

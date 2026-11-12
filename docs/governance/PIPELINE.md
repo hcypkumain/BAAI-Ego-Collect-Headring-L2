@@ -43,8 +43,12 @@ or migrated; all verification below uses temporary synthetic data.
   Production Queue additionally binds the **entire target suffix** to the
   actual source path below `standardized`, including the source device.
 - `UploadQueue(app_root, state_root, proxy, *, registry)` checks grants at seed,
-  queue selection, entry, SDK batch, each file and cloud confirmation. Snapshot
-  counts exclude denied rows and expose `denied`; denied persisted rows prevent
+  queue selection, entry, SDK batch, each file and cloud confirmation. Task-creation
+  authorization is rechecked immediately before `client.begin`, after project
+  binding and SDK preparation, so expiry during preparation creates no task and
+  does not update the queued task ID. Synthetic negative/positive tests exercise
+  the real batch method with a controlled UTC clock and in-memory task ledger.
+  Snapshot counts exclude denied rows and expose `denied`; denied persisted rows prevent
   `all_confirmed`. Project binding, fixed profiles/file lists, cloud verification,
   sealed retention and no-delete behavior remain. The constructor still opens
   credentials/DB only when explicitly run; governance CLI must never construct it.
