@@ -498,7 +498,7 @@ class WebControls:
                         raise ValueError('无效的腕部相机帧率选项')
                     if not self.wrist_settings_available():raise ValueError('设备正在采集或交接，暂不可更改腕部相机设置')
                 if action in ('rescan','calibrate_wrist','calibrate_emg','eeg_filter','wrist_camera_settings'):
-                    if action=='rescan' and self.scan_prohibited():raise ValueError('设备所有权或采集状态尚未释放，扫描已延后')
+                    if self.scan_prohibited():raise ValueError('设备所有权或采集状态尚未释放，请先退出本段')
                     self.release_prepared()
                     if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
                 if action=='abandon':

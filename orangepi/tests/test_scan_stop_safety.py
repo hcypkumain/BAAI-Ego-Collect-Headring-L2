@@ -38,6 +38,21 @@ class ScanStopSafety(unittest.TestCase):
         c=controller_type()();c.state='ready';c.worker=object();c.last_usb_poll=0;c.usb_fingerprint=('old',)
         c.release_prepared=Mock();c.scan_devices=Mock();c.poll_hotplug()
         self.assertTrue(c.scan_retry_pending);c.release_prepared.assert_not_called();c.scan_devices.assert_not_called()
+    def test_dispatch_cannot_release_owner_for_rescan_or_settings(self):
+        from test_stop_dashboard_dispatch import dashboard_tick_method
+        for action in ('rescan','calibrate_wrist','calibrate_emg','eeg_filter','wrist_camera_settings'):
+            dispatch=dashboard_tick_method();dispatch.__globals__['actions_for']=lambda *_:[action];dispatch.__globals__['time']=time
+            job={'action':action,'revision':1,'value':None}
+            privacy=SimpleNamespace(snapshot=Mock(return_value={'required':False,'stop_confirmed':True}),target_matches=Mock(return_value=False))
+            dashboard=SimpleNamespace(privacy=privacy,take=Mock(return_value=job),complete=Mock())
+            owner=SimpleNamespace(state='ready',dashboard=dashboard,ui_revision=1,selected_devices=[],
+                voice=SimpleNamespace(tick=Mock(),interrupt=Mock()),ui_publish=Mock(),keyboard=None,
+                scan_prohibited=Mock(return_value=True),release_prepared=Mock(),ensure_preview=Mock(),
+                reference_can_change=Mock(return_value=False),wrist_settings_available=Mock(return_value=True),
+                OwnerExited=type('OwnerExited',(RuntimeError,),{}))
+            dispatch(owner)
+            owner.release_prepared.assert_not_called()
+            self.assertIn('先退出',dashboard.complete.call_args.args[0])
     def test_flock_timeout_does_not_steal_or_rewrite(self):
         with tempfile.TemporaryDirectory() as tmp:
             registry=Registry(tmp,lock_timeout=.08);lock=Path(tmp)/'camera_owner.lock'
