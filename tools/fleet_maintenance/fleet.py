@@ -10,6 +10,8 @@ import re
 import subprocess
 import tarfile
 import tempfile
+from host.common.device_registry import Registry, parse_registry, select_devices
+from host.common.strict_json import strict_json_loads
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
@@ -31,10 +33,19 @@ def git(*args):
     return subprocess.run(['git', '-C', str(REPO), *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE).stdout
 
 def target(value):
-    match = re.fullmatch(r'cp_?(\d{4})', value)
+    match = re.fullmatch(r'cp_(\d{4})', value)
     if not match:
-        raise argparse.ArgumentTypeError('target must be cp followed by four digits')
+        raise argparse.ArgumentTypeError('target must be canonical cp_ followed by four digits')
     return 'cp_' + match.group(1)
+
+def registry_ssh(online, registry, device_id, ssh_config, bind_interface=None, bind_address=None):
+    """Preserve legacy auth while binding its identity to the registry."""
+    device, = select_devices(registry, [device_id], purpose='monitor')
+    values = online.config_for(ssh_config, device.ssh_alias)
+    if (values.get('user') != device.ssh_user or
+            (values.get('hostkeyalias') or values.get('hostname')) != device.host_key_alias):
+        raise online.Failure('SSH user/host key identity differs from registry')
+    return online.SSH(ssh_config, device.ssh_alias, device.address, bind_interface, bind_address)
 
 def address(value):
     import ipaddress
@@ -102,7 +113,8 @@ def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--release', default='stable', help='registered release: stable (default) or eeg-impedance-advisory')
     p.add_argument('--offline-plan', action='store_true', help='build and validate pinned bundle without contacting devices')
-    p.add_argument('--targets', nargs='+', type=target, default=['cp_0014', 'cp_0018'])
+    p.add_argument('--registry', required=True, type=Path)
+    p.add_argument('--targets', nargs='+', type=target, required=True)
     p.add_argument('--address', action='append', type=address, default=[])
     p.add_argument('--state-dir', type=Path, default=Path.home()/'.cache/headring-fleet-maintenance')
     p.add_argument('--ssh-config', type=Path, default=Path.home()/'headring-qc/ssh/config')
@@ -113,10 +125,17 @@ def main(argv=None):
     p.add_argument('--verify', action='store_true')
     p.add_argument('--accepted-plan', help='SHA-256 of reviewed per-device plan; required for apply/verify')
     p.add_argument('--sudo-command-file', type=Path, help='stage inputs and write separate password-free root dry-run/apply argv instead of executing')
-    p.add_argument('--approve-unknown-baseline', action='store_true', help='allow a plan for reviewed source modifications outside pinned Git history')
+    p.add_argument('--approve-unknown-baseline', action='store_true', help='deprecated: always rejected; reconcile unknown sources separately')
     p.add_argument('--audit-recordings', action='store_true')
     p.add_argument('--local-root', action='append', type=Path, default=[], help='explicit local raw-backup candidate root for read-only audit')
     args = p.parse_args(argv)
+    try:
+        registry = parse_registry(strict_json_loads(args.registry.read_text(encoding='utf-8')))
+        selected = select_devices(registry, args.targets, purpose='monitor')
+    except (OSError, ValueError) as exc:
+        p.error(str(exc))
+    if args.approve_unknown_baseline:
+        p.error('unknown baseline requires separate reconciliation; approval bypass disabled')
     if args.dry_run and (args.apply or args.verify):
         p.error('--dry-run cannot be combined with --apply or --verify')
     if args.sudo_command_file and not args.apply:
@@ -124,9 +143,13 @@ def main(argv=None):
     addresses = dict(args.address)
     if len(addresses) != len(args.address) or set(addresses) - set(args.targets):
         p.error('duplicate or unselected target address')
+    configured = {d.device_id: d.address for d in selected}
+    if any(configured[k] != v for k, v in addresses.items()):
+        p.error('--address cannot override registry identity')
+    addresses = configured
     if args.release != 'stable':
         import delta_release
-        return delta_release.main(args, p)
+        return delta_release.main(args, p, registry=registry)
     if args.offline_plan and (args.apply or args.verify or args.audit_recordings or args.accepted_plan):
         p.error('offline plan cannot be combined with device operations')
     if args.audit_recordings:
@@ -137,7 +160,7 @@ def main(argv=None):
         results=[]
         for device in args.targets:
             try:
-                ssh=online.SSH(args.ssh_config,device,addresses.get(device),args.bind_interface,args.bind_address)
+                ssh=registry_ssh(online,registry,device,args.ssh_config,args.bind_interface,args.bind_address)
                 results.append(audit_recordings.audit(ssh,device,args.local_root))
             except (online.Failure,OSError,subprocess.SubprocessError,ValueError,KeyError) as exc:
                 results.append({'device':device,'status':'not_audited','error':str(exc)})
@@ -158,10 +181,12 @@ def main(argv=None):
     summaries=[]; exit_code=0
     for device in args.targets:
         try:
-            ssh=online.SSH(args.ssh_config, device, addresses.get(device), args.bind_interface, args.bind_address)
+            ssh=registry_ssh(online,registry,device,args.ssh_config,args.bind_interface,args.bind_address)
             live=online.read_live(ssh, manifest)
             if args.apply or args.verify:
                 plan=online.load_plan(args.state_dir,args.accepted_plan)
+                if plan.get('unknown_approved'):
+                    raise online.Failure('unknown baseline plan rejected; separate reconciliation required')
                 if args.apply:
                     online.matches(plan, live, device, manifest, result)
                     if plan['unknown_approved'] and not args.approve_unknown_baseline:

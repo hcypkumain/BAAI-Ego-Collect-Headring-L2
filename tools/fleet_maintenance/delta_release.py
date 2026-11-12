@@ -12,6 +12,8 @@ import zipfile
 
 import fleet
 import online
+from host.common.device_registry import Registry, select_devices
+from host.common.strict_json import strict_json_loads
 
 RELEASE = 'eeg-impedance-advisory-36d8059918ce'
 ALIASES = (RELEASE, 'eeg-impedance-advisory')
@@ -27,13 +29,6 @@ AFTER = {
     PREFIX+'common/impedance_record.py': 'dc437d13d2e488a361671949fc6dc9199a7148447191720bf2287c36a65a09d3',
     PREFIX+'control/dashboard.html': 'b787ed400e657e77770ce9a627b07cc28636ab0c2faf6b524944d559ff992ff3',
     PREFIX+'framework/eeg_qc.py': 'b362e196b9f2d568e9e64037667a0cfbf31e2b7c12751344cbf7fdb730a9b78d',
-}
-DEFAULT_INVENTORY = {
-    'cp_0014': {'address':'192.168.20.111','hostkey_alias':'192.168.1.103','applied_release':RELEASE},
-    'cp_0015': {'address':'192.168.20.109','hostkey_alias':'192.168.1.119','applied_release':RELEASE},
-    'cp_0018': {'address':'192.168.20.110','hostkey_alias':'192.168.1.121','applied_release':RELEASE},
-    'cp_0020': {'address':'192.168.20.106','hostkey_alias':'192.168.20.106'},
-    'cp_0022': {'address':'192.168.20.107','hostkey_alias':'192.168.20.107','status':'offline_last_known'},
 }
 
 def registered():
@@ -94,10 +89,14 @@ def read_profile(ssh):
     if value.get('explicit_policy') not in (None,'advisory'): raise online.Failure('explicit EEG policy requires separate review')
     return value
 
-def inventory(path):
-    if not path.exists(): return {k:dict(v) for k,v in DEFAULT_INVENTORY.items()}
-    value=json.loads(path.read_text())
-    if not isinstance(value,dict): raise online.Failure('invalid inventory')
+def inventory(path, *, registry: Registry):
+    """Observation cache only; identity fields are rejected, never merged."""
+    if not path.exists(): return {}
+    value=strict_json_loads(path.read_text())
+    allowed={'last_verified_at','last_checked_at','policy','status','applied_release'}
+    if (not isinstance(value,dict) or set(value)-{d.device_id for d in registry.devices}
+            or any(not isinstance(v,dict) or set(v)-allowed for v in value.values())):
+        raise online.Failure('invalid observation cache; identity is registry-only')
     return value
 
 def save_inventory(path, values):
@@ -132,7 +131,8 @@ def stage_apply(ssh, device, bundle, bootstrap, command_file=None):
     ssh.run('sudo sh -c '+shlex.quote('set -eu; '+boot+'; '+command+'; '+command+' --apply'),interactive=True)
     return {'status':'applied','root_bundle':root}
 
-def main(args, parser):
+def main(args, parser, *, registry: Registry):
+    selected=select_devices(registry,args.targets,purpose='monitor')
     if args.release not in ALIASES: parser.error('unknown registered release')
     if args.approve_unknown_baseline or args.audit_recordings or args.local_root: parser.error('delta does not permit unknown baseline or recording audit')
     if len(args.targets)!=1: parser.error('delta requires exactly one selected target')
@@ -142,14 +142,11 @@ def main(args, parser):
     device=args.targets[0]; manifest,stable,bundle,bootstrap=registered()
     if args.offline_plan:
         print(json.dumps({'release':RELEASE,'manifest_sha256':MANIFEST_SHA,'status':'offline_manifest_validated','deploy_ready':False},indent=2));return 0
-    inv_path=args.state_dir/'inventory.json'; inv=inventory(inv_path)
-    if not inv_path.exists():save_inventory(inv_path,inv)
+    inv_path=args.state_dir/'observations.json'; inv=inventory(inv_path,registry=registry)
     entry=inv.get(device,{})
-    address=dict(args.address).get(device) or entry.get('address')
-    if not address: raise online.Failure('no verified address; supply --address '+device+'=IP')
-    values=online.config_for(args.ssh_config,device); alias=values.get('hostkeyalias') or values.get('hostname')
-    if entry.get('hostkey_alias') and alias!=entry['hostkey_alias']: raise online.Failure('SSH host key alias differs from inventory')
-    ssh=online.SSH(args.ssh_config,device,address,args.bind_interface or 'wlx40a5ef5ff812',args.bind_address or '192.168.20.100')
+    address=selected[0].address; alias=selected[0].host_key_alias
+    if any(k!=device or v!=address for k,v in args.address): parser.error('address differs from registry')
+    ssh=fleet.registry_ssh(online,registry,device,args.ssh_config,args.bind_interface,args.bind_address)
     try:
         live=online.read_live(ssh,stable);online.gates(live,device);state=classify(live,stable,manifest);profile=read_profile(ssh)
         if state=='after' and profile['policy']!='advisory': raise online.Failure('installed overlay EEG policy is not advisory')
@@ -176,16 +173,15 @@ def main(args, parser):
                   'created_at':time.time(),'baseline':state,'files':live['files'],'protected':live['protected'],'camd_pid':live['camd_pid'],'profile':profile}
             digest,path=online.write_plan(args.state_dir,plan)
             result={'status':'plan_ready','plan_sha256':digest,'plan_path':str(path),'baseline':state,'deploy_ready':False}
-        entry.update(address=address,hostkey_alias=alias,last_verified_at=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
+        entry.update(last_verified_at=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),
                      policy=profile['policy'],status='verified')
         if state=='after' or result.get('status')=='applied': entry['applied_release']=RELEASE
         inv[device]=entry;save_inventory(inv_path,inv)
         print(json.dumps({'device':device,'release':RELEASE,'inventory':str(inv_path),**result},indent=2,sort_keys=True))
         return 3 if result.get('status')=='staged_not_applied' else 0
     except (online.Failure,OSError,ValueError,KeyError) as exc:
-        if address==entry.get('address'):
-            entry['status']='offline' if 'deviceunreachable_or_ssh_failed' in str(exc) else 'rejected'
-            entry['last_checked_at']=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
-            inv[device]=entry;save_inventory(inv_path,inv)
-        print(json.dumps({'device':device,'release':RELEASE,'status':'offline_or_rejected','last_known_address':entry.get('address'),
+        entry['status']='unavailable_or_rejected'
+        entry['last_checked_at']=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime())
+        inv[device]=entry;save_inventory(inv_path,inv)
+        print(json.dumps({'device':device,'release':RELEASE,'status':'unavailable_or_rejected','configured_address':address,
                           'inventory':str(inv_path),'error':str(exc),'required_action':'provide a verified address or reconcile the baseline; no scanning or retry'},indent=2));return 2
