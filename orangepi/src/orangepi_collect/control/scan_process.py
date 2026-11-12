@@ -28,7 +28,7 @@ def group_alive(pgid):
         return True
 
 
-def run_scan(command, registry, timeout=15, grace=.5, kill_grace=1.0, kind="scan", input_text=None, allow_nonzero=False, return_code=False, allow_partial=False, env=None, return_identity=False):
+def run_scan(command, registry, timeout=15, grace=.5, kill_grace=1.0, kind="scan", input_text=None, allow_nonzero=False, return_code=False, allow_partial=False, env=None, return_identity=False, cancel=None):
     # Regular files mean a surviving descendant cannot keep communicate() stuck
     # by retaining stdout/stderr pipes. The session belongs only to this scan.
     with tempfile.TemporaryFile(mode='w+t', encoding='utf-8') as out, tempfile.TemporaryFile(mode='w+t', encoding='utf-8') as err, tempfile.TemporaryFile(mode='w+t', encoding='utf-8') as source:
@@ -40,14 +40,23 @@ def run_scan(command, registry, timeout=15, grace=.5, kill_grace=1.0, kind="scan
             # pending-owner state (which has no run to retry).
             raise ScanProcessError(str(exc),False,ownership_blocked=True) from exc
         pgid = child.pid
-        owner=registry.inspect()
+        try:owner=registry.inspect()
+        except (RegistryError,OSError) as exc:
+            raise ScanProcessError('扫描所有权无法确认，保持设备锁定：'+str(exc),True,pgid,run,child,ownership_blocked=True) from exc
         if not owner or owner.get('run')!=run:raise ScanProcessError('扫描所有权已变化',True,pgid,run,child)
         nonce=owner.get('nonce')
-        timed_out = False
-        try:
-            child.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
+        timed_out = False;cancelled=False;deadline=time.monotonic()+timeout
+        while True:
+            if cancel is not None:
+                try:cancelled=bool(cancel())
+                except Exception:cancelled=True
+                if cancelled:break
+            remaining=deadline-time.monotonic()
+            if remaining<=0:
+                timed_out=True;break
+            try:
+                child.wait(timeout=min(.1,remaining));break
+            except subprocess.TimeoutExpired:pass
         # Clean up the entire dedicated group, including the v4l2-ctl children
         # of individual probes, even if the scan leader already exited.
         for sig, window in ((signal.SIGTERM, grace), (signal.SIGKILL, kill_grace)):
@@ -76,6 +85,7 @@ def run_scan(command, registry, timeout=15, grace=.5, kill_grace=1.0, kind="scan
             error.nonce=nonce;raise error
         try:registry.finish(run)
         except (RegistryError,OSError) as exc:raise ScanProcessError(str(exc),True,pgid,run,child) from exc
+        if cancelled:raise ScanProcessError('设备扫描已中止，等待优先控制操作')
         out.seek(0)
         stdout = out.read(262145)
         if len(stdout.encode('utf-8'))>262144:raise ScanProcessError('扫描结果超过长度限制')

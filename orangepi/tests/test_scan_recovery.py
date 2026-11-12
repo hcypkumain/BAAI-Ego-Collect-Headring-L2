@@ -8,7 +8,7 @@ ROOT=pathlib.Path(os.environ.get('HOTPLUG_SOURCE_ROOT',str(pathlib.Path(__file__
 
 def controller_class():
  p=ROOT/'launcher.py';tree=ast.parse(p.read_text());cls=next(n for n in tree.body if isinstance(n,ast.ClassDef) and n.name=='Controller')
- cls.bases=[];cls.body=[n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in ('scan_devices','_scan_devices','poll_hotplug')]
+ cls.bases=[];cls.body=[n for n in cls.body if isinstance(n,ast.FunctionDef) and n.name in ('scan_devices','_scan_devices','poll_hotplug','scan_prohibited','scan_cancel_requested')]
  clock=types.SimpleNamespace(value=100.);clock.monotonic=lambda:clock.value
  settings=device_config('emg');settings['auto_discovery']={'enabled':True,'poll_seconds':2,'retry_no_data_seconds':15}
  required=build_contract(settings)['required_devices']

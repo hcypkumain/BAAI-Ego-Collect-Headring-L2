@@ -57,13 +57,22 @@ def group_exists(pgid):
 
 
 class Registry:
-    def __init__(self,root):
+    def __init__(self,root,lock_timeout=0.5):
         self.root=Path(root);self.record=self.root/'camera_owner.json';self.witness=self.root/'active_run_witness.json';self.lockfile=self.root/'camera_owner.lock'
+        self.lock_timeout=max(0,float(lock_timeout))
     @contextlib.contextmanager
     def locked(self):
         self.root.mkdir(parents=True,exist_ok=True)
         with self.lockfile.open('a+') as f:
-            fcntl.flock(f,fcntl.LOCK_EX)
+            deadline=time.monotonic()+self.lock_timeout
+            while True:
+                try:
+                    fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic()>=deadline:
+                        raise RegistryError('设备所有权锁等待超时，所有权未知，未执行设备操作')
+                    time.sleep(min(.025,max(0,deadline-time.monotonic())))
             try:
                 opened=os.fstat(f.fileno());current=self.lockfile.stat()
                 if (opened.st_dev,opened.st_ino)!=(current.st_dev,current.st_ino):

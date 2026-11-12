@@ -561,7 +561,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.voice.say(contract_error+'。本次没有开始采集，请重新准备。')
             return False
         if fingerprint(devices().get('auto_discovery',{})) != self.usb_fingerprint:
-            self.release_prepared();self.scan_devices();return False
+            self.scan_retry_pending=True
+            self.last_help=['设备连接发生变化；当前准备保持锁定，请退出本段后重新扫描。']
+            self.state_write();return False
         interrupt=getattr(self.voice,'interrupt',None)
         if callable(interrupt):interrupt()
         self.state='countdown'
@@ -835,15 +837,38 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.last_help=['已向经过核验的设备进程组发送有界结束信号，但进程组仍未退出。隐私遮挡保持，请联系维护人员。']
                 self.state_write()
 
+    def scan_prohibited(self):
+        dashboard=getattr(self,'dashboard',None)
+        if getattr(self,'worker',None) is not None or self.state in ('preparing','ready','recording','countdown','finalizing','confirm_stop'):
+            return True
+        if dashboard is not None:
+            with dashboard.lock:
+                queued=(dashboard.pending or {}).get('action')=='start'
+                active=dashboard.busy and getattr(dashboard,'active_action',None)=='start'
+                privacy=dashboard.privacy.snapshot()
+            if queued or active or privacy.get('required') is not False or privacy.get('stop_confirmed') is not True:return True
+        return False
+
+    def scan_cancel_requested(self):
+        dashboard=getattr(self,'dashboard',None)
+        if getattr(self,'quit',False) or self.scan_prohibited():return True
+        if dashboard is not None:
+            with dashboard.lock:return dashboard.pending_stop is not None
+        return False
+
     def scan_devices(self,announce=True,quiet=False):
         events=getattr(getattr(self,'dashboard',None),'events',None)
         started=time.monotonic()
+        if self.scan_prohibited():
+            self.scan_retry_pending=True
+            self.last_help=['设备所有权或采集状态尚未释放，扫描已延后。']
+            if events:events.emit('scan_deferred',reason='owner_active')
+            return False
         if events:events.emit('scan_start')
         if not self.scan_lock.acquire(False):return False
         try:
+            if self.scan_prohibited():return False
             if not self.retry_pending_owner(force=True):return False
-            if self.worker or self.state in ('preparing','recording','countdown','finalizing','confirm_stop'):
-                self.last_help=['设备正在准备、采集或收尾，不能扫描'];return False
             return self._scan_devices(announce,quiet)
         finally:
             self.scan_lock.release()
@@ -860,7 +885,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         scan_run=None;scan_nonce=None
         self.state='scanning';self.state_write()
         try:
-            output,scan_run,scan_nonce=run_scan([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/scan_devices.py')],self.camera_registry,timeout=15,allow_partial=True,env=scan_env,return_identity=True)
+            output,scan_run,scan_nonce=run_scan([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/scan_devices.py')],self.camera_registry,timeout=15,allow_partial=True,env=scan_env,return_identity=True,cancel=self.scan_cancel_requested)
             if getattr(self,'quit',False) or self.state!='scanning' or getattr(self,'switch_requested',None):return False
             scan=decode_scan_result(output,scan_run,scan_nonce,request_id,fingerprint_wire)
             if fingerprint(devices().get('auto_discovery',{}))!=scanned_fingerprint:
@@ -879,6 +904,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.remember_pending_owner(exc)
             elif isinstance(exc,ScanProcessError) and getattr(exc,'ownership_blocked',False):
                 self.remember_pending_owner(exc)
+            if self.scan_prohibited():
+                self.scan_retry_pending=True
+                return False
             reason=('设备扫描超时' if isinstance(exc,subprocess.TimeoutExpired)
                 else '设备扫描结果不是有效 JSON' if isinstance(exc,json.JSONDecodeError) else str(exc))
             print('DEVICE SCAN failed '+repr(exc),flush=True)
@@ -1177,7 +1205,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if self.worker and self.state=='ready' and time.monotonic()-getattr(self,'last_usb_poll',0)>2:
             self.last_usb_poll=time.monotonic()
             if fingerprint(devices().get('auto_discovery',{}))!=self.usb_fingerprint:
-                self.release_prepared();self.scan_devices()
+                self.scan_retry_pending=True
+                events=getattr(getattr(self,'dashboard',None),'events',None)
+                if events:events.emit('scan_deferred',reason='owner_active')
             return
         emg=getattr(self,'emg_wizard',None)
         if emg is not None and not self.worker:

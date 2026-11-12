@@ -72,7 +72,7 @@ class Tests(unittest.TestCase):
    self.assertEqual([x['connected'] for x in rows],[True,True,True,False]);self.assertEqual(rows[-1]['status'],'timeout')
  def test_result_from_changed_generation_is_not_ready(self):
   path=r/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller')
-  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('scan_devices','_scan_devices')]
+  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('scan_devices','_scan_devices','scan_prohibited','scan_cancel_requested')]
   fingerprints=iter([('video1',1),('video1',2)])
   scope=dict(uuid=uuid,os=os,decode_scan_result=decode,fingerprint=lambda *_:next(fingerprints),devices=lambda:{},run_scan=lambda *a,**kw:(encode('run','nonce',json.loads(kw['env']['ORANGEPI_SCAN_REQUEST'])['id'],json.loads(kw['env']['ORANGEPI_SCAN_REQUEST'])['fingerprint'],[dict(name='wrist',label='A',connected=True,status='ready')]),'run','nonce'),ScanProcessError=sp.ScanProcessError,atomic_json=lambda *a:None,BASE=Path('/tmp'),SRC=Path('/tmp'),json=json,subprocess=subprocess,time=time)
   exec(compile(ast.Module(body=[cls],type_ignores=[]),str(path),'exec'),scope)
@@ -85,7 +85,7 @@ class Tests(unittest.TestCase):
    rows=json.loads(text);self.assertTrue(rows[0]['connected']);self.assertEqual(rows[1]['status'],'timeout')
  def test_pending_group_retains_partial_evidence_without_ready(self):
   path=r/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller')
-  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('scan_devices','_scan_devices')]
+  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('scan_devices','_scan_devices','scan_prohibited','scan_cancel_requested')]
   def runner(*args,**kwargs):
    req=json.loads(kwargs['env']['ORANGEPI_SCAN_REQUEST'])
    partial=encode('run','nonce',req['id'],req['fingerprint'],[dict(name='good',label='A',connected=True,status='ready'),dict(name='slow',label='B',connected=False,status='timeout')])
@@ -122,7 +122,7 @@ class Tests(unittest.TestCase):
     thread.join(4);libc.prctl(36,old.value,0,0,0)
  def test_late_output_after_controller_cancel_is_not_published(self):
   path=r/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller')
-  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('scan_devices','_scan_devices')];writes=[]
+  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('scan_devices','_scan_devices','scan_prohibited','scan_cancel_requested')];writes=[]
   c=None
   def runner(*args,**kwargs):
    c.quit=True;req=json.loads(kwargs['env']['ORANGEPI_SCAN_REQUEST'])
@@ -143,13 +143,13 @@ class Tests(unittest.TestCase):
      except ProcessLookupError:pass
  def test_scan_refused_when_worker_active(self):
   path=r/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller')
-  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='scan_devices'];scope={}
+  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('scan_devices','scan_prohibited')];scope={'time':time}
   exec(compile(ast.Module(body=[cls],type_ignores=[]),str(path),'exec'),scope)
   c=scope['Controller']();c.retry_pending_owner=lambda **kw:True;c.scan_lock=threading.Lock();c.worker=object();c.state='ready'
   self.assertFalse(c.scan_devices());self.assertTrue(c.last_help)
  def test_scans_rejected_during_active_states_and_when_locked(self):
   path=r/'control/launcher.py';tree=ast.parse(path.read_text());cls=next(x for x in tree.body if isinstance(x,ast.ClassDef) and x.name=='Controller')
-  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name=='scan_devices'];scope={}
+  cls.bases=[];cls.body=[x for x in cls.body if isinstance(x,ast.FunctionDef) and x.name in ('scan_devices','scan_prohibited')];scope={'time':time}
   exec(compile(ast.Module(body=[cls],type_ignores=[]),str(path),'exec'),scope)
   c=scope['Controller']();c.retry_pending_owner=lambda **kw:True;c.scan_lock=threading.Lock();c.worker=None
   for state in ('preparing','recording','countdown','finalizing','confirm_stop'):
