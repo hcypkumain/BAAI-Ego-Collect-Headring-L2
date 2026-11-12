@@ -51,10 +51,14 @@ class ProbeTests(unittest.TestCase):
         manifest=__import__('json').loads((fleet.RESOURCES/'manifest.json').read_bytes())
         live={'device_id':'cp_0014','project':__import__('online').PROJECT,'files':{x['path']:{'sha256':x['sha256']} for x in manifest['files']},'protected':{'/secret/calibration':{'type':'regular','sha256':'secret-hash'}},'component_timer':{}}
         class SSH:
-            def __init__(self,*a): pass
+            def __init__(self,*a): self.argv=['ssh',a[1]]
             def run(self,cmd): self_cmds.append(cmd); return b'cp_0014\n'
         self_cmds=[]
-        with patch.object(metrics.online,'SSH',SSH),patch.object(metrics.online,'read_live',return_value=live) as read:
-            r=metrics.deep_check({'devices':{'cp_0014':'192.168.20.111'},'ssh_config':'x'},'cp_0014')
+        from host.qc.tests.governance_fixtures import sample_registry
+        import operations,web_config
+        registry=sample_registry(('cp_0014',))
+        config=operations.bound_config(web_config.setup(registry=registry,selected=['cp_0014'],config={'ssh_config':'x'}),registry)
+        with patch.object(metrics.online,'SSH',SSH),patch.object(metrics.online,'config_for',return_value={'user':'fixture','hostkeyalias':'test-key-cp_0014'}),patch.object(metrics.online,'read_live',return_value=live) as read:
+            r=metrics.deep_check(config,'cp_0014')
         self.assertEqual(self_cmds,['cat /opt/egorecord/DEVICE_ID']); read.assert_called_once(); self.assertTrue(r['code_matches_pin']); self.assertNotIn('secret',str(r)); self.assertEqual(r['calibration']['regular_files'],1)
 if __name__=='__main__': unittest.main()

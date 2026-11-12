@@ -1,11 +1,11 @@
 import json, time, subprocess, re, ipaddress, os
 from pathlib import Path
-import online
+import online, operations, fleet
 PROBE=Path(__file__).parent/'resources/metrics_probe.py'
 def collect(config,device):
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices']: raise ValueError('invalid device')
     address=str(ipaddress.IPv4Address(config['devices'][device]))
-    ssh=online.SSH(config['ssh_config'],device,address,config.get('bind_interface'),config.get('bind_address'))
+    ssh=operations.caller_ssh(config,device)
     argv=ssh.argv[:-1]+['-o','BatchMode=yes','-T',ssh.argv[-1],'python3 - '+device]
     p=subprocess.run(argv,input=PROBE.read_bytes(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=45)
     if p.returncode: raise RuntimeError('SSH unavailable or authentication failed')
@@ -21,7 +21,7 @@ def deep_check(config,device):
     import hashlib, fleet
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices']: raise ValueError('invalid device')
     address=str(ipaddress.IPv4Address(config['devices'][device]))
-    ssh=online.SSH(config['ssh_config'],device,address,config.get('bind_interface'),config.get('bind_address'))
+    ssh=operations.caller_ssh(config,device)
     if ssh.run('cat /opt/egorecord/DEVICE_ID').decode().strip()!=device: raise RuntimeError('identity mismatch')
     raw=(fleet.RESOURCES/'manifest.json').read_bytes()
     if fleet.sha(raw)!=fleet.MANIFEST_SHA256: raise RuntimeError('manifest invalid')
@@ -43,12 +43,15 @@ def create_plan(config,device,state):
     import fleet
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices']: raise ValueError('invalid device')
     address=str(ipaddress.IPv4Address(config['devices'][device]))
-    ssh=online.SSH(config['ssh_config'],device,address,config.get('bind_interface'),config.get('bind_address'))
+    registry=operations.caller_registry(config,device)
+    ssh=operations.caller_ssh(config,device)
     if ssh.run('cat /opt/egorecord/DEVICE_ID').decode().strip()!=device: raise RuntimeError('identity mismatch')
     bundle=fleet.build(Path(state)/'bundles')
     manifest=json.loads((fleet.RESOURCES/'manifest.json').read_bytes())
     live=online.read_live(ssh,manifest)
     plan=online.prepare_plan(live,manifest,device,bundle)
+    operations.require_config(config,registry)
+    plan=fleet.bind_registry_plan(plan,registry=registry,device=device)
     digest,_=online.write_plan(Path(state),plan)
     return {'device':device,'address':address,'status':'review_required','plan_sha256':digest,'commit':fleet.PIN,'manifest_sha256':bundle['manifest_sha256'],'code_changes':len(plan['diff']),'protected_entries':len(plan['protected']),'component_changes':sum(x['status']!='same' for x in plan['component_diff']),'component_status':[{'name':Path(x['source']).name,'status':x['status']} for x in plan['component_diff']],'code_diff':[{'path':x['path'],'before_sha256':x['before'],'after_sha256':x['after'],'known_git_history':x['known_git_history']} for x in plan['diff']],'created_at':time.time(),'scope':'read-only remote; local plan and artifacts','apply':'not_available_in_web'}
 
@@ -57,7 +60,7 @@ def fetch_thumbnails(config,device,mode,revision,ids,state):
     from PIL import Image
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices'] or mode not in ('emg','eeg') or type(revision)!=int or not 0<=revision<10**12 or not 1<=len(ids)<=6 or any(not re.fullmatch(r'[A-Za-z0-9_-]{1,100}',x) for x in ids): raise ValueError('invalid asset request')
     address=str(ipaddress.IPv4Address(config['devices'][device]))
-    ssh=online.SSH(config['ssh_config'],device,address,config.get('bind_interface'),config.get('bind_address'))
+    ssh=operations.caller_ssh(config,device)
     argv=ssh.argv[:-1]+['-o','BatchMode=yes','-T',ssh.argv[-1],'python3 - '+' '.join([device,mode,str(revision),*ids])]
     proc=subprocess.run(argv,input=(Path(__file__).parent/'resources/thumbnail_probe.py').read_bytes(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=35)
     if proc.returncode: raise RuntimeError('thumbnail SSH failed')
@@ -86,7 +89,7 @@ def fetch_original(config,device,mode,revision,ident,state):
     import base64,hashlib,io
     from PIL import Image
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices'] or mode not in ('emg','eeg') or type(revision)!=int or not 0<=revision<10**12 or not isinstance(ident,str) or not re.fullmatch(r'image_[a-f0-9]{40}',ident): raise ValueError('invalid asset')
-    address=str(ipaddress.IPv4Address(config['devices'][device])); ssh=online.SSH(config['ssh_config'],device,address,config.get('bind_interface'),config.get('bind_address'))
+    address=str(ipaddress.IPv4Address(config['devices'][device])); ssh=operations.caller_ssh(config,device)
     argv=ssh.argv[:-1]+['-o','BatchMode=yes','-T',ssh.argv[-1],'python3 - '+' '.join([device,mode,str(revision),ident])]
     proc=subprocess.run(argv,input=(Path(__file__).parent/'resources/original_probe.py').read_bytes(),stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=45)
     if proc.returncode or len(proc.stdout)>12000000: raise RuntimeError('image unavailable')
@@ -108,7 +111,7 @@ def audit_history(config,device):
     import audit_recordings
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices']: raise ValueError('invalid device')
     address=str(ipaddress.IPv4Address(config['devices'][device]))
-    ssh=online.SSH(config['ssh_config'],device,address,config.get('bind_interface'),config.get('bind_address'))
+    ssh=operations.caller_ssh(config,device)
     data=audit_recordings.audit(ssh,device,[])
     rows=[]
     for x in data.get('sessions',[]):

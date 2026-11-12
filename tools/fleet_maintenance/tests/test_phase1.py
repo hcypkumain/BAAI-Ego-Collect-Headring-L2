@@ -3,11 +3,16 @@ from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-import metrics,jobs,web_config
+import metrics,jobs,web_config,operations
 from host.qc.tests.governance_fixtures import sample_registry
 import importlib.util
 spec=importlib.util.spec_from_file_location('phase_probe',ROOT/'resources/metrics_probe.py');probe=importlib.util.module_from_spec(spec);spec.loader.exec_module(probe)
 class PhaseTests(unittest.TestCase):
+ def setUp(self):
+  self.registry=sample_registry(('cp_0014',))
+  self.config=operations.bound_config(web_config.setup(registry=self.registry,selected=['cp_0014'],config={'ssh_config':'x'}),self.registry)
+  p=patch.object(metrics.online,'config_for',return_value={'user':'fixture','hostkeyalias':'test-key-cp_0014'})
+  p.start();self.addCleanup(p.stop)
  def test_profile_selection_eeg_legacy(self):
   with tempfile.TemporaryDirectory() as t:
    code=Path(t)/'orangepi';code.mkdir()
@@ -29,13 +34,13 @@ class PhaseTests(unittest.TestCase):
    finally:owner.lockfile.close()
  def test_plan_no_remote_mutation(self):
   with tempfile.TemporaryDirectory() as t:
-   config={'devices':{'cp_0014':'192.168.20.111'},'ssh_config':'x'}
+   config=self.config
    class S:
-    def __init__(self,*args): pass
+    def __init__(self,*args): self.argv=['ssh',args[1]]
     def run(self,cmd): self.assert_safe(cmd);return b'cp_0014\n'
     def assert_safe(self,cmd):
      if cmd!='cat /opt/egorecord/DEVICE_ID': raise AssertionError(cmd)
-   live={'a':1}; plan={'diff':[],'protected':{},'component_diff':[]}
+   live={'a':1}; plan={'device':'cp_0014','diff':[],'protected':{},'component_diff':[]}
    with patch.object(metrics.online,'SSH',S),patch.object(metrics.online,'read_live',return_value=live),patch.object(metrics.online,'prepare_plan',return_value=plan),patch.object(metrics.online,'write_plan',return_value=('a'*64,None)),patch('fleet.build',return_value={'manifest_sha256':'b'*64}):
     r=metrics.create_plan(config,'cp_0014',t);self.assertEqual(r['plan_sha256'],'a'*64);self.assertEqual(r['apply'],'not_available_in_web')
  def test_original_integrity_and_size(self):
@@ -44,8 +49,8 @@ class PhaseTests(unittest.TestCase):
    value={'id':ident,'data':base64.b64encode(raw).decode(),'sha256':hashlib.sha256(raw).hexdigest()}
    class P: returncode=0;stdout=json.dumps(value).encode()
    class S:
-    def __init__(self,*a):self.argv=['ssh','cp_0014']
-   cfg={'devices':{'cp_0014':'192.168.20.111'},'ssh_config':'x'}
+    def __init__(self,*a):self.argv=['ssh',a[1]]
+   cfg=self.config
    with patch.object(metrics.online,'SSH',S),patch.object(metrics.subprocess,'run',return_value=P()):
     result=metrics.fetch_original(cfg,'cp_0014','emg',1,ident,t);self.assertEqual((result['width'],result['height']),(4,5)); self.assertEqual(os.stat(Path(t)/'assets'/result['key']).st_mode&0o777,0o600)
     value['sha256']='0'*64;P.stdout=json.dumps(value).encode()

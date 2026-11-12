@@ -4,7 +4,7 @@ import metrics, operations, broker_client, imports
 class Jobs:
     def __init__(self,state,config,*,registry):
         operations.require_config(config,registry)
-        self.registry=registry;self.state=Path(state); self.config=json.loads(json.dumps(config))
+        self.registry=registry;self.state=Path(state); self.config=operations.bound_config(config,registry)
         self.lockfile=open(self.state/'owner.lock','a+'); os.chmod(self.state/'owner.lock',0o600)
         try: fcntl.flock(self.lockfile,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except OSError:

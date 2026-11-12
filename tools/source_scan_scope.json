@@ -22,6 +22,8 @@
     {"path":"tools/fleet_maintenance/broker.py","category":"runtime","reason":"Main registry-bound broker authorization and auth transport"},
     {"path":"tools/fleet_maintenance/jobs.py","category":"runtime","reason":"Main immutable configured identities separate from observations"},
     {"path":"tools/fleet_maintenance/operations.py","category":"runtime","reason":"Main accepted plan digest/identity checks at stage and verification boundaries"},
+    {"path":"tools/fleet_maintenance/metrics.py","category":"runtime","reason":"Main allocated six Registry-bound SSH helpers; cp0018 roots are explicit historical evidence only"},
+    {"path":"tools/fleet_maintenance/imports.py","category":"runtime","reason":"Main allocated USB caller Registry transport, scan/plan and one-shot binding"},
     {"path":"tools/build_governance_release.py","category":"runtime","reason":"Main immutable explicit host payload exporter"},
     {"path":"tools/check_device_generality.py","category":"runtime","reason":"Main path-first audit itself"},
     {"path":"host/qc/tests/governance_fixtures.py","category":"fixture","reason":"Single main-owned synthetic C0 factory, never production defaults"},

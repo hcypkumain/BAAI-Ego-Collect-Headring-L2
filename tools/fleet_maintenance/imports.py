@@ -1,7 +1,7 @@
 """Fixed USB import plans; browser supplies opaque IDs, never paths or commands."""
 import base64,hashlib,ipaddress,json,os,re,shlex,subprocess,time,selectors,threading
 from pathlib import Path
-import online
+import online, operations, fleet
 HERE=Path(__file__).parent
 REGISTRY='usb-tasks-v1'
 def canonical(value):return (json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':'))+'\n').encode()
@@ -15,7 +15,7 @@ def load(path,limit=8388608):
     return json.loads(path.read_bytes())
 def remote(config,device,payload,timeout=120,on_event=None):
     if not re.fullmatch(r'cp_\d{4}',device) or device not in config['devices']:raise ValueError('invalid_device')
-    ip=str(ipaddress.IPv4Address(config['devices'][device]));ssh=online.SSH(config['ssh_config'],device,ip,config.get('bind_interface'),config.get('bind_address'))
+    ssh=operations.caller_ssh(config,device)
     script=(HERE/'zip_preview.py').read_bytes()+b'\n'+(HERE/'resources/usb_import_adapter.py').read_bytes()
     bootstrap='import base64;exec(compile(base64.b64decode('+repr(base64.b64encode(script).decode())+'),"usb_adapter","exec"))'
     command='python3 -c '+shlex.quote(bootstrap)
@@ -60,6 +60,7 @@ def remote(config,device,payload,timeout=120,on_event=None):
     if not isinstance(result,dict):raise ValueError('invalid_remote_result')
     return result
 def scan(state,config,device):
+    registry=operations.caller_registry(config,device)
     result=remote(config,device,{'op':'scan','device':device},timeout=80)
     if result.get('status')!='ok':raise RuntimeError('scan_failed')
     scan=result.get('scan') or {}; sid=scan.get('scan_id');entries=scan.get('files')
@@ -69,11 +70,15 @@ def scan(state,config,device):
         if not isinstance(e,dict) or not re.fullmatch(r'[a-f0-9]{32}',e.get('id','')) or not isinstance(e.get('relative_path'),str) or type(e.get('size_bytes'))!=int:raise ValueError('invalid_scan')
         clean.append({'id':e['id'],'relative_path':e['relative_path'],'name':str(e.get('name') or '')[:240],'size_bytes':e['size_bytes']})
     record={'device':device,'address':config['devices'][device],'mode':result['mode'],'context':result['context'],'scan_id':sid,'revision':scan['catalog_revision'],'created_at':time.time(),'entries':clean}
+    operations.require_config(config,registry)
+    record=fleet.bind_registry_plan(record,registry=registry,device=device)
     store(Path(state)/'imports/scans'/(sid+'.json'),record)
     return {'scan_id':sid,'mode':record['mode'],'context':record['context'],'revision':record['revision'],'files':[{'id':x['id'],'name':x['name'],'size_bytes':x['size_bytes']} for x in clean],'note':'USB 扫描可能触发只读挂载；旧列表默认保留'}
 def preview(state,config,device,sid,ids):
+    registry=operations.caller_registry(config,device)
     if not re.fullmatch(r'[a-f0-9]{32}',sid or '') or not isinstance(ids,list) or not 1<=len(ids)<=50 or any(not isinstance(x,str) or not re.fullmatch(r'[a-f0-9]{32}',x) for x in ids) or len(set(ids))!=len(ids):raise ValueError('invalid_selection')
     scan=load(Path(state)/'imports/scans'/(sid+'.json'))
+    fleet.require_registry_plan(scan,registry=registry,device=device)
     if scan['device']!=device or scan['address']!=config['devices'].get(device) or time.time()-scan['created_at']>600:raise ValueError('scan_expired')
     byid={x['id']:x for x in scan['entries']};entries=[byid[x] for x in ids if x in byid]
     if len(entries)!=len(ids):raise ValueError('unknown_zip_id')
@@ -81,17 +86,23 @@ def preview(state,config,device,sid,ids):
     info=remote(config,device,payload,timeout=300)
     if info.get('status')!='preview':raise ValueError(info.get('reason','preview_failed'))
     plan={'schema':1,'operation':'import_tasks','device':device,'address':scan['address'],'created_at':time.time(),'scan':sid,'mode':scan['mode'],'context':scan['context'],'revision':scan['revision'],'entries':entries,'expected':info,'remove_list_ids':[]}
+    operations.require_config(config,registry)
+    plan=fleet.bind_registry_plan(plan,registry=registry,device=device)
     raw=canonical(plan);digest=hashlib.sha256(raw).hexdigest();path=Path(state)/'imports/plans'/(digest+'.json')
     try:store(path,plan)
     except FileExistsError:
         if path.read_bytes()!=raw:raise ValueError('plan_collision')
     return {'plan_sha256':digest,'device':device,'address':scan['address'],'mode':scan['mode'],'context':scan['context'],'revision':scan['revision'],'created_at':plan['created_at'],'old_lists_preserved':True,'new_unique':info['new_unique'],'reused_unique':info['reused_unique'],'name_conflicts':info['name_conflicts'],'deleted_conflicts':info.get('deleted_conflicts',0),'existing_lists':info['existing_lists'],'available_bytes':info['available_bytes'],'estimated_bytes':info['estimated_bytes'],'volume_majmin':info['volume_majmin'],'sources':[{'id':z['id'],'sha256':z['sha256'],'size':z['size'],'images':len(z['images'])} for z in info['sources']],'coverage':'USB ZIP 内容逐项验证；真实提交仍需控制器回读'}
 def execute(state,config,device,digest,progress=lambda *_:None):
+    registry=operations.caller_registry(config,device)
     if not re.fullmatch(r'[a-f0-9]{64}',digest or ''):raise ValueError('invalid_plan')
     path=Path(state)/'imports/plans'/(digest+'.json');plan=load(path)
+    fleet.require_registry_plan(plan,registry=registry,device=device)
     if hashlib.sha256(path.read_bytes()).hexdigest()!=digest or plan.get('schema')!=1 or plan.get('operation')!='import_tasks' or plan.get('device')!=device or plan.get('address')!=config['devices'].get(device) or plan.get('remove_list_ids')!=[] or time.time()-plan.get('created_at',0)>600:raise ValueError('plan_expired_or_scope')
     if plan.get('expected',{}).get('deleted_conflicts',0):raise ValueError('deleted_asset_conflict')
     progress('preflight')
+    operations.require_config(config,registry)
+    fleet.require_registry_plan(plan,registry=registry,device=device)
     marker=Path(state)/'imports/started'/(digest+'.json');marker.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
     # Durable one-shot marker is written before issuing the one remote action.
     store(marker,{'device':device,'plan_sha256':digest,'state':'started','created_at':time.time()})

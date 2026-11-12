@@ -49,7 +49,7 @@ class Broker:
     def __init__(self,state,config,scope,ttl,secret,executor=operations.execute,operation="apply_plan",*,registry):
         operations.require_config(config,registry)
         if not set(scope)<=set(config['devices']):raise ValueError('unselected authorization scope')
-        self.registry=registry;self.state=Path(state); self.config=json.loads(json.dumps(config)); self.scope=dict(scope); self.deadline=time.monotonic()+ttl; self.expires=time.time()+ttl
+        self.registry=registry;self.state=Path(state); self.config=operations.bound_config(config,registry); self.scope=dict(scope); self.deadline=time.monotonic()+ttl; self.expires=time.time()+ttl
         self.secret=bytearray(secret); self.executor=executor; self.operation=operation; self.failed=False; self.stop_requested=False
     def allowed(self): return not self.failed and not self.stop_requested and time.monotonic()<self.deadline
     def status(self): return {'unlocked':self.allowed(),'expires_at':self.expires if self.allowed() else None,'targets':sorted(self.scope) if self.allowed() else [],'plans':dict(self.scope) if self.allowed() else {},'operation':self.operation,'registry':operations.REGISTRY if self.operation=='apply_plan' else imports.REGISTRY,'registry_digest':self.registry.digest}

@@ -15,8 +15,29 @@ def require_config(config,registry):
     require(type(config) is dict,'Explicit bound configuration required')
     transport={key:config[key] for key in ('ssh_config','bind_interface','bind_address') if key in config}
     expected=web_config.setup(registry=registry,selected=tuple(config.get('devices',{})),config=transport)
-    require(config==expected and config.get('registry_digest')==registry.digest,'Configuration identity/digest changed')
+    public={key:value for key,value in config.items() if key!='_registry'}
+    require(public==expected and config.get('registry_digest')==registry.digest and
+            ('_registry' not in config or config['_registry'] is registry),'Configuration identity/digest changed')
     return expected
+
+def bound_config(config,registry):
+    """Executable-owned injection; Registry is not JSON configuration or cache."""
+    public=require_config(config,registry)
+    return {**json.loads(json.dumps(public)), '_registry':registry}
+
+def caller_registry(config,device):
+    from host.common.device_registry import Registry
+    registry=config.get('_registry')
+    require(isinstance(registry,Registry),'Explicit caller Registry required')
+    require_config(config,registry)
+    require(device in config['devices'],'Device not selected')
+    select_devices(registry,[device],purpose='monitor')
+    return registry
+
+def caller_ssh(config,device):
+    registry=caller_registry(config,device)
+    return fleet.registry_ssh(online,registry,device,config['ssh_config'],
+                              config.get('bind_interface'),config.get('bind_address'))
 
 def load_inputs(registry_path,targets,transport_path):
     import web_config
@@ -24,7 +45,7 @@ def load_inputs(registry_path,targets,transport_path):
     select_devices(registry,targets,purpose='monitor')
     config=web_config.setup(registry=registry,selected=targets,
                             config=strict_json_loads(Path(transport_path).read_text()))
-    return registry,config
+    return registry,bound_config(config,registry)
 
 def execute(state,config,device,digest,ssh_factory,progress=lambda *_:None,*,registry):
     require_config(config,registry)

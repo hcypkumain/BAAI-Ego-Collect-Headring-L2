@@ -3,11 +3,11 @@ from pathlib import Path
 from unittest.mock import patch
 from PIL import Image
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-import zip_preview,imports,broker,operations,web_config
+import zip_preview,imports,broker,operations,web_config,fleet
 from host.qc.tests.governance_fixtures import sample_registry
 TEST_REGISTRY=sample_registry(('cp_0014',))
 def fixture_config():
- return web_config.setup(registry=TEST_REGISTRY,selected=['cp_0014'],config={'ssh_config':'synthetic'})
+ return operations.bound_config(web_config.setup(registry=TEST_REGISTRY,selected=['cp_0014'],config={'ssh_config':'synthetic'}),TEST_REGISTRY)
 
 def png():
  b=io.BytesIO();Image.new('RGB',(5,6),(50,70,80)).save(b,format='PNG');return b.getvalue()
@@ -48,9 +48,9 @@ class ZipTests(unittest.TestCase):
    with self.assertRaises(ValueError):zip_preview.preview_file(archive([('x.png',png())]))
  def test_unknown_zip_never_remote(self):
   with tempfile.TemporaryDirectory() as t:
-   sid='a'*32;state=Path(t);imports.store(state/'imports/scans'/(sid+'.json'),{'device':'cp_0014','address':'192.168.20.111','created_at':time.time(),'entries':[]})
+   sid='a'*32;state=Path(t);cfg=fixture_config();imports.store(state/'imports/scans'/(sid+'.json'),fleet.bind_registry_plan({'device':'cp_0014','address':cfg['devices']['cp_0014'],'created_at':time.time(),'entries':[]},registry=TEST_REGISTRY,device='cp_0014'))
    with patch.object(imports,'remote') as remote:
-    with self.assertRaises(ValueError):imports.preview(state,{'devices':{'cp_0014':'192.168.20.111'}},'cp_0014',sid,['b'*32])
+    with self.assertRaisesRegex(ValueError,'unknown_zip_id'):imports.preview(state,cfg,'cp_0014',sid,['b'*32])
     remote.assert_not_called()
  def test_broker_operation_scope_separation(self):
   cfg=fixture_config();b=broker.Broker('/tmp',cfg,{'cp_0014':'a'*64},30,b'',operation='import_tasks',registry=TEST_REGISTRY)
@@ -98,7 +98,7 @@ class FakeControllerTests(unittest.TestCase):
      for line in lines[:-1]:
       if 'event' in line and kw.get('on_event'):kw['on_event'](line['event'])
      return lines[-1]
-    with patch.object(imports,'remote',side_effect=fake_remote),patch.object(broker.web_config,'setup',return_value=config):
+    with patch.object(imports,'remote',side_effect=fake_remote):
      scan=imports.scan(top/'local',config,'cp_0014');preview=imports.preview(top/'local',config,'cp_0014',sid,[zipid]);self.assertEqual(preview['new_unique'],1);self.assertEqual(posted,['scan'])
      instance=broker.Broker(top/'local',config,{'cp_0014':preview['plan_sha256']},60,b'',imports.execute,operation='import_tasks',registry=TEST_REGISTRY)
      req={'operation':'import_tasks','device':'cp_0014','plan_hash':preview['plan_sha256'],'registry_entry':imports.REGISTRY}
@@ -114,7 +114,7 @@ class ImportFlowTests(unittest.TestCase):
    if payload['op']=='preview':return {'status':'preview','mode':'emg','context':'emg:5','catalog_revision':4,'sources':[{'id':zipid,'sha256':'c'*64,'size':100,'images':[{'sha256':'d'*64}]}],'existing_lists':1,'new_unique':1,'reused_unique':0,'name_conflicts':0,'available_bytes':100000000,'estimated_bytes':40000000,'volume_majmin':'8:1','protected_sha256':'e'*64}
    self.assertEqual(payload['expected']['sources'][0]['sha256'],'c'*64)
    return {'status':'succeeded','revision':5,'verified_unique':1,'old_lists_preserved':True,'protected_unchanged':True}
-  with tempfile.TemporaryDirectory() as t,patch.object(imports,'remote',side_effect=fake_remote),patch.object(broker.web_config,'setup',return_value=cfg):
+  with tempfile.TemporaryDirectory() as t,patch.object(imports,'remote',side_effect=fake_remote):
    scan=imports.scan(t,cfg,'cp_0014');plan=imports.preview(t,cfg,'cp_0014',scan['scan_id'],[zipid]);self.assertEqual(calls,['scan','preview'])
    b=broker.Broker(t,cfg,{'cp_0014':plan['plan_sha256']},60,b'',imports.execute,operation='import_tasks',registry=TEST_REGISTRY)
    req={'operation':'import_tasks','device':'cp_0014','plan_hash':plan['plan_sha256'],'registry_entry':imports.REGISTRY}
@@ -136,17 +136,17 @@ class GuardTests(unittest.TestCase):
      status.assert_not_called()
    finally:owner.lockfile.close()
  def test_drift_and_insufficient_space_no_action(self):
-  cfg={'devices':{'cp_0014':'192.168.20.111'}};sid='a'*32;zipid='b'*32
+  cfg=fixture_config();sid='a'*32;zipid='b'*32
   with tempfile.TemporaryDirectory() as t:
-   imports.store(Path(t)/'imports/scans'/(sid+'.json'),{'device':'cp_0014','address':'192.168.20.111','created_at':time.time(),'mode':'emg','context':'emg:5','revision':5,'entries':[{'id':zipid,'relative_path':'task.zip'}]})
+   imports.store(Path(t)/'imports/scans'/(sid+'.json'),fleet.bind_registry_plan({'device':'cp_0014','address':cfg['devices']['cp_0014'],'created_at':time.time(),'mode':'emg','context':'emg:5','revision':5,'entries':[{'id':zipid,'relative_path':'task.zip'}]},registry=TEST_REGISTRY,device='cp_0014'))
    for reason in ('catalog_changed','insufficient_space','busy_privacy_or_context'):
     with patch.object(imports,'remote',return_value={'status':'failed','reason':reason}) as remote:
      with self.assertRaisesRegex(ValueError,reason):imports.preview(t,cfg,'cp_0014',sid,[zipid])
      self.assertEqual(remote.call_count,1);self.assertEqual(remote.call_args.args[2]['op'],'preview')
  def test_disconnect_after_start_is_not_retried(self):
-  cfg={'devices':{'cp_0014':'192.168.20.111'}}
+  cfg=fixture_config()
   with tempfile.TemporaryDirectory() as t:
-   path=Path(t)/'imports/plans';plan={'schema':1,'operation':'import_tasks','device':'cp_0014','address':'192.168.20.111','created_at':time.time(),'remove_list_ids':[],'scan':'a'*32,'mode':'emg','context':'emg:5','revision':1,'entries':[],'expected':{}}
+   path=Path(t)/'imports/plans';plan=fleet.bind_registry_plan({'schema':1,'operation':'import_tasks','device':'cp_0014','address':cfg['devices']['cp_0014'],'created_at':time.time(),'remove_list_ids':[],'scan':'a'*32,'mode':'emg','context':'emg:5','revision':1,'entries':[],'expected':{}},registry=TEST_REGISTRY,device='cp_0014')
    import hashlib
    digest=hashlib.sha256(imports.canonical(plan)).hexdigest();imports.store(path/(digest+'.json'),plan)
    with patch.object(imports,'remote',side_effect=TimeoutError()) as remote:
@@ -175,7 +175,7 @@ class SocketImportTests(unittest.TestCase):
    if payload['op']=='preview':return {'status':'preview','mode':'emg','context':'emg:5','catalog_revision':4,'sources':[{'id':zipid,'sha256':'c'*64,'size':100,'images':[{'sha256':'d'*64}]}],'existing_lists':1,'new_unique':1,'reused_unique':0,'name_conflicts':0,'available_bytes':100000000,'estimated_bytes':40000000,'volume_majmin':'8:1','protected_sha256':'e'*64}
    kw['on_event']('building:1:1');kw['on_event']('verifying')
    return {'status':'succeeded','revision':5,'verified_unique':1,'old_lists_preserved':True,'protected_unchanged':True}
-  with tempfile.TemporaryDirectory() as t,patch.object(imports,'remote',side_effect=fake_remote),patch.object(broker.web_config,'setup',return_value=cfg):
+  with tempfile.TemporaryDirectory() as t,patch.object(imports,'remote',side_effect=fake_remote):
    scan=imports.scan(t,cfg,'cp_0014');plan=imports.preview(t,cfg,'cp_0014',sid,[zipid])
    b=broker.Broker(t,cfg,{'cp_0014':plan['plan_sha256']},60,b'',imports.execute,operation='import_tasks',registry=TEST_REGISTRY);thread=threading.Thread(target=broker.serve,args=(t,b),daemon=True);thread.start()
    try:
@@ -206,7 +206,7 @@ class HTTPImportTests(unittest.TestCase):
   scan={'scan_id':sid,'mode':'emg','context':'emg:5','revision':2,'files':[{'id':zid,'name':'a.zip','size_bytes':100}]}
   plan={'plan_sha256':digest,'device':'cp_0014','address':cfg['devices']['cp_0014'],'mode':'emg','context':'emg:5','created_at':time.time()}
   def execute(state,config,device,hash_value,progress):progress('preflight');progress('applying');progress('verifying');return {'status':'succeeded','revision':3,'protected_unchanged':True}
-  with tempfile.TemporaryDirectory() as t,patch.object(imports,'scan',return_value=scan),patch.object(imports,'preview',return_value=plan),patch.object(broker.web_config,'setup',return_value=cfg):
+  with tempfile.TemporaryDirectory() as t,patch.object(imports,'scan',return_value=scan),patch.object(imports,'preview',return_value=plan):
    owner=jobs.Jobs(t,cfg,registry=TEST_REGISTRY);owner.cache['cp_0014']={'profile_context':{'active_mode':'emg','generation':5}}
    b=broker.Broker(t,cfg,{'cp_0014':digest},60,b'',execute,operation='import_tasks',registry=TEST_REGISTRY);bt=threading.Thread(target=broker.serve,args=(t,b),daemon=True);bt.start()
    for _ in range(100):
@@ -235,8 +235,13 @@ class StreamTransportTests(unittest.TestCase):
   with tempfile.TemporaryDirectory() as t:
    script=Path(t)/'fake_ssh.py';script.write_text("import sys,json\np=json.load(sys.stdin)\nprint(json.dumps({'event':'building:1:2'}),flush=True)\nprint(json.dumps({'event':'verifying'}),flush=True)\nprint(json.dumps({'status':'succeeded','echo':p['op']}),flush=True)\n")
    class SSH:
-    def __init__(self,*args):self.argv=[sys.executable,str(script),'device']
+    def __init__(self,*args):self.argv=['ssh',args[1]]
    seen=[]
-   with patch.object(imports.online,'SSH',SSH):
-    out=imports.remote({'devices':{'cp_0014':'192.168.20.111'},'ssh_config':'fake'},'cp_0014',{'op':'apply'},timeout=10,on_event=seen.append)
+   import subprocess
+   popen=subprocess.Popen
+   def local(argv,**kwargs):
+    self.assertEqual(argv[-2],'test-cp_0014');self.assertIn('stricthostkeychecking=yes',argv)
+    return popen([sys.executable,str(script)],**kwargs)
+   with patch.object(imports.online,'SSH',SSH),patch.object(imports.online,'config_for',return_value={'user':'fixture','hostkeyalias':'test-key-cp_0014'}),patch.object(imports.subprocess,'Popen',side_effect=local):
+    out=imports.remote(fixture_config(),'cp_0014',{'op':'apply'},timeout=10,on_event=seen.append)
    self.assertEqual(out['status'],'succeeded');self.assertEqual(seen,['building:1:2','verifying'])
