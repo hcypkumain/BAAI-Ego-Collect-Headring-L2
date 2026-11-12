@@ -213,6 +213,17 @@ claimed. Reproduce new fixtures with
 `python3 -m unittest discover -s orangepi/tests -p 'test_phone_tether*.py' -q`
 and `node --test orangepi/tests/test_phone_tether_ui.cjs`.
 
+Astra independently reviewed `7e49950` (33 Python / 8 Node pass), reporting no
+blocking/high findings and one medium Wake Lock sentinel-lifecycle issue. The
+follow-up fix discards already-released request results, detaches on explicit
+disable before awaiting release, preserves new sentinels against late old events,
+and invalidates pending requests on disable (including disable/re-enable races).
+Four extracted-real-code regressions failed before the fix and pass afterward:
+current focused Python 33/33; Node UI 12/12 (original 8 plus 4); related Node
+runner 21/21 (12 cases plus 9 existing script wrappers). Privacy/busy gates,
+START and device/deployment scope are unchanged. No full-product rerun or device
+acceptance is claimed for this follow-up.
+
 **Not tested:** any phone model/OEM/Android/browser, kernel drivers, no-SIM/no-data
 tether enabling, DHCP, USB power/roles, actual ID_PATH, network activation/default
 route/DNS preservation/overlap behavior, generic profile competition, manual URL

@@ -3,18 +3,23 @@ const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 const control=path.join(__dirname,'../src/orangepi_collect/control');
 const app=fs.readFileSync(path.join(control,'phone_app.js'),'utf8');
-const start=app.indexOf("let wakeState='released';"),end=app.indexOf("document.addEventListener('visibilitychange'",start);
+const start=app.indexOf("let wakeState='released'"),end=app.indexOf("document.addEventListener('visibilitychange'",start);
 assert(start>=0&&end>start);
-function wake({secure=true,api=true,deny=false,privacy=false}={}){
- const button={dataset:{}},listeners={},sentinel={released:false,addEventListener:(kind,fn)=>listeners[kind]=fn,
-  release:async()=>{sentinel.released=true;listeners.release?.();}};
+function sentinelFixture(){
+ const listeners={};
+ const sentinel={released:false,addEventListener:(kind,fn)=>listeners[kind]=fn,
+  release:async()=>{if(!sentinel.released){sentinel.released=true;listeners.release?.();}}};
+ return {sentinel,emitRelease:()=>{sentinel.released=true;listeners.release?.();}};
+}
+function wake({secure=true,api=true,deny=false,privacy=false,request=null}={}){
+ const button={dataset:{}},fixture=sentinelFixture(),sentinel=fixture.sentinel;
  let requests=0;
- const context={global:{isSecureContext:secure},navigator:api?{wakeLock:{request:async()=>{requests++;if(deny)throw Error('denied');return sentinel;}}}:{},
+ const context={global:{isSecureContext:secure},navigator:api?{wakeLock:{request:async()=>{requests++;if(deny)throw Error('denied');return request?request():sentinel;}}}:{},
   document:{hidden:false},safe:()=>!privacy,$:()=>button,sessionStorage:{setItem(){}},
   keepAwake:false,wakeLock:null,wakePending:false,message:()=>assert.fail('wake status must not add a toast over privacy')};
  vm.createContext(context);vm.runInContext(app.slice(start,end),context);
  return {button,context,sentinel,requests:()=>requests,click:()=>button.onclick(),acquire:()=>context.acquireWakeLock(),
-  release:()=>{sentinel.released=true;listeners.release?.();}};
+   release:fixture.emitRelease};
 }
 test('insecure HTTP reports insecure, never claims permission success',async()=>{
  const h=wake({secure:false});await h.click();assert.equal(h.button.dataset.wakeState,'insecure');assert.equal(h.requests(),0);
@@ -31,6 +36,38 @@ test('held only after fulfilled request, OS release is reflected',async()=>{
 });
 test('explicit disable releases actual sentinel',async()=>{
  const h=wake();await h.click();await h.click();assert(h.sentinel.released);assert.equal(h.button.dataset.wakeState,'released');
+});
+test('already released request result is not retained and explicit re-enable requests again',async()=>{
+ const first=sentinelFixture(),second=sentinelFixture();first.sentinel.released=true;
+ const results=[first.sentinel,second.sentinel],h=wake({request:()=>results.shift()});
+ await h.click();assert.equal(h.button.dataset.wakeState,'released');assert.equal(h.context.wakeLock,null);
+ await h.click();await h.click();assert.equal(h.requests(),2);assert.equal(h.context.wakeLock,second.sentinel);
+ assert.equal(h.button.dataset.wakeState,'held');
+});
+test('disable clears a sentinel even if release happened without a delivered event',async()=>{
+ const h=wake();await h.click();h.sentinel.released=true;
+ await h.click();assert.equal(h.context.wakeLock,null);assert.equal(h.button.dataset.wakeState,'released');
+});
+test('late old release cannot clear a new sentinel or overwrite held state',async()=>{
+ const old=sentinelFixture(),current=sentinelFixture();let finishRelease;
+ old.sentinel.release=()=>new Promise(resolve=>{finishRelease=resolve;});
+ const results=[old.sentinel,current.sentinel],h=wake({request:()=>results.shift()});
+ await h.click();const closing=h.click();assert.equal(h.context.wakeLock,null,'detach before awaiting release');
+ await h.click();assert.equal(h.context.wakeLock,current.sentinel);
+ old.emitRelease();finishRelease();await closing;
+ assert.equal(h.context.wakeLock,current.sentinel);assert.equal(h.button.dataset.wakeState,'held');
+});
+test('pending result after disable is discarded, including disable then re-enable race',async()=>{
+ for(const reenable of [false,true]){
+  const canceled=sentinelFixture(),current=sentinelFixture();let resolveRequest;
+  const h=wake({request:()=>h.requests()===1?new Promise(resolve=>{resolveRequest=resolve;}):current.sentinel});
+  const opening=h.click();assert.equal(h.button.dataset.wakeState,'requesting');
+  await h.click();if(reenable)await h.click();
+  resolveRequest(canceled.sentinel);await opening;
+  assert(canceled.sentinel.released);assert.equal(h.context.wakeLock,null);assert.equal(h.button.dataset.wakeState,'released');
+  if(!reenable)await h.click();else await h.acquire();
+  assert.equal(h.requests(),2);assert.equal(h.context.wakeLock,current.sentinel);
+ }
 });
 test('privacy and background prevent new wake requests or messages',async()=>{
  const h=wake({privacy:true});await h.click();assert.equal(h.requests(),0);

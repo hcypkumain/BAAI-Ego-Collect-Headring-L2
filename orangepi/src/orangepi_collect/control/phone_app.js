@@ -379,7 +379,7 @@
    if(installPrompt){await installPrompt.prompt();installPrompt=null;}
    else message('iPhone：Safari 分享 → 添加到主屏幕。Android：浏览器菜单 → 添加到主屏幕。局域网 HTTP 地址可能只支持快捷方式；完整安装需要受信任的 HTTPS。');
   };
-   let wakeState='released';
+   let wakeState='released',wakeGeneration=0;
    function paintWake() {
     const button=$('phone-awake');button.dataset.wakeState=wakeState;
     button.textContent='屏幕保活：'+wakeState+(wakeState==='held'?'（可撤销）':'');
@@ -389,18 +389,20 @@
     if(!keepAwake || document.hidden || !safe() || wakeLock || wakePending || wakeState==='denied')return;
     if(!global.isSecureContext){wakeState='insecure';paintWake();return;}
     if(!navigator.wakeLock?.request){wakeState='unsupported';paintWake();return;}
+    const generation=wakeGeneration;
     wakePending=true;wakeState='requesting';paintWake();
     try {
      const acquired=await navigator.wakeLock.request('screen');
-     if(!keepAwake){await acquired.release();wakeState='released';return;}
-     wakeLock=acquired;wakeState=acquired.released?'released':'held';
+     if(!keepAwake || generation!==wakeGeneration){if(!acquired.released)await acquired.release();return;}
+     if(acquired.released){wakeState='released';return;}
+     wakeLock=acquired;wakeState='held';
      acquired.addEventListener('release',() => {if(wakeLock===acquired){wakeLock=null;wakeState='released';paintWake();}});
     }
-    catch {wakeState='denied';}
+    catch {if(keepAwake && generation===wakeGeneration)wakeState='denied';}
     finally{wakePending=false;paintWake();}
   }
    paintWake();
-   $('phone-awake').onclick=async () => {keepAwake=!keepAwake;try{sessionStorage.setItem('pi-keep-awake',keepAwake?'1':'0');}catch{}if(!keepAwake){try{if(wakeLock)await wakeLock.release();}finally{wakeState='released';paintWake();}}else{wakeState='released';await acquireWakeLock();}};
+   $('phone-awake').onclick=async () => {keepAwake=!keepAwake;try{sessionStorage.setItem('pi-keep-awake',keepAwake?'1':'0');}catch{}if(!keepAwake){wakeGeneration++;const previous=wakeLock;wakeLock=null;wakeState='released';paintWake();if(previous&&!previous.released)await previous.release();}else{wakeState='released';await acquireWakeLock();}};
   document.addEventListener('visibilitychange',() => {if(document.hidden)pause();else acquireWakeLock();});
   document.addEventListener('keydown',event => {if(event.key==='Escape'&&!viewer.hidden)suspend();});
   async function references(){begin('references');await referenceLibrary?.open();}
