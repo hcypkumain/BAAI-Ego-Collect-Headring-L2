@@ -3,13 +3,20 @@
 Environment: Python 3.14.4, jsonschema 4.19.2, referencing 0.36.2, Node
 v26.13.0, all pre-existing. No dependencies installed. No hardware acceptance.
 
+R1–R3 follow-up: `REVIEW_FIXES.md` records the independent review findings and
+actual red→green reproductions. The 10 new regressions pass; the 5-test host
+review subset (including real RST/capacity/slow-reader sockets) also passed three
+additional repetitions. All legacy comparison commands below were rerun in both
+the unchanged baseline and corrected branch, with the same outcomes. Independent
+re-review/signoff remains pending; phase4A was not implemented.
+
 Run from repository root:
 
 | Exact command | Result |
 | --- | --- |
 | `python3 contracts/v1/validate_examples.py` | 9 JSON / 4 schemas / original 25 case expectations PASS |
-| `python3 -m unittest discover -s orangepi/tests -p 'test_snapshot*.py' -v` | 7 PASS |
-| `python3 -m unittest discover -s host/qc/tests -p 'test_*.py' -v` | 6 PASS; includes device HTTP → Hub → both consumer HTTP → actual JS consumer/renderer chain |
+| `python3 -m unittest discover -s orangepi/tests -p 'test_snapshot*.py' -v` | 12 PASS after R1/R2 corrections (original 7 + 5 review regressions) |
+| `python3 -m unittest discover -s host/qc/tests -p 'test_*.py' -v` | 11 PASS after review corrections (original 6 + 5 review regressions); includes device HTTP → Hub → both consumer HTTP → actual JS consumer/renderer chain |
 | `python3 tools/system_read_model_fixture.py --output /tmp/opencode/system-v1-fixture.json` | synthetic five-card host schema validated |
 | `node host/qc/tests/test_fleet_cards.cjs /tmp/opencode/system-v1-fixture.json` | PASS shared actual renderer, actual receiver entry, actual workbench consumer; five distinct quality/reboot examples |
 | `node --check tools/fleet_maintenance/static/app.js` | PASS |

@@ -75,13 +75,20 @@ def validate(value, kind='device'):
     def samples(obj):
         if not isinstance(obj, dict): return
         if 'sampled_mono_ms' in obj:
+            now = value['time']['monotonic_ms']
             if obj['quality'] == 'known':
                 if (obj['boot_id'] is None or obj['boot_id'] != value['boot_id'] or
                     obj['age_ms'] is None or obj['sampled_mono_ms'] is None or
                     obj['age_ms'] > obj['stale_after_ms']): raise ValueError('sample identity/age')
-                now = value['time']['monotonic_ms']
                 if now is None or obj['sampled_mono_ms'] > now: raise ValueError('future sample')
             elif obj['reason'] is None: raise ValueError('unknown reason')
+            # Host projections add response/local elapsed without advancing the
+            # device timestamp: age is a lower bound, not an equality. Never let
+            # same-boot wire evidence understate its own device elapsed time.
+            if (obj['boot_id'] is not None and obj['boot_id'] == value['boot_id'] and
+                now is not None and obj['sampled_mono_ms'] is not None and
+                obj['age_ms'] is not None and obj['age_ms'] < now - obj['sampled_mono_ms']):
+                raise ValueError('underestimated sample age')
         for item in obj.values(): samples(item)
     samples(value)
     if value['sample']['quality'] == 'known' and (value['controller_instance'] is None or value['seq'] is None): raise ValueError('publish identity')
@@ -94,11 +101,18 @@ def validate(value, kind='device'):
     if r['disk_free_bytes'] is not None and r['disk_available_bytes'] is not None and r['disk_available_bytes'] > r['disk_free_bytes']: raise ValueError('disk counts')
     for role in ('left', 'right'):
         r = value['roles'][role]
-        if r['calibration_valid'] is True and (r['confirmed'] is not True or r['proof_boot_id'] != value['boot_id'] or r['profile_epoch'] != value['session']['profile_epoch']): raise ValueError('role proof')
+        if r['calibration_valid'] is True:
+            if (value['boot_id'] is None or value['session']['profile_epoch'] is None or
+                any(r[k] is None for k in ('binding_id', 'calibration_version', 'profile_epoch', 'proof_boot_id')) or
+                r['confirmed'] is not True or r['proof_boot_id'] != value['boot_id'] or
+                r['profile_epoch'] != value['session']['profile_epoch']): raise ValueError('role proof')
     i = value['health']['impedance']
     if i['can_review'] is True:
         if i['quality'] == 'unknown' or any(i[k] is None for k in ('measurement_id', 'owner_run', 'quality_version')): raise ValueError('review evidence')
-        if i['session_id'] is None or i['session_id'] != value['session']['session_id'] or i['profile_epoch'] != value['session']['profile_epoch']: raise ValueError('review identity')
+        if (value['boot_id'] is None or value['controller_instance'] is None or
+            i['session_id'] is None or i['profile_epoch'] is None or
+            i['session_id'] != value['session']['session_id'] or
+            i['profile_epoch'] != value['session']['profile_epoch']): raise ValueError('review identity')
     return value
 
 

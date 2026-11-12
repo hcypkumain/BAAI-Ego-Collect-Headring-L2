@@ -363,15 +363,20 @@ class Handler(BaseHTTPRequestHandler):
         model=getattr(self.hub,'read_model',None)
         if model is None:self.send(503,error('SNAPSHOT_UNAVAILABLE'));return
         if self.path=='/api/v1/fleet':self.send(200,self.hub.v1_snapshot());return
-        client=model.subscribe(self.headers.get('Last-Event-ID'))
+        # Bound each stream write, including headers/capacity errors. This is
+        # connection maintenance only; it never renews device observation.
+        self.connection.settimeout(1.0)
+        try:client=model.subscribe(self.headers.get('Last-Event-ID'))
+        except ValueError:
+            self.send(503,error('CAPACITY_EXCEEDED'));return
         try:
             self.send_response(200);self.cors();self.send_header('Content-Type','text/event-stream');self.send_header('Cache-Control','no-store');self.end_headers()
             while not self.hub.stop.is_set():
                 try:
                     value=client.get(timeout=.5)
                     raw=('id: '+value['id']+'\nevent: '+value['event']+'\ndata: ').encode()+encoded(value['data'])+b'\n\n'
-                    self.wfile.write(raw);self.wfile.flush()
-                except queue.Empty:continue
+                except queue.Empty:raw=b': keepalive\n\n'
+                self.wfile.write(raw);self.wfile.flush()
         except (BrokenPipeError,ConnectionResetError,OSError):pass
         finally:model.unsubscribe(client)
 

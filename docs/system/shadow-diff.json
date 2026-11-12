@@ -11,5 +11,7 @@
   {"device_id":"cp_0018","field":"mode","classification":"legacy_missing_unknown","reason":"NOT_OBSERVED"},
   {"device_id":"cp_0020","field":"mode","classification":"legacy_missing_unknown","reason":"NOT_OBSERVED"},
   {"device_id":"cp_0022","field":"mode","classification":"legacy_missing_unknown","reason":"NOT_OBSERVED"},
-  {"device_id":"synthetic-only","field":"WARN_accepted_ledger_completed","classification":"known_consistent","reason":"EXISTING_RULE_UNCHANGED"}
+  {"device_id":"synthetic-only","field":"WARN_accepted_ledger_completed","classification":"known_consistent","reason":"EXISTING_RULE_UNCHANGED"},
+  {"device_id":"synthetic-only","field":"sample.age_ms","classification":"conflict","reason":"AGE_UNDERESTIMATED"},
+  {"device_id":"synthetic-only","field":"roles.calibration_valid","classification":"legacy_inference_discarded","reason":"NULL_NOT_PROOF"}
 ]

@@ -1,5 +1,9 @@
 # Phase 3: offline read-model vertical slice
 
+Review status: Astra found R1/R2 high and R3 medium in `ae60c5c`; the minimal
+corrections are documented in `REVIEW_FIXES.md`. Independent re-review/signoff
+is pending. Phase4A has not started.
+
 **Not deployed. No device, production HTTP, database, service, route or network
 configuration was changed.** Existing controller actions, impedance controls,
 WARN completion rules, ledger, task grouping and USB transport are unchanged.

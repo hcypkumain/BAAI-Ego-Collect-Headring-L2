@@ -37,6 +37,22 @@ def shadow_matrix():
     validate(synthetic)
     assert synthetic['progress']['completed']==fixture['synthetic_ledger_case']['completed']
     matrix.append(dict(device_id='synthetic-only',field='WARN_accepted_ledger_completed',classification='known_consistent',reason='EXISTING_RULE_UNCHANGED'))
+    # Review corrections: these are synthetic contract conflicts, not new live
+    # facts about any device. Invalid wire evidence must never become UI green.
+    invalid=json.loads((ROOT/'contracts/v1/fixtures/device.json').read_text())
+    invalid['resources']['ram_sample'].update(sampled_mono_ms=0,age_ms=0)
+    with_error=False
+    try:validate(invalid)
+    except ValueError:with_error=True
+    assert with_error
+    matrix.append(dict(device_id='synthetic-only',field='sample.age_ms',classification='conflict',reason='AGE_UNDERESTIMATED'))
+    invalid=normalize('cp_0015')
+    invalid['roles']['left'].update(confirmed=True,calibration_valid=True)
+    with_error=False
+    try:validate(invalid)
+    except ValueError:with_error=True
+    assert with_error
+    matrix.append(dict(device_id='synthetic-only',field='roles.calibration_valid',classification='legacy_inference_discarded',reason='NULL_NOT_PROOF'))
     return matrix
 
 

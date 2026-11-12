@@ -49,8 +49,13 @@ def semantic(kind, value):
                         assert obj['boot_id'] == value['boot_id'] and value['boot_id'] is not None
                         assert obj['age_ms'] is not None and obj['sampled_mono_ms'] is not None
                         assert obj['age_ms'] <= obj['stale_after_ms']
+                        assert value['time']['monotonic_ms'] is not None
+                        assert obj['sampled_mono_ms'] <= value['time']['monotonic_ms']
                     if obj['quality'] != 'known':
                         assert obj['reason'] is not None
+                    if (obj['boot_id'] is not None and obj['boot_id'] == value['boot_id'] and
+                        value['time']['monotonic_ms'] is not None and obj['sampled_mono_ms'] is not None and obj['age_ms'] is not None):
+                        assert obj['age_ms'] >= value['time']['monotonic_ms'] - obj['sampled_mono_ms']
                 for item in obj.values():
                     samples(item)
         samples(value)
@@ -68,10 +73,14 @@ def semantic(kind, value):
         for role in ('left', 'right'):
             r = value['roles'][role]
             if r['calibration_valid']:
+                assert value['boot_id'] is not None and value['session']['profile_epoch'] is not None
+                assert all(r[k] is not None for k in ('binding_id', 'calibration_version', 'profile_epoch', 'proof_boot_id'))
                 assert r['confirmed'] is True and r['proof_boot_id'] == value['boot_id']
                 assert r['profile_epoch'] == value['session']['profile_epoch']
         i = value['health']['impedance']
         if i['can_review']:
+            assert value['boot_id'] is not None and value['controller_instance'] is not None
+            assert i['session_id'] is not None and i['profile_epoch'] is not None
             assert i['quality'] != 'unknown'
             assert all(i[k] is not None for k in ('measurement_id', 'owner_run', 'quality_version'))
             assert i['session_id'] == value['session']['session_id']
