@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "files": [
+    {"path":"host/common/device_registry.py","category":"runtime","reason":"C0 enrollment and grant authority"},
+    {"path":"host/common/governance_contract.py","category":"runtime","reason":"C0 evidence and policy validation"},
+    {"path":"host/common/strict_json.py","category":"runtime","reason":"C0 strict serialization"},
+    {"path":"host/qc/fleet_monitor/governance_cli.py","category":"runtime","reason":"Main explicit target selection and result binding"},
+    {"path":"host/qc/fleet_monitor/readonly_probe.py","category":"runtime","reason":"C readonly adapter, absent before merge"},
+    {"path":"host/qc/fleet_monitor/isolated_transport.py","category":"runtime","reason":"C resource isolation, absent before merge"},
+    {"path":"tools/fleet_maintenance/component_bom.py","category":"runtime","reason":"B source/installed/runtime separation, absent before merge"},
+    {"path":"tools/fleet_maintenance/release_registry.py","category":"runtime","reason":"B release/resource/router binding, absent before merge"},
+    {"path":"services/headring-qc/receiver_state.py","category":"legacy","reason":"A registry adapter, certified algorithm list remains before merge"},
+    {"path":"services/headring-qc/handoff_receiver.py","category":"legacy","reason":"A receive locks/filtering and preservation of certified guards"},
+    {"path":"services/headring-qc/host_storage.py","category":"legacy","reason":"A shared storage enrollment integration"},
+    {"path":"services/headring-qc/cloud_upload_cli.py","category":"legacy","reason":"A independent upload grant gates"},
+    {"path":"host/standardizer/worker.py","category":"legacy","reason":"A archived source purification, AST only"},
+    {"path":"tools/fleet_maintenance/fleet.py","category":"legacy","reason":"B explicit targets instead of defaults"},
+    {"path":"tools/fleet_maintenance/delta_release.py","category":"legacy","reason":"B remove inventory authority from observed cache"},
+    {"path":"tools/fleet_maintenance/web_config.py","category":"legacy","reason":"B remove fixed default inventory"},
+    {"path":"tools/build_governance_release.py","category":"runtime","reason":"Main immutable explicit host payload exporter"},
+    {"path":"tools/check_device_generality.py","category":"runtime","reason":"Main path-first audit itself"},
+    {"path":"host/qc/tests/governance_fixtures.py","category":"fixture","reason":"Single main-owned synthetic C0 factory, never production defaults"},
+    {"path":"configs/device-registry.example.json","category":"config","reason":"Disabled RFC5737 example, not production enablement"},
+    {"path":"docs/GOVERNANCE_RELEASE.md","category":"docs","reason":"Main scope, debt and release limitations"}
+  ],
+  "exception_sources": {
+    "services/headring-qc/receiver_state.py":"477a64980aa93021efc24fcc60956e8ab2f4704e159ac9be23ada04738b40689",
+    "tools/fleet_maintenance/fleet.py":"a32874525a802531f7f3145e8eb671afa00ed6af2a973e25daf33ee14803dfeb",
+    "tools/fleet_maintenance/delta_release.py":"1cade505dd8c42422bfc4b40679bebf09b91ffc1b49688b70b8bd7077e4b9f4b",
+    "tools/fleet_maintenance/web_config.py":"a14d35fc8079c14ada63bbb4f56e7cff957c6a3b8f5c89252193fb2c081fd8f1",
+    "host/qc/tests/governance_fixtures.py":"918cd6cb1459dd6a77814e6850d086006ddb5650b2fe32bd5292be41fa043b77"
+  },
+  "exceptions": [
+    {"path":"services/headring-qc/receiver_state.py","rule":"DEVICE_TABLE","symbol":"TARGETS","category":"legacy_debt","reason":"Certified premerge code only; A must replace via explicit registry. Not authorization for new fixed lists."},
+    {"path":"tools/fleet_maintenance/fleet.py","rule":"DEVICE_DEFAULT","symbol":"main","category":"legacy_debt","reason":"Certified premerge defaults; B must require explicit targets. Final G2 must re-evaluate surviving debt."},
+    {"path":"tools/fleet_maintenance/delta_release.py","rule":"DEVICE_TABLE","symbol":"DEFAULT_INVENTORY","category":"legacy_debt","reason":"Certified premerge inventory; B owns registry replacement."},
+    {"path":"tools/fleet_maintenance/delta_release.py","rule":"RUNTIME_IP","symbol":"DEFAULT_INVENTORY","category":"legacy_debt","reason":"Certified premerge inventory address literals; B must remove authority, never copy to new configuration."},
+    {"path":"tools/fleet_maintenance/delta_release.py","rule":"RUNTIME_IP","symbol":"ssh","category":"legacy_debt","reason":"Certified legacy host bind fallback, not a governance target. B/main review required before final G2."},
+    {"path":"tools/fleet_maintenance/web_config.py","rule":"DEVICE_TABLE","symbol":"DEFAULT","category":"legacy_debt","reason":"Certified premerge default configuration; B owns registry injection."},
+    {"path":"tools/fleet_maintenance/web_config.py","rule":"RUNTIME_IP","symbol":"DEFAULT","category":"legacy_debt","reason":"Certified premerge host bind configuration; final integration review, not a scan-wide exclusion."},
+    {"path":"host/qc/tests/governance_fixtures.py","rule":"DEVICE_TABLE","symbol":"DEFAULT_DEVICE_IDS","category":"fixture","reason":"Explicit six-device synthetic test factory, no production default authority."},
+    {"path":"host/qc/tests/governance_fixtures.py","rule":"DEVICE_TABLE","symbol":"LEGACY_UPLOAD_IDS","category":"historical_scope","reason":"Synthetic explicit migration test of original four upload scopes, not parser authorization defaults."},
+    {"path":"host/qc/tests/governance_fixtures.py","rule":"DEVICE_DEFAULT","symbol":"sample_device","category":"fixture","reason":"Synthetic test factory ID only."},
+    {"path":"host/qc/tests/governance_fixtures.py","rule":"DEVICE_DEFAULT","symbol":"sample_probe_result","category":"fixture","reason":"Synthetic test evidence ID only."}
+  ]
+}
