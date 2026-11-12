@@ -255,7 +255,7 @@ def handle_phone_request(handler, owner, method):
         except (ValueError,TypeError):handler.send(400,{'error':'检查确认无效'})
         return True
     if path=='/api/phone/links' and method=='GET':
-        handler.send(200,owner.phone_links.snapshot('http://'+handler.headers.get('Host','')));return True
+        handler.send(200,owner.phone_links.snapshot(handler.connection.getsockname()));return True
     if path.startswith('/api/phone/preview/'):
         handle_preview(handler,owner,url,method); return True
     if path.startswith('/api/phone/stream/'):

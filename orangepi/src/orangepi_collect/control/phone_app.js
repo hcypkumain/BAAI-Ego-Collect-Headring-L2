@@ -379,14 +379,28 @@
    if(installPrompt){await installPrompt.prompt();installPrompt=null;}
    else message('iPhone：Safari 分享 → 添加到主屏幕。Android：浏览器菜单 → 添加到主屏幕。局域网 HTTP 地址可能只支持快捷方式；完整安装需要受信任的 HTTPS。');
   };
-  async function acquireWakeLock() {
-   if(!keepAwake || document.hidden || !safe() || wakeLock || wakePending)return;
-   wakePending=true;
-   try {wakeLock=await navigator.wakeLock.request('screen');wakeLock.addEventListener('release',() => {wakeLock=null;});message('已请求保持亮屏；系统省电策略仍可能锁屏。');}
-   catch {message('此浏览器或当前连接不支持保持亮屏，请在手机系统中设置自动锁屏时间。');}
-   finally{wakePending=false;}
+   let wakeState='released';
+   function paintWake() {
+    const button=$('phone-awake');button.dataset.wakeState=wakeState;
+    button.textContent='屏幕保活：'+wakeState+(wakeState==='held'?'（可撤销）':'');
+    button.title='需保持页面前台并手动检查系统锁屏设置；网页不能保证系统屏幕控制或 STOP 可达。';
+   }
+   async function acquireWakeLock() {
+    if(!keepAwake || document.hidden || !safe() || wakeLock || wakePending || wakeState==='denied')return;
+    if(!global.isSecureContext){wakeState='insecure';paintWake();return;}
+    if(!navigator.wakeLock?.request){wakeState='unsupported';paintWake();return;}
+    wakePending=true;wakeState='requesting';paintWake();
+    try {
+     const acquired=await navigator.wakeLock.request('screen');
+     if(!keepAwake){await acquired.release();wakeState='released';return;}
+     wakeLock=acquired;wakeState=acquired.released?'released':'held';
+     acquired.addEventListener('release',() => {if(wakeLock===acquired){wakeLock=null;wakeState='released';paintWake();}});
+    }
+    catch {wakeState='denied';}
+    finally{wakePending=false;paintWake();}
   }
-  $('phone-awake').onclick=async () => {keepAwake=!keepAwake;try{sessionStorage.setItem('pi-keep-awake',keepAwake?'1':'0');}catch{}if(!keepAwake){if(wakeLock)await wakeLock.release();$('phone-awake').textContent='保持亮屏';}else{$('phone-awake').textContent='允许息屏';await acquireWakeLock();}};
+   paintWake();
+   $('phone-awake').onclick=async () => {keepAwake=!keepAwake;try{sessionStorage.setItem('pi-keep-awake',keepAwake?'1':'0');}catch{}if(!keepAwake){try{if(wakeLock)await wakeLock.release();}finally{wakeState='released';paintWake();}}else{wakeState='released';await acquireWakeLock();}};
   document.addEventListener('visibilitychange',() => {if(document.hidden)pause();else acquireWakeLock();});
   document.addEventListener('keydown',event => {if(event.key==='Escape'&&!viewer.hidden)suspend();});
   async function references(){begin('references');await referenceLibrary?.open();}
