@@ -257,6 +257,7 @@ class GovernanceRelease(unittest.TestCase):
     def test_ssh_uses_registry_address_and_alias(self):
         registry=sample_registry();device=next(d for d in registry.devices if d.device_id=='cp_0042')
         with patch.object(online,'config_for',return_value={'user':device.ssh_user,'hostkeyalias':device.host_key_alias}),patch.object(online,'SSH') as ssh:
+            ssh.return_value.argv=['ssh','-F','/synthetic/ssh','-o','StrictHostKeyChecking=yes',device.ssh_alias]
             fleet.registry_ssh(online,registry,'cp_0042',Path('/synthetic/ssh'))
             self.assertEqual(ssh.call_args.args[1:3],(device.ssh_alias,device.address))
 
@@ -317,6 +318,184 @@ class GovernanceRelease(unittest.TestCase):
         self.assertEqual(actual['installed']['status'],'unknown')
         self.assertEqual(actual['runtime']['evidence']['scope'],'file')
         self.assertTrue(actual['runtime']['evidence']['matches_source'])
+
+class G1BoundaryRegression(unittest.TestCase):
+    """Astra's independent counterexamples: real entry points, no real transport."""
+    @classmethod
+    def setUpClass(cls):
+        cls.path = 'host/qc/fleet_monitor/__init__.py'
+        cls.data = blob(C0, cls.path)
+        source = {'schema_version':1, 'base_commit':C0,
+                  'components':[record(c) for c in COMPONENT_IDS]}
+        next(c for c in source['components'] if c['component_id']=='monitor')['files'] = [
+            {'ref':C0,'path':cls.path,'sha256':fleet.sha(cls.data),
+             'resource':cls.path,'provenance':'certified:host'}]
+        cls.bom = build_bom(source_manifest=source, read_blob=blob, overlays=[])
+
+    def check_bom(self, mutate=None):
+        bom=deepcopy(self.bom)
+        if mutate: mutate(bom)
+        release,router=make_release(bom,{self.path:self.data},['monitor'])
+        return validate_release(release=release,router=router,resources={self.path:self.data})
+
+    def source(self, bom):
+        return next(c for c in bom['components'] if c['component_id']=='monitor')['source']
+
+    def test_b02_extra_bom_root(self):
+        self.assertTrue(self.check_bom(lambda b:b.update(unexpected=True)))
+
+    def test_b02_missing_installed_and_runtime(self):
+        def mutate(b):
+            for c in b['components']:
+                del c['installed'];del c['runtime']
+        self.assertTrue(self.check_bom(mutate))
+
+    def test_b02_source_ref_bool(self):
+        self.assertTrue(self.check_bom(lambda b:self.source(b).update(ref=True)))
+
+    def test_b02_file_provenance_bool(self):
+        self.assertTrue(self.check_bom(lambda b:self.source(b)['files'][0].update(provenance=True)))
+
+    def test_b02_file_extra_field(self):
+        self.assertTrue(self.check_bom(lambda b:self.source(b)['files'][0].update(unexpected=True)))
+
+    def test_b02_nested_bool_extra_and_invalid_labels(self):
+        mutations = [
+            lambda b:self.source(b).update(sha256=True),
+            lambda b:self.source(b).update(provenance=[True]),
+            lambda b:self.source(b).update(provenance=['/private/absolute']),
+            lambda b:self.source(b)['files'][0].update(provenance='bad\nlabel'),
+            lambda b:self.source(b)['files'][0].update(provenance='/private/absolute'),
+            lambda b:self.source(b)['files'][0].update(ref=True),
+            lambda b:self.source(b)['files'][0].update(path='../escape'),
+            lambda b:self.source(b)['files'][0].update(sha256=True),
+            lambda b:self.source(b).update(unexpected=True),
+            lambda b:b['components'][0].update(unexpected=True),
+            lambda b:b['components'][0]['installed'].update(unexpected=True),
+            lambda b:b['components'][0]['installed'].update(sha256='a'*64),
+            lambda b:b['components'][0]['runtime'].update(status=True),
+            lambda b:b['components'][0]['approval'].update(unexpected=True),
+            lambda b:b['components'][0]['approval'].update(scope=True),
+        ]
+        for i, mutate in enumerate(mutations):
+            with self.subTest(case=i):self.assertTrue(self.check_bom(mutate))
+
+    def test_b02_valid_unknown_and_file_compare_positive(self):
+        self.assertEqual(self.check_bom(),())
+        entry={'monitor':{'sha256':fleet.sha(self.data),'status':'observed','source':'file:'+self.path}}
+        observation=sample_probe_result(fields={'installed_components':sample_evidence(entry)})
+        bom=compare_components(self.bom,observation)
+        release,router=make_release(bom,{self.path:self.data},['monitor'])
+        self.assertEqual(validate_release(release=release,router=router,resources={self.path:self.data}),())
+
+    def test_b02_overlay_nested_shape(self):
+        GovernanceRelease.setUpClass()
+        mutations = [
+            lambda o:o.update(unexpected=True),
+            lambda o:o.update(ref=True),
+            lambda o:o['resources'].update(unexpected=True),
+            lambda o:o['resources'].update({'bundle.zip':True}),
+            lambda o:o['approval'].update(unexpected=True),
+            lambda o:o['approval'].update(expiry=True),
+        ]
+        for i, mutate in enumerate(mutations):
+            bom=deepcopy(GovernanceRelease.bom);mutate(bom['overlays'][0])
+            release,router=make_release(bom,GovernanceRelease.all_resources,['collector'])
+            with self.subTest(case=i):
+                self.assertTrue(validate_release(release=release,router=router,resources=GovernanceRelease.all_resources))
+
+    def plan_main(self, overlay, mode, corruption):
+        """Create a fresh plan through the real main, then consume it through main."""
+        registry=sample_registry();raw=asdict(registry);del raw['digest']
+        device=registry.devices[-1]
+        live={'files':{},'protected':{},'camd_pid':'synthetic'}
+        profile={'policy':'advisory'}
+        prepared={'schema':1,'device':device.device_id,'commit':PIN,
+                  'manifest_sha256':fleet.MANIFEST_SHA256,'unknown_approved':False,
+                  'diff':{},'component_diff':{},'protected':{},'camd_pid':'synthetic'}
+        with tempfile.TemporaryDirectory() as t,contextlib.ExitStack() as stack:
+            root=Path(t);path=root/'registry.json';path.write_text(canonical_json(raw))
+            output=io.StringIO();stack.enter_context(contextlib.redirect_stdout(output))
+            stack.enter_context(patch.object(fleet,'registry_ssh',return_value=object()))
+            stack.enter_context(patch.object(fleet,'build',return_value={'manifest_sha256':fleet.MANIFEST_SHA256}))
+            stack.enter_context(patch.object(online,'read_live',return_value=live))
+            stack.enter_context(patch.object(online,'prepare_plan',return_value=deepcopy(prepared)))
+            stack.enter_context(patch.object(online,'matches'))
+            stack.enter_context(patch.object(online,'gates'))
+            classify=stack.enter_context(patch.object(delta_release,'classify',return_value='after' if mode=='verify' else 'before'))
+            stack.enter_context(patch.object(delta_release,'read_profile',return_value=profile))
+            delta_stage=stack.enter_context(patch.object(delta_release,'stage_apply',return_value={'status':'staged_not_applied'}))
+            stage=stack.enter_context(patch.object(online,'stage_and_apply',return_value='synthetic-root'))
+            components=stack.enter_context(patch.object(online,'stage_components_verify',return_value='synthetic-root'))
+            verify=stack.enter_context(patch.object(online,'verify',return_value={'status':'verified','deploy_ready':True}))
+            cli=['--registry',str(path),'--targets',device.device_id,'--state-dir',str(root)]
+            if overlay:cli+=['--release',OVERLAY_ID]
+            self.assertEqual(fleet.main(cli),0)
+            created=json.loads(output.getvalue())
+            plan=online.load_plan(root,(created if overlay else created['results'][0])['plan_sha256'])
+            if corruption=='missing':plan.pop('registry_digest',None)
+            elif corruption=='missing_identity':plan.pop('registry_device',None)
+            elif corruption=='wrong':plan['registry_digest']='0'*64
+            elif corruption=='identity':plan['registry_device']={'device_id':device.device_id}
+            elif corruption=='config_changed':
+                raw['devices'][-1]['capabilities']=list(raw['devices'][-1]['capabilities'])+['changed-context']
+                path.write_text(canonical_json(raw))
+            if corruption is None:
+                self.assertEqual(plan.get('registry_digest'),registry.digest)
+                self.assertEqual(plan.get('registry_device',{}).get('host_key_alias'),device.host_key_alias)
+            digest,_=online.write_plan(root,plan)
+            output.seek(0);output.truncate()
+            classify.return_value='after' if mode=='verify' else 'before'
+            code=fleet.main(cli+['--'+mode,'--accepted-plan',digest])
+            if corruption is None:
+                self.assertEqual(code,3 if overlay and mode=='apply' else 0)
+                if overlay:self.assertEqual(delta_stage.call_count,1 if mode=='apply' else 0)
+                elif mode=='apply':self.assertEqual(stage.call_count,1);self.assertEqual(verify.call_count,1)
+                else:self.assertEqual(components.call_count,1);self.assertEqual(verify.call_count,2)
+            else:
+                self.assertEqual(code,2)
+                for spy in (delta_stage,stage,components,verify):spy.assert_not_called()
+
+    def test_b01_stable_real_main_create_apply_verify(self):
+        for mode in ('apply','verify'):
+            for corruption in (None,'missing','wrong','missing_identity','identity','config_changed'):
+                with self.subTest(mode=mode,corruption=corruption):self.plan_main(False,mode,corruption)
+
+    def test_b01_overlay_real_main_create_apply_verify(self):
+        for mode in ('apply','verify'):
+            for corruption in (None,'missing','wrong','missing_identity','identity','config_changed'):
+                with self.subTest(mode=mode,corruption=corruption):self.plan_main(True,mode,corruption)
+
+    def test_b01_direct_stage_boundary_cannot_bypass_registry_binding(self):
+        registry=sample_registry();ssh=unittest.mock.Mock()
+        with self.assertRaises((online.Failure,ValueError)):
+            delta_release.stage_apply(ssh,'cp_0042',b'not-staged',b'not-staged',
+                                      registry=registry,plan={})
+        ssh.run.assert_not_called();ssh.require_tty.assert_not_called()
+        with patch.object(online,'stage_and_apply') as stage,patch.object(online,'stage_components_verify') as components,patch.object(online,'verify') as verify:
+            for plan in ({},fleet.bind_registry_plan({'device':'cp_0042','unknown_approved':True},registry=registry,device='cp_0042')):
+                with self.assertRaises(ValueError):
+                    fleet.stage_registry_plan(online,ssh,{},plan,{},'cp_0042',registry=registry)
+                with self.assertRaises(ValueError):
+                    fleet.verify_registry_components(online,ssh,plan,{},'cp_0042',registry=registry)
+                with self.assertRaises(ValueError):
+                    fleet.verify_registry_plan(online,{},plan,{},'cp_0042',{},registry=registry)
+            for spy in (stage,components,verify):spy.assert_not_called()
+
+    def test_b03_configuration_reread_cannot_change_final_identity(self):
+        registry=sample_registry();d=registry.devices[-1]
+        with patch.object(online,'config_for',side_effect=[
+                {'user':d.ssh_user,'hostkeyalias':d.host_key_alias},
+                {'user':'unexpected-user','hostkeyalias':'unexpected-key'}]):
+            transport=fleet.registry_ssh(online,registry,d.device_id,'/synthetic/ssh')
+        opts=[]
+        for i,part in enumerate(transport.argv[:-1]):
+            if part=='-o':opts.append(transport.argv[i+1])
+        for key,value in (('hostname',d.address),('hostkeyalias',d.host_key_alias),
+                          ('user',d.ssh_user),('stricthostkeychecking','yes'),('batchmode','yes')):
+            values=[p.split('=',1)[1] for p in opts if p.split('=',1)[0].lower()==key]
+            self.assertEqual(values,[value],key)
+
 
 if __name__ == '__main__':
     unittest.main()

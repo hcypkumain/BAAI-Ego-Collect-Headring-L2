@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Pinned fleet code and USB component deployment."""
 import argparse
+from collections.abc import Mapping
 import hashlib
 import io
 import json
@@ -45,7 +46,61 @@ def registry_ssh(online, registry, device_id, ssh_config, bind_interface=None, b
     if (values.get('user') != device.ssh_user or
             (values.get('hostkeyalias') or values.get('hostname')) != device.host_key_alias):
         raise online.Failure('SSH user/host key identity differs from registry')
-    return online.SSH(ssh_config, device.ssh_alias, device.address, bind_interface, bind_address)
+    transport = online.SSH(ssh_config, device.ssh_alias, device.address, bind_interface, bind_address)
+    # online.SSH rereads config. Never trust identity options from that second read
+    # (or a later OpenSSH config parse); put the sole effective values first.
+    argv = transport.argv
+    if (not isinstance(argv, list) or not all(isinstance(a, str) for a in argv)
+            or len(argv) < 2 or argv[0] != 'ssh' or argv[-1] != device.ssh_alias):
+        raise online.Failure('unexpected SSH transport argv')
+    protected = {'hostname': device.address, 'hostkeyalias': device.host_key_alias,
+                 'user': device.ssh_user, 'stricthostkeychecking': 'yes', 'batchmode': 'yes'}
+    remaining = []; i = 1
+    while i < len(argv)-1:
+        if argv[i] not in ('-F', '-o') or i+1 >= len(argv)-1:
+            raise online.Failure('unexpected SSH transport option')
+        flag, value = argv[i:i+2]; i += 2
+        if flag == '-o':
+            key, sep, _ = value.partition('=')
+            if not sep:
+                raise online.Failure('unexpected SSH option syntax')
+            if key.lower() in protected:
+                continue
+        remaining.extend((flag, value))
+    fixed = [part for key, value in protected.items() for part in ('-o', key+'='+value)]
+    transport.argv = ['ssh', *fixed, *remaining, device.ssh_alias]
+    return transport
+
+def registry_device_identity(registry, device_id):
+    device, = select_devices(registry, [device_id], purpose='monitor')
+    return {name: getattr(device, name) for name in
+            ('device_id', 'ssh_alias', 'address', 'ssh_user', 'host_key_alias')}
+
+def bind_registry_plan(plan, *, registry: Registry, device):
+    if not isinstance(plan, Mapping) or plan.get('device') != device:
+        raise ValueError('cannot bind a plan for a different or missing device')
+    return {**plan, 'registry_digest': registry.digest,
+            'registry_device': registry_device_identity(registry, device)}
+
+def require_registry_plan(plan, *, registry: Registry, device):
+    if (not isinstance(plan, Mapping) or plan.get('unknown_approved') or plan.get('device') != device
+            or plan.get('registry_digest') != registry.digest
+            or plan.get('registry_device') != registry_device_identity(registry, device)):
+        raise ValueError('accepted plan registry/Device identity mismatch or missing; create a fresh plan')
+
+def stage_registry_plan(online, ssh, live, plan, result, device, *, registry, command_file=None):
+    require_registry_plan(plan, registry=registry, device=device)
+    return online.stage_and_apply(ssh, live, plan, result, device, command_file)
+
+def verify_registry_components(online, ssh, plan, result, device, *, registry):
+    require_registry_plan(plan, registry=registry, device=device)
+    return online.stage_components_verify(ssh, plan, result, device)
+
+def verify_registry_plan(online, live, plan, manifest, device, result, *, registry,
+                         root_components_verified=False):
+    require_registry_plan(plan, registry=registry, device=device)
+    return online.verify(live, plan, manifest, device, result,
+                         root_components_verified=root_components_verified)
 
 def address(value):
     import ipaddress
@@ -185,28 +240,30 @@ def main(argv=None):
             live=online.read_live(ssh, manifest)
             if args.apply or args.verify:
                 plan=online.load_plan(args.state_dir,args.accepted_plan)
+                require_registry_plan(plan,registry=registry,device=device)
                 if plan.get('unknown_approved'):
                     raise online.Failure('unknown baseline plan rejected; separate reconciliation required')
                 if args.apply:
                     online.matches(plan, live, device, manifest, result)
                     if plan['unknown_approved'] and not args.approve_unknown_baseline:
                         raise online.Failure('accepted plan contains unknown baseline; explicit --approve-unknown-baseline required')
-                    root=online.stage_and_apply(ssh,live,plan,result,device,args.sudo_command_file) if args.sudo_command_file else online.stage_and_apply(ssh,live,plan,result,device)
+                    root=stage_registry_plan(online,ssh,live,plan,result,device,registry=registry,command_file=args.sudo_command_file)
                     if isinstance(root,dict):
                         summaries.append({'device':device,**root,'deploy_ready':False}); exit_code=max(exit_code,3)
                         continue
                     live=online.read_live(ssh, manifest)
-                    summary=online.verify(live,plan,manifest,device,result,root_components_verified=True); summary['root_input']=root
+                    summary=verify_registry_plan(online,live,plan,manifest,device,result,registry=registry,root_components_verified=True); summary['root_input']=root
                 else:
                     if plan['device'] != device or plan['commit'] != PIN or plan['manifest_sha256'] != result['manifest_sha256']:
                         raise online.Failure('accepted plan identity or manifest mismatch')
-                    online.verify(live,plan,manifest,device,result)
-                    root=online.stage_components_verify(ssh,plan,result,device)
+                    verify_registry_plan(online,live,plan,manifest,device,result,registry=registry)
+                    root=verify_registry_components(online,ssh,plan,result,device,registry=registry)
                     live=online.read_live(ssh,manifest)
-                    summary=online.verify(live,plan,manifest,device,result,root_components_verified=True); summary['root_input']=root
+                    summary=verify_registry_plan(online,live,plan,manifest,device,result,registry=registry,root_components_verified=True); summary['root_input']=root
                 if not summary['deploy_ready']: exit_code=max(exit_code,3)
             else:
                 plan=online.prepare_plan(live,manifest,device,result,args.approve_unknown_baseline)
+                plan=bind_registry_plan(plan,registry=registry,device=device)
                 digest,path=online.write_plan(args.state_dir,plan)
                 summary={'device':device,'status':'plan_ready','plan_sha256':digest,'plan_path':str(path),
                          'diff':plan['diff'],'protected':plan['protected'],'camd_pid':plan['camd_pid'],

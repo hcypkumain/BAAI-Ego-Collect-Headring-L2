@@ -87,6 +87,108 @@ def approved(value, scope):
     except ValueError:
         return False
 
+def _shape(value, keys):
+    if not isinstance(value, Mapping) or set(value) != set(keys):
+        raise ValueError('missing or extra evidence fields')
+
+def _text(value):
+    return isinstance(value, str) and bool(value.strip()) and not any(ord(c) < 32 or ord(c) == 127 for c in value)
+
+def _logical_label(value):
+    return (_text(value) and not value.startswith('/') and '\\' not in value
+            and all(p not in ('', '.', '..') for p in value.split('/')))
+
+def _hash(value):
+    return isinstance(value, str) and re.fullmatch('[0-9a-f]{64}', value) is not None
+
+def _utc(value):
+    if not isinstance(value, str) or not re.fullmatch(
+            r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?(?:Z|\+00:00)', value):
+        return False
+    try:
+        datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return True
+    except ValueError:
+        return False
+
+def _approval_shape(value):
+    _shape(value, ('status', 'scope', 'reason', 'expiry'))
+    if (value['status'] not in ('approved', 'unknown', 'rejected')
+            or not isinstance(value['scope'], list)
+            or any(not isinstance(c, str) or c not in COMPONENT_IDS for c in value['scope'])
+            or len(set(value['scope'])) != len(value['scope']) or not _text(value['reason'])
+            or (value['expiry'] is not None and not _utc(value['expiry']))):
+        raise ValueError('invalid approval shape')
+
+def _observation_shape(value, *, category, files):
+    _shape(value, ('sha256', 'status', 'evidence'))
+    if value['status'] == 'unknown':
+        if value['sha256'] is not None or value['evidence'] is not None:
+            raise ValueError('unknown observation has no bytes/evidence')
+        return
+    if value['status'] != 'observed' or not _hash(value['sha256']):
+        raise ValueError('invalid observation status/hash')
+    evidence = value['evidence']
+    _shape(evidence, ('source', 'scope', 'matches_source', 'observed_at'))
+    prefix = 'file:' if category == 'installed' else 'loaded:file:'
+    if (not isinstance(evidence['source'], str) or not evidence['source'].startswith(prefix)
+            or not valid_path(evidence['source'][len(prefix):]) or evidence['scope'] != 'file'
+            or type(evidence['matches_source']) is not bool or not _utc(evidence['observed_at'])):
+        raise ValueError('invalid same-file observation evidence')
+    matching = next((f for f in files if prefix+f['path'] == evidence['source']), None)
+    if matching is None or evidence['matches_source'] != (matching['sha256'] == value['sha256']):
+        raise ValueError('observation is not matching same-file evidence')
+
+def _bom_shape(bom):
+    """Full local output contract, including out-of-scope unknown evidence."""
+    _shape(bom, ('schema_version', 'base_commit', 'overlays', 'components'))
+    if type(bom['schema_version']) is not int or bom['schema_version'] != 1 or not valid_ref(bom['base_commit']):
+        raise ValueError('invalid BOM version/base')
+    if not isinstance(bom['overlays'], list) or len(bom['overlays']) > 1:
+        raise ValueError('invalid overlay list')
+    for overlay in bom['overlays']:
+        _shape(overlay, ('overlay_id', 'ref', 'resources', 'approval'))
+        if not _logical_label(overlay['overlay_id']) or not valid_ref(overlay['ref']):
+            raise ValueError('invalid overlay identity')
+        _shape(overlay['resources'], set(OVERLAY_PINS) | {'stable_manifest.json'})
+        if not all(valid_path(p) for p in overlay['resources'].values()):
+            raise ValueError('invalid overlay resource path')
+        _approval_shape(overlay['approval'])
+    if not isinstance(bom['components'], list) or len(bom['components']) != 9:
+        raise ValueError('nine components required')
+    ids = []
+    for component in bom['components']:
+        _shape(component, ('component_id', 'source', 'installed', 'runtime', 'approval'))
+        if not isinstance(component['component_id'], str) or component['component_id'] not in COMPONENT_IDS:
+            raise ValueError('invalid component ID')
+        ids.append(component['component_id'])
+        source = component['source']
+        _shape(source, ('ref', 'sha256', 'provenance', 'status', 'files'))
+        if not isinstance(source['files'], list) or not isinstance(source['provenance'], list):
+            raise ValueError('invalid source collections')
+        files = source['files']
+        for f in files:
+            _shape(f, ('ref', 'path', 'sha256', 'provenance', 'resource'))
+            if (not valid_ref(f['ref']) or not valid_path(f['path']) or not _hash(f['sha256'])
+                    or not valid_path(f['resource']) or not _logical_label(f['provenance'])):
+                raise ValueError('invalid source file evidence')
+        if not files:
+            if (source['status'] != 'unknown' or source['ref'] is not None
+                    or source['sha256'] is not None or source['provenance'] != []):
+                raise ValueError('unknown source must remain null')
+        elif (source['status'] != 'verified_files' or not valid_ref(source['ref'])
+              or source['ref'] != bom['base_commit'] or not _hash(source['sha256'])
+              or source['sha256'] != file_set_digest(files)
+              or len({f['path'] for f in files}) != len(files)
+              or not all(_logical_label(p) for p in source['provenance'])
+              or source['provenance'] != sorted({f['provenance'] for f in files})):
+            raise ValueError('invalid verified file-set evidence')
+        _approval_shape(component['approval'])
+        for category in ('installed', 'runtime'):
+            _observation_shape(component[category], category=category, files=files)
+    if set(ids) != set(COMPONENT_IDS) or len(set(ids)) != 9:
+        raise ValueError('duplicate/missing components')
+
 def validate_release(*, release: Mapping, router: Mapping, resources: Mapping[str, bytes]) -> tuple[str, ...]:
     """Empty tuple alone means eligible; malformed/unknown evidence fails closed."""
     blocked = []
@@ -113,10 +215,15 @@ def validate_release(*, release: Mapping, router: Mapping, resources: Mapping[st
                 or set(scope) - set(COMPONENT_IDS)):
             block('scope_invalid')
         approval = release['approval']
+        _approval_shape(approval)
         if (not approved(approval, scope) or release['reason'] != approval.get('reason')
                 or release['expiry'] != approval.get('expiry')):
             block('release_approval')
         bom = release['component_BOM']
+        try:
+            _bom_shape(bom)
+        except (ValueError, TypeError, KeyError):
+            block('bom_schema')
         if (type(bom['schema_version']) is not int or bom['schema_version'] != 1 or not valid_ref(release['base_commit'])
                 or bom['base_commit'] != release['base_commit']):
             block('base_unknown')

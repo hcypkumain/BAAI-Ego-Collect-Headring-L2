@@ -109,7 +109,8 @@ def save_inventory(path, values):
     finally:
         if temp.exists():temp.unlink()
 
-def stage_apply(ssh, device, bundle, bootstrap, command_file=None):
+def stage_apply(ssh, device, bundle, bootstrap, command_file=None, *, registry: Registry, plan):
+    fleet.require_registry_plan(plan,registry=registry,device=device)
     if command_file is None: ssh.require_tty()
     stage=ssh.run('umask 077; mktemp -d "$HOME/.headring-stage-XXXXXXXX"').decode().strip()
     if not re.fullmatch(r'/home/orangepi/\.headring-stage-[A-Za-z0-9]{8}',stage): raise online.Failure('unsafe stage path')
@@ -152,6 +153,7 @@ def main(args, parser, *, registry: Registry):
         if state=='after' and profile['policy']!='advisory': raise online.Failure('installed overlay EEG policy is not advisory')
         if args.apply or args.verify:
             plan=online.load_plan(args.state_dir,args.accepted_plan)
+            fleet.require_registry_plan(plan,registry=registry,device=device)
             if (plan.get('release')!=RELEASE or plan.get('device')!=device or plan.get('manifest_sha256')!=MANIFEST_SHA
                     or plan.get('address')!=address or plan.get('hostkey_alias')!=alias): raise online.Failure('accepted plan release/device/address mismatch')
             if time.time()-plan.get('created_at',0)>600 or time.time()<plan.get('created_at',0)-30: raise online.Failure('plan expired; make a fresh plan')
@@ -160,7 +162,7 @@ def main(args, parser, *, registry: Registry):
             if state=='after': result={'status':'already_installed_verified','root_mutation':False,'overlay_files':5,'verified_files':236}
             elif args.verify: raise online.Failure('overlay not installed')
             else:
-                result=stage_apply(ssh,device,bundle,bootstrap,args.sudo_command_file)
+                result=stage_apply(ssh,device,bundle,bootstrap,args.sudo_command_file,registry=registry,plan=plan)
                 if result['status']=='applied':
                     after=online.read_live(ssh,stable);online.gates(after,device)
                     if classify(after,stable,manifest)!='after' or after['protected']!=plan['protected'] or after['camd_pid']!=plan['camd_pid']:
@@ -170,7 +172,8 @@ def main(args, parser, *, registry: Registry):
                     result.update(verified_files=236,policy='advisory')
         else:
             plan={'schema':1,'release':RELEASE,'device':device,'address':address,'hostkey_alias':alias,'manifest_sha256':MANIFEST_SHA,
-                  'created_at':time.time(),'baseline':state,'files':live['files'],'protected':live['protected'],'camd_pid':live['camd_pid'],'profile':profile}
+                   'created_at':time.time(),'baseline':state,'files':live['files'],'protected':live['protected'],'camd_pid':live['camd_pid'],'profile':profile}
+            plan=fleet.bind_registry_plan(plan,registry=registry,device=device)
             digest,path=online.write_plan(args.state_dir,plan)
             result={'status':'plan_ready','plan_sha256':digest,'plan_path':str(path),'baseline':state,'deploy_ready':False}
         entry.update(last_verified_at=time.strftime('%Y-%m-%dT%H:%M:%SZ',time.gmtime()),

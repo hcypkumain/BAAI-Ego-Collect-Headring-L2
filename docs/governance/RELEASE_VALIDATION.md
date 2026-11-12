@@ -149,6 +149,22 @@ Missing resources, unknown source, component omission, wrong scope, expiry,
 unregistered overlay or tampering block; rehashing only the outer route cannot
 hide a wrong original collector pin or a mismatched source file.
 
+The complete nested BOM is validated before eligibility, including components
+outside release scope. Exact required keys are enforced at BOM root, overlay,
+overlay resources, component, source, file, installed/runtime, their evidence,
+and approval levels; missing/extra keys block with `bom_schema`. The version is
+a strict integer (bool is not int), refs are full lowercase 40-hex commits and
+hashes lowercase 64-hex. Provenance must be a nonempty, control-free logical label,
+not an absolute/private path, backslash or dot/traversal segment. Source provenance
+must equal the sorted unique labels of its files; source file-set digest and base
+ref must agree. Unknown source has empty files/provenance and null ref/hash;
+unknown installed/runtime has null hash/evidence. None of these fields may be
+omitted, even outside scope. Approval statuses are approved/unknown/rejected with
+explicit scope array, nonempty control-free reason and null or valid UTC expiry.
+Observed installed/runtime evidence requires exactly source, scope=`file`, strict
+boolean matches_source and valid UTC observed_at, matching a declared same file.
+These rules also admit valid `compare_components` output without inventing runtime.
+
 Representative codes: `component_coverage`, `base_unknown`,
 `collector_baseline_unknown`, `overlay_unregistered`, `overlay_approval`,
 `collector_reconstruction`, `source_unknown`, `source_resource_mismatch`,
@@ -192,10 +208,33 @@ select_devices(purpose='monitor'); unknown/unenrolled/monitor-disabled selection
 fails. Legacy aliases `cp0042` are rejected. Legacy registry-free calls fail
 closed, not fallback. `--address` can only repeat the registry address, never
 override it. SSH config's user and host-key alias must match the selected Device;
-transport uses Device.ssh_alias/address. Existing SSH/sudo authentication remains
-in online.py unchanged, including secure PTY handling. Deprecated
+transport uses Device.ssh_alias/address. The final wrapper argv has exactly one
+explicit HostName/HostKeyAlias/User fixed to that Device, plus
+StrictHostKeyChecking=yes and BatchMode=yes. It strips earlier instances of these
+options and puts the fixed values first, honoring OpenSSH's first-value semantics;
+neither online.SSH's second config read nor actual OpenSSH's later config parse
+can change effective identity. Unexpected transport argv shapes fail closed.
+online.py is unchanged; secure sudo PTY handling is retained. SSH password prompts
+are disabled by the wrapper's BatchMode (no fallback). Deprecated
 `--approve-unknown-baseline` always errors; old unknown-approved plans cannot
 apply/verify. Stable shadow, downgrade, preflight/transaction and pins remain.
+
+Both stable and overlay newly created accepted plans carry two additional fields:
+`registry_digest` (exact Registry.digest) and `registry_device` (exact object with
+device_id, ssh_alias, address, ssh_user, host_key_alias from the selected Device).
+`plan.device` must also equal that device_id. Missing/wrong digest or identity,
+including an old plan after any registry change, fails with a fresh-plan-required
+error before stage/apply/verify. An address match alone is insufficient. Old plans
+must be regenerated, not patched or grandfathered.
+
+Checks are not confined to argparse: fleet's `stage_registry_plan`,
+`verify_registry_components` and `verify_registry_plan` each call
+`require_registry_plan` at their own boundary. Delta's internal staging helper now
+requires `stage_apply(..., command_file=None, *, registry: Registry, plan)` and
+checks the binding **before** TTY/stage/remote operations. Main adapters and local
+test spies calling that helper directly must pass a freshly bound reviewed plan;
+there is no registry-free compatibility path. The three frozen public BOM APIs
+and C0 contracts remain unchanged; this does not require C1.
 
 Delta main now requires `main(args, parser, *, registry: Registry)`. Its cache is
 `<state-dir>/observations.json`, **not inventory.json**. It may contain only
@@ -233,9 +272,22 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. python3 -m unittest discover \
   -s tools/fleet_maintenance/tests -p 'test_governance_release.py'
 ```
 
-Original suite C0: 107/107 passed. With this change and the new 38 tests:
-145 executed, 137 passed, 8 expected **unmigrated old-test errors**, no assertion
-failures. Do not claim the complete suite is green. Main must migrate these exact
+Original suite C0: 107/107 passed before these changes. Initial B had 38/38 new
+tests; Astra G1-B follow-up adds 12 independent boundary test methods, so the
+current B suite is **50/50** and shared C0 suite **16/16**. The 12 regression tests
+were also executed against original immutable B implementation `4f2c6e4` in memory
+(without resetting files): 45 failing checks including subtests, one missing-new-
+helper-signature error; corrected implementation passes all 12. They cover the
+five exact Astra malformed-BOM counterexamples, nested bool/extra/invalid labels,
+overlay shape, valid unknown/compare controls, 24 stable/overlay real-main plan
+create/apply/verify combinations with only local spies, direct helper bypass and
+two-read SSH identity drift. No actual stage/apply/SSH process ran.
+
+Current complete fleet suite: **157 executed, 148 passed, 9 unmigrated old-test
+errors**, zero assertion failures/skips. Eight are the original B migration
+errors, plus the legacy direct stage_apply caller now missing its mandatory plan/
+Registry binding. These are caused by the new interfaces, **not preexisting
+baseline failures**. Do not claim the complete suite is green. Main must migrate these exact
 legacy expectations/tests (B does not edit other owners' tests):
 
 - test_audit: test_audit_dispatch_does_not_build_or_deploy,
@@ -243,7 +295,9 @@ legacy expectations/tests (B does not edit other owners' tests):
 - test_delta_release: test_cached_known_host_and_failed_override_never_saved
   (override must now fail; observations cannot store address),
   test_fake_plan_apply_and_already_installed_skip,
-  test_offline_plan_no_network_and_only_selected (Registry and identity mocks);
+  test_offline_plan_no_network_and_only_selected (Registry and identity mocks),
+  test_staging_command_is_registered_password_free_and_no_remote_tty
+  (direct stage_apply now needs registry and bound accepted plan);
 - test_fleet: test_target_and_address_validation (canonical IDs, reject alias);
 - test_online: test_cli_fake_transport_plan_apply_and_verify,
   test_fake_ssh_cli_code_components_verify_vertical (Registry and identity mocks).
