@@ -52,7 +52,7 @@ class Broker:
         self.registry=registry;self.state=Path(state); self.config=json.loads(json.dumps(config)); self.scope=dict(scope); self.deadline=time.monotonic()+ttl; self.expires=time.time()+ttl
         self.secret=bytearray(secret); self.executor=executor; self.operation=operation; self.failed=False; self.stop_requested=False
     def allowed(self): return not self.failed and not self.stop_requested and time.monotonic()<self.deadline
-    def status(self): return {'unlocked':self.allowed(),'expires_at':self.expires if self.allowed() else None,'targets':sorted(self.scope) if self.allowed() else [],'plans':dict(self.scope) if self.allowed() else {},'operation':self.operation,'registry':operations.REGISTRY if self.operation=='apply_plan' else imports.REGISTRY}
+    def status(self): return {'unlocked':self.allowed(),'expires_at':self.expires if self.allowed() else None,'targets':sorted(self.scope) if self.allowed() else [],'plans':dict(self.scope) if self.allowed() else {},'operation':self.operation,'registry':operations.REGISTRY if self.operation=='apply_plan' else imports.REGISTRY,'registry_digest':self.registry.digest}
     def handle(self,obj,uid,emit=lambda *_:None):
         if uid!=os.getuid() or not isinstance(obj,dict): return {'error':'forbidden'}
         if obj=={'operation':'status'}: return self.status()

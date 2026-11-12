@@ -1,4 +1,63 @@
-# Governance RC — main premerge scaffolding, not G2 ready
+# Governance host candidate — integrated local evidence, independent G2 pending
+
+## Current consolidated checkpoint (supersedes historical premerge notes below)
+
+All three G1-approved original+fix pairs have been integrated in main-authorized
+order, with immutable base/allowlist/shared-interface checks and no conflicts:
+A `a63199f` + `2aed528`, B `4f2c6e4` + `1f9f96b`, C `31791b8` + `5b188d7`.
+Main's M1 metadata/verified_files repair is `b71bfc6`; service caller migration is
+`93bb4c2`, fleet caller/test migration `cfc5c38`. C0 contracts/schema/factory remain
+unchanged. The source-provenance selection update intentionally preserves original
+upstream hashes plus C0 decisions and separately records immutable A artifacts.
+
+The actual full service suite passes 71/71 (all eight constructor errors closed),
+standardizer 10/10, fleet 157/157 (all nine new migration errors closed), common
+16/16, full host/qc 76/76. These path-disjoint suites total **330 distinct test
+cases**, not repeated counts of C0 or tests invoked through imports. The host/qc
+total includes 37 main-owned tests, 28 real C tests and 11 older regressions.
+Counts are command outputs at this checkpoint; final report records the final run.
+
+Real integration tests use actual HMAC verification, actual temporary Store and
+Handoff discovery, real C local child domains/fixed reader/strict IPC, actual B
+build_bom/compare/validator and actual CLI rendering. Six namespaces share the
+legal session/content but retain device/generation/digest isolation; original four
+upload grants remain independent and 42 denied. Wrong identity/digest/device/
+generation, incorrect file labels, unknown runtime, real timeout/quarantine and
+false-close cleanup are exercised. Existing actual two-hung/third-three-round and
+100-timeout resource tests are retained; mock cancellation is not substituted.
+
+Main-reviewed absolute-to-logical file bindings have an exact three-field record
+(`component_id`, `absolute_path`, `relative_path`), require the identical C0 policy
+path and BOM source file, and rewrite **installed** labels only. Public candidate
+manifest defaults to an empty binding list, so unreviewed mappings stay unknown.
+Manifest bytes are read once, parsed and hash-checked against the same BOM envelope;
+no second-read identity drift. Runtime labels are never manufactured. B's boolean
+matches_source is shown as file evidence only, not whole-component verification.
+
+Timeout/quarantine and unreaped close output `cleanup_required=true` and fixed
+`NO_AUTOMATIC_RETRY_REVIEW_REMOTE_CLEANUP`, with nonzero exit. Strong references
+deny same-process rebuild after false close; C's tombstones also deny a new
+scheduler after local reap. **This quarantine is process-wide, not persistent
+across CLI processes. Never automatically restart a timed-out target in a new
+CLI process.** Operator/main must review remote cleanup before any future attempt;
+G3 is one explicit attempt and never retries that target on timeout. No temporary
+persistent-gate framework or uninterruptible-kernel kill guarantee is invented.
+
+Two exact legacy-adapter scope issues remain registered pending main/owner
+allocation: Handoff rsync still uses its reviewed old transport builder, and
+metrics.create_plan/its SSH callers still lack Registry injection. Discovery and
+governance host execution do not prove those legacy paths complete. These do not
+justify restoring defaults or silently monkeypatching core/metrics. Independent
+G2 cannot be claimed complete until resolved or explicitly excluded by main.
+
+The host-only immutable package and its two real builds/clean parser/synthetic-SSH
+execution receipts are recorded in the external final G2 result, not guessed by
+this document. No real SSH/trust/key/production config/HTTP/DB or device operation
+is used. Synthetic SSH admission/process execution is **not** cryptographic SSH
+trust or live verification. Host candidate runtime capability, production
+approval and production pipeline migration remain separate acceptance claims.
+
+## Historical premerge and implementation detail
 
 ## M1 review repair and A integration checkpoint
 

@@ -17,7 +17,7 @@ from host.common.strict_json import canonical_json, exact_fields, require, stric
 
 _RULES = frozenset(('DEVICE_COMPARE', 'DEVICE_TABLE', 'DEVICE_DEFAULT', 'RUNTIME_IP'))
 _EXCLUDED = frozenset(('state', 'runtime', 'private', 'secrets', 'keys', 'images',
-                       'image', 'data', 'raw', 'logs', 'venv', '.git', '__pycache__'))
+                       'image', 'data', 'raw', 'logs', 'venv', '.git', '.ssh', '__pycache__'))
 _DEVICE = re.compile(r'cp_[0-9]{4}\Z')
 
 

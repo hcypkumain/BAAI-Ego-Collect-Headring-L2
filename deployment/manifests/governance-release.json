@@ -7,8 +7,9 @@
   "reason": "Independent review and G2/G3 pending; not production approved",
   "expiry": null,
   "overlay_ids": [],
+  "probe_path_bindings": [],
   "runtime": {"python": "CPython 3.14.4; other versions require explicit revalidation", "platform": "Linux POSIX openat/O_NOFOLLOW", "openssh": "Required only for later explicit readonly probing; exact executable/version/trust validation pending main acceptance; not invoked in premerge", "dependencies": "Python standard library for governance CLI"},
-  "external_unbundled_unverified": ["standardizer converter", "pipeline SDK", "pipeline private configuration", "production SSH trust"],
+  "external_unbundled_unverified": ["standardizer converter", "pipeline SDK", "pipeline private configuration", "production SSH trust", "catalog publication", "pipeline video tooling"],
   "required_adapters": ["host/qc/fleet_monitor/readonly_probe.py", "host/qc/fleet_monitor/isolated_transport.py", "tools/fleet_maintenance/component_bom.py", "tools/fleet_maintenance/release_registry.py"],
   "payload_paths": [
     "host/__init__.py",

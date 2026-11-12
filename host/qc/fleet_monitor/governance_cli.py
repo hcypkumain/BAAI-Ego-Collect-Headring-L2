@@ -7,6 +7,7 @@ import re
 import stat
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from host.common.device_registry import parse_registry, select_devices
@@ -24,7 +25,7 @@ class CliError(Exception):
     """Only a fixed public code, never adapter exception text."""
 
 
-def _read_json(path):
+def _read_json_bytes(path):
     # Explicitly requested local registry/policy only. Trust files are NOT opened.
     target = Path(path).absolute()
     require('..' not in target.parts, 'Canonical input path required')
@@ -44,7 +45,11 @@ def _read_json(path):
     finally:
         os.close(fd)
     require(len(data) <= _INPUT_LIMIT, 'Input exceeds bound')
-    return strict_json_loads(data.decode('utf-8'))
+    return data
+
+
+def _read_json(path):
+    return strict_json_loads(_read_json_bytes(path).decode('utf-8'))
 
 
 def _targets(value):
@@ -135,6 +140,10 @@ def _render_comparison(comparison):
             output[phase] = {'sha256': sha if known else None,
                              'status': status if known else 'unknown',
                              'scope': 'selected-file-set' if phase == 'source' else 'file-evidence-only'}
+            if phase!='source':
+                evidence=value.get('evidence')
+                matched=evidence.get('matches_source') if type(evidence) is dict else None
+                output[phase]['matches_source']=matched if known and type(matched) is bool else None
         result[name] = output
     return result
 
@@ -150,7 +159,35 @@ def _stats(scheduler):
     return {key: value[key] for key in required}
 
 
-def observe(devices, *, registry_digest, policy, scheduler_factory, compare_components, bom):
+def _bind_file_evidence(result, *, policy, bom, bindings):
+    """Only main-reviewed exact absolute-to-BOM identities, never runtime relabelling."""
+    require(type(bindings) in (tuple,list) and len(bindings)<=9,'Invalid reviewed bindings')
+    paths=dict(policy.component_paths)
+    sources={row['component_id']:{f['path'] for f in row['source']['files']}
+             for row in bom.get('components',[])}
+    seen=set();mapping={}
+    for binding in bindings:
+        require(type(binding) is dict and set(binding)=={'component_id','absolute_path','relative_path'},
+                'Unexpected binding fields')
+        name=binding['component_id'];absolute=binding['absolute_path'];relative=binding['relative_path']
+        require(type(name) is str and name in COMPONENT_IDS and name not in seen and
+                type(absolute) is str and paths.get(name)==absolute and
+                type(relative) is str and relative in sources.get(name,set()),'Unreviewed file identity')
+        seen.add(name);mapping[name]=(absolute,relative)
+    fields=[]
+    for name,evidence in result.fields:
+        if name=='installed_components' and evidence.quality=='observed':
+            value=strict_json_loads(evidence.value_json)
+            for component,(absolute,relative) in mapping.items():
+                row=value.get(component)
+                if row is not None and row['status']=='observed' and row['source']=='file:'+absolute:
+                    row['source']='file:'+relative
+            evidence=replace(evidence,value_json=canonical_json(value))
+        fields.append((name,evidence))
+    return replace(result,fields=tuple(fields))
+
+
+def observe(devices, *, registry_digest, policy, scheduler_factory, compare_components, bom,evidence_bindings=()):
     """One bounded generation using the fixed C scheduler API; injected only by main/tests."""
     require(bool(devices) and len(devices) <= 64 and
             len({d.device_id for d in devices}) == len(devices) and
@@ -198,6 +235,7 @@ def observe(devices, *, registry_digest, policy, scheduler_factory, compare_comp
     output = []
     for device in devices:
         result = received.get(device.device_id, _unknown(registry_digest, device.device_id, generation))
+        result=_bind_file_evidence(result,policy=policy,bom=bom,bindings=evidence_bindings)
         comparison = compare_components(bom, result)
         output.append({'device_id': device.device_id, 'generation': generation,
                        'identity_verified': result.identity_verified, 'status': result.status,
@@ -213,21 +251,35 @@ def observe(devices, *, registry_digest, policy, scheduler_factory, compare_comp
     if any(row['status'] != 'ok' or any(field['quality'] != 'observed' or field['value'] is None
                                       for field in row['fields'].values()) for row in output):
         warnings.append('PARTIAL_EVIDENCE')
+    cleanup_required=bool(stats['quarantined'] or any(row['status'] in
+        ('timeout','quarantined','identity_rejected','unavailable') for row in output))
     return {'schema_version': 1, 'registry_digest': registry_digest, 'generation': generation,
             'observations': output, 'rejected_results': rejected, 'closed': closed,
             'stats': stats, 'warning_codes': warnings,
+            'cleanup_required':cleanup_required,
+            'operator_action':'NO_AUTOMATIC_RETRY_REVIEW_REMOTE_CLEANUP' if cleanup_required else 'NONE',
             'elapsed_seconds': round(time.monotonic() - started, 3),
             'production_pipeline_migrated': False}
 
 
-def _packaged_bom():
+def _packaged_metadata():
     # Build installs BOM beside the explicit package payload; never reads a live default config.
     path = Path(__file__).resolve().parents[3] / 'BOM.json'
     if not path.is_file():
         raise CliError('RELEASE_NOT_BUILT')
     value = _read_json(path)
     require(type(value) is dict and type(value.get('component_BOM')) is dict, 'Invalid built BOM')
-    return value['component_BOM']
+    # One read of each exact file; bind/parse the same bytes, no second-read drift.
+    import hashlib
+    root=Path(__file__).resolve().parents[3]
+    manifest_path=root/'deployment/manifests/governance-release.json'
+    raw=_read_json_bytes(manifest_path)
+    manifest=strict_json_loads(raw.decode('utf-8'))
+    require(hashlib.sha256(raw).hexdigest()==
+            value['files']['deployment/manifests/governance-release.json']['sha256'],
+            'Unbound policy evidence mapping')
+    bindings=manifest.get('probe_path_bindings',[])
+    return value['component_BOM'],bindings
 
 
 def main(argv=None):
@@ -243,8 +295,10 @@ def main(argv=None):
         if sys.implementation.name != 'cpython' or sys.version_info[:3] != (3, 14, 4):
             raise CliError('RUNTIME_NOT_VALIDATED')
         scheduler, compare = _adapters()
+        bom,bindings=_packaged_metadata()
         output = observe(devices, registry_digest=registry.digest, policy=policy,
-                         scheduler_factory=scheduler, compare_components=compare, bom=_packaged_bom())
+                         scheduler_factory=scheduler, compare_components=compare, bom=bom,
+                         evidence_bindings=bindings)
         print(canonical_json(output))
         return 5 if output['warning_codes'] else 0
     except KeyboardInterrupt:
@@ -255,7 +309,9 @@ def main(argv=None):
         if code not in ('ADAPTER_NOT_INTEGRATED', 'RELEASE_NOT_BUILT', 'CLOSE_NOT_REAPED',
                         'PRIOR_CLOSE_UNREAPED', 'RUNTIME_NOT_VALIDATED'):
             code = 'OBSERVATION_FAILED'
-        print(canonical_json({'error': code}), file=sys.stderr)
+        cleanup=code in ('CLOSE_NOT_REAPED','PRIOR_CLOSE_UNREAPED')
+        print(canonical_json({'error': code,**({'cleanup_required':True,
+            'operator_action':'NO_AUTOMATIC_RETRY_REVIEW_REMOTE_CLEANUP'} if cleanup else {})}), file=sys.stderr)
         return 3
     except Exception:
         # Do not expose registry paths, SSH stderr, callback or credential contents.

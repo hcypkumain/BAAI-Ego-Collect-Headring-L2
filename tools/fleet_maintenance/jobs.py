@@ -117,7 +117,7 @@ class Jobs:
         plan=(self.cache.get(device,{}) or {}).get('review_plan') or {}
         if self.cache.get(device,{}).get('address')!=self.config['devices'][device] or plan.get('address')!=self.config['devices'][device] or plan.get('plan_sha256')!=digest or time.time()-plan.get('created_at',0)>600: raise ValueError('fresh reviewed plan required')
         auth=broker_client.status(self.state)
-        if not auth.get('unlocked') or auth.get('operation')!='apply_plan' or device not in auth.get('targets',[]): raise PermissionError('broker locked')
+        if not auth.get('unlocked') or auth.get('registry_digest')!=self.registry.digest or auth.get('operation')!='apply_plan' or device not in auth.get('targets',[]): raise PermissionError('broker locked or registry changed')
         if not self.guard.acquire(False): raise RuntimeError('job busy')
         jid=uuid.uuid4().hex; self.jobs[jid]={'id':jid,'device':device,'kind':'apply','status':'queued','events':['queued'],'plan_sha256':digest}
         try: self._save_jobs()
@@ -175,7 +175,7 @@ class Jobs:
         row=self.cache.get(device,{}) or {};plan=row.get('import_plan') or {};context=row.get('profile_context') or {}
         if plan.get('plan_sha256')!=digest or plan.get('address')!=self.config['devices'][device] or plan.get('mode')!=mode or context.get('active_mode')!=mode or mode+':'+str(context.get('generation'))!=plan.get('context') or time.time()-plan.get('created_at',0)>600:raise ValueError('fresh active-profile plan required')
         auth=broker_client.status(self.state)
-        if not auth.get('unlocked') or auth.get('operation')!='import_tasks' or auth.get('plans',{}).get(device)!=digest:raise PermissionError('import broker locked')
+        if not auth.get('unlocked') or auth.get('registry_digest')!=self.registry.digest or auth.get('operation')!='import_tasks' or auth.get('plans',{}).get(device)!=digest:raise PermissionError('import broker locked or registry changed')
         if not self.guard.acquire(False):raise RuntimeError('job busy')
         jid=uuid.uuid4().hex;self.jobs[jid]={'id':jid,'device':device,'kind':'import','status':'queued','events':['queued'],'plan_sha256':digest}
         try:self._save_jobs()

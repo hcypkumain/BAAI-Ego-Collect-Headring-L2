@@ -14,6 +14,7 @@ import socket
 import sqlite3
 import subprocess
 import sys
+import time
 import tarfile
 import tempfile
 import threading
@@ -233,7 +234,7 @@ class CliPremergeTests(unittest.TestCase):
         with (patch.object(cli, '_read_json', side_effect=[registry_wire(self.registry),
                 json.loads(canonical_json(asdict(sample_probe_policy())))]),
               patch.object(cli, '_adapters', return_value=(FakeScheduler, synthetic_comparison)),
-              patch.object(cli, '_packaged_bom', return_value={'synthetic': True}),
+              patch.object(cli, '_packaged_metadata', return_value=({'synthetic': True},())),
               contextlib.redirect_stdout(io.StringIO()) as output):
             self.assertEqual(cli.main(self.args), 5)
         self.assertIn('PARTIAL_EVIDENCE', json.loads(output.getvalue())['warning_codes'])
@@ -390,6 +391,230 @@ class MainAIntegrationTests(unittest.TestCase):
                                    '--identity-file', '/synthetic/key', '--known-hosts', '/synthetic/trust'])
             db.assert_not_called()
             process.assert_not_called()
+
+
+class RealG2Tests(unittest.TestCase):
+    """Actual A/B/C modules and real local child domains, never real SSH/device I/O."""
+    def setUp(self):
+        from host.qc.fleet_monitor import isolated_transport as transport
+        self.transport=transport
+        self.quarantine=patch.dict(transport._PROCESS_QUARANTINE,clear=True)
+        self.quarantine.start();self.addCleanup(self.quarantine.stop)
+        self.retention=patch.object(cli,'_UNCLOSED',[])
+        self.retention.start();self.addCleanup(self.retention.stop)
+        self.temp=tempfile.TemporaryDirectory(prefix='governance-real-G2-')
+        self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
+        self.registry=sample_registry();self.schedulers=[]
+        self.addCleanup(self.close_all)
+        self.admission=self.root/'admission'
+        self.admission.write_text(''.join('Host '+d.ssh_alias+'\n IdentityFile /synthetic/unopened-software-key\n'
+                                           for d in self.registry.devices))
+
+    def close_all(self):
+        for scheduler in self.schedulers:self.assertTrue(scheduler.close())
+        self.assertEqual(self.transport._PROCESS_DOMAINS,{})
+
+    def bom(self,*,path='synthetic/collector.py',data=b'# synthetic ordinary source\n'):
+        from tools.fleet_maintenance.component_bom import build_bom
+        records=[{'component_id':name,'files':[],'approval':{'status':'unknown','scope':[name],
+                   'reason':'not reviewed','expiry':None}} for name in COMPONENT_IDS]
+        records[0]['files']=[{'ref':'a'*40,'path':path,'resource':path,
+                             'sha256':hashlib.sha256(data).hexdigest(),'provenance':'synthetic/file'}]
+        return build_bom(source_manifest={'schema_version':1,'base_commit':'a'*40,'components':records},
+                         read_blob=lambda ref,name:data,overlays=())
+
+    def factory(self,device,digest,generation,policy):
+        from host.qc.fleet_monitor.readonly_probe import _ssh_argv,_REMOTE_SCRIPT
+        _ssh_argv(device,policy)  # Actual minimal admission and fixed SSH argv, no SSH execution.
+        return subprocess.Popen([sys.executable,'-I','-S','-c',_REMOTE_SCRIPT],
+            stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+            start_new_session=True,close_fds=True)
+
+    def scheduler_factory(self,factory=None):
+        def make(devices,*,registry_digest,policy,concurrency):
+            scheduler=self.transport._test_scheduler(tuple(devices),registry_digest=registry_digest,
+                policy=policy,concurrency=concurrency,factory=factory or self.factory)
+            self.schedulers.append(scheduler);return scheduler
+        return make
+
+    def test_actual_reader_scheduler_B_compare_and_CLI_file_binding(self):
+        from tools.fleet_maintenance.component_bom import compare_components
+        device,=select_devices(self.registry,['cp_0042'],purpose='monitor')
+        identity=self.root/'identity';identity.write_text(device.device_id+'\n')
+        source=self.root/'collector.py';data=b'# ordinary synthetic file, never executed\n';source.write_bytes(data)
+        policy=sample_probe_policy(ssh_config=str(self.admission),identity_path=str(identity),
+            component_paths=(('collector',str(source)),),timeout_ms=1000)
+        bom=self.bom(data=data)
+        bindings=({'component_id':'collector','absolute_path':str(source),'relative_path':'synthetic/collector.py'},)
+        output=cli.observe((device,),registry_digest=self.registry.digest,policy=policy,
+            scheduler_factory=self.scheduler_factory(),compare_components=compare_components,bom=bom,evidence_bindings=bindings)
+        row=output['observations'][0]
+        self.assertTrue(row['identity_verified']);self.assertEqual(row['generation'],1)
+        self.assertGreaterEqual(row['fields']['ram_available_bytes']['value'],0)
+        self.assertEqual(row['component_comparison']['collector']['source']['status'],'verified_files')
+        self.assertEqual(row['component_comparison']['collector']['installed']['sha256'],hashlib.sha256(data).hexdigest())
+        self.assertIs(row['component_comparison']['collector']['installed']['matches_source'],True)
+        self.assertIsNone(row['component_comparison']['collector']['runtime']['sha256'])
+        self.assertIsNone(row['fields']['controller_state']['value'])
+        self.assertEqual(self.schedulers[0].stats()['spawned'],1)
+        self.assertEqual(self.schedulers[0].stats()['children'],0)
+        self.assertIn('PARTIAL_EVIDENCE',output['warning_codes'])
+        # Equal hash does not authorize a different source label, or manufacture loaded bytes.
+        result=sample_probe_result(registry_digest=self.registry.digest,fields={
+            'installed_components':sample_evidence({'collector':{'status':'observed',
+                'sha256':hashlib.sha256(data).hexdigest(),'source':'file:/synthetic/different.py'}}),
+            'runtime_components':sample_evidence({'collector':{'status':'observed',
+                'sha256':hashlib.sha256(data).hexdigest(),'source':'file:synthetic/collector.py'}})})
+        bound=cli._bind_file_evidence(result,policy=policy,bom=bom,bindings=bindings)
+        compared=compare_components(bom,bound)['components'][0]
+        self.assertIsNone(compared['installed']['sha256']);self.assertIsNone(compared['runtime']['sha256'])
+        with self.assertRaises(ValueError):
+            cli._bind_file_evidence(result,policy=policy,bom=bom,bindings=[{**bindings[0],'relative_path':'wrong.py'}])
+
+    def test_actual_six_local_namespaces_same_session_A_signatures_and_digest(self):
+        from host.standardizer.tests.test_registry_adapter import context_at,signed_archive
+        from host.standardizer import worker
+        from host.qc.fleet_monitor.readonly_probe import _REMOTE_SCRIPT,_ssh_argv
+        from tools.fleet_maintenance.component_bom import compare_components
+        context=context_at(self.root,registry=self.registry)
+        for device in self.registry.devices:
+            path,source,_=signed_archive(context,device.device_id)
+            self.assertEqual(worker.verify_receipt(path,context=context)[1],source)
+            namespace=self.root/device.device_id;namespace.mkdir();(namespace/'identity').write_text(device.device_id)
+        policy=sample_probe_policy(ssh_config=str(self.admission),component_paths=(),timeout_ms=1500)
+        # Fake SSH models distinct remote filesystems, but uses the actual fixed reader and IPC.
+        prefix=('import io,sys,json\np=json.load(sys.stdin)\np["identity_path"]='+repr(str(self.root))+
+                '+"/"+p["device_id"]+"/identity"\nsys.stdin=io.TextIOWrapper(io.BytesIO(json.dumps(p).encode()))\n')
+        def local_ssh(device,digest,generation,policy):
+            _ssh_argv(device,policy)
+            return subprocess.Popen([sys.executable,'-I','-S','-c',prefix+'exec('+repr(_REMOTE_SCRIPT)+')'],
+                stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True,close_fds=True)
+        output=cli.observe(self.registry.devices,registry_digest=self.registry.digest,policy=policy,
+            scheduler_factory=self.scheduler_factory(local_ssh),compare_components=compare_components,bom=self.bom())
+        self.assertEqual(len(output['observations']),6)
+        self.assertEqual({(r['device_id'],r['generation']) for r in output['observations']},
+                         {(d.device_id,1) for d in self.registry.devices})
+        self.assertTrue(all(r['identity_verified'] for r in output['observations']))
+        self.assertEqual(self.schedulers[0].stats()['spawned'],6)
+        for device in self.registry.devices:
+            allowed=upload_allowed(self.registry,device.device_id,destination='EGOL2',
+                                   now_utc=datetime(2026,11,13,tzinfo=timezone.utc))
+            self.assertEqual(allowed,device.device_id in ('cp_0007','cp_0011','cp_0013','cp_0014'))
+
+    def test_real_CLI_timeout_is_bounded_and_new_scheduler_cannot_retry(self):
+        from host.qc.tests.test_governance_isolation import synthetic_factory
+        from tools.fleet_maintenance.component_bom import compare_components
+        device,=select_devices(self.registry,['cp_0042'],purpose='monitor')
+        policy=sample_probe_policy(timeout_ms=40)
+        factory=Mock(side_effect=synthetic_factory(hung=(device.device_id,)))
+        start=time.monotonic()
+        output=cli.observe((device,),registry_digest=self.registry.digest,policy=policy,
+            scheduler_factory=self.scheduler_factory(factory),compare_components=compare_components,bom=self.bom())
+        self.assertLess(time.monotonic()-start,3)
+        self.assertTrue(output['cleanup_required']);self.assertIn('DEVICE_QUARANTINED',output['warning_codes'])
+        again=cli.observe((device,),registry_digest=self.registry.digest,policy=policy,
+            scheduler_factory=self.scheduler_factory(factory),compare_components=compare_components,bom=self.bom())
+        self.assertEqual(factory.call_count,1)
+        self.assertEqual(again['observations'][0]['status'],'quarantined')
+        self.assertEqual(again['operator_action'],'NO_AUTOMATIC_RETRY_REVIEW_REMOTE_CLEANUP')
+
+    def test_actual_builder_BOM_shape_and_candidate_metadata_mutations(self):
+        from tools.fleet_maintenance.component_bom import build_bom
+        from tools.fleet_maintenance.release_registry import resource_digest,validate_release
+        blobs={name:(ROOT/name).read_bytes() for name in builder.PAYLOAD_PATHS}
+        files=builder._assemble('a'*40,blobs,build_bom,resource_digest)
+        envelope=json.loads(files['BOM.json']);components=envelope['component_BOM']['components']
+        self.assertEqual(len(components),9)
+        self.assertEqual(next(r for r in components if r['component_id']=='monitor')['source']['status'],'verified_files')
+        self.assertTrue(all(r['runtime']['sha256'] is None and r['installed']['sha256'] is None for r in components))
+        reasons=validate_release(release=json.loads(files['release.json']),router=json.loads(files['router.json']),
+                                 resources=builder._candidate_resources(files))
+        self.assertTrue(reasons)  # Candidate integrity never grants production approval.
+        mutations={'base_commit':'b'*40,'scope':['collector'],'reason':'tampered','expiry':'2099-01-01T00:00:00Z',
+                   'overlay_ids':['unregistered'],'release_id':'wrong','extra':True}
+        for key,value in mutations.items():
+            changed=dict(files);release=json.loads(files['release.json']);release[key]=value
+            changed['release.json']=canonical_json(release).encode()
+            if key=='release_id':changed['router.json']=canonical_json({value:release['resource_digest']}).encode()
+            with self.subTest(key=key),self.assertRaises(ValueError):
+                builder.verify_candidate(changed,resource_digest=resource_digest)
+
+    def test_real_process_wrong_tuples_and_reader_identity_are_unknown(self):
+        from host.qc.tests.test_governance_isolation import synthetic_factory
+        from tools.fleet_maintenance.component_bom import compare_components
+        for device,corrupt in zip(self.registry.devices[:3],(
+                {'registry_digest':'f'*64},{'device_id':'cp_0043'},{'generation':2})):
+            output=cli.observe((device,),registry_digest=self.registry.digest,
+                policy=sample_probe_policy(timeout_ms=200),scheduler_factory=self.scheduler_factory(
+                    synthetic_factory(corrupt=corrupt)),compare_components=compare_components,bom=self.bom())
+            row=output['observations'][0]
+            self.assertFalse(row['identity_verified'])
+            self.assertTrue(all(f['value'] is None for f in row['fields'].values()))
+            self.assertTrue(output['cleanup_required'])
+        device,=select_devices(self.registry,['cp_0042'],purpose='monitor')
+        identity=self.root/'wrong-identity';identity.write_text('cp_0043')
+        output=cli.observe((device,),registry_digest=self.registry.digest,
+            policy=sample_probe_policy(ssh_config=str(self.admission),identity_path=str(identity),
+                                      component_paths=(),timeout_ms=500),
+            scheduler_factory=self.scheduler_factory(),compare_components=compare_components,bom=self.bom())
+        self.assertEqual(output['observations'][0]['status'],'identity_rejected')
+        self.assertTrue(all(f['value'] is None for f in output['observations'][0]['fields'].values()))
+
+    def test_real_child_false_close_main_reports_cleanup_and_retains_handle(self):
+        from tools.fleet_maintenance.component_bom import compare_components
+        from host.qc.tests.test_governance_isolation import synthetic_factory
+        device,=select_devices(self.registry,['cp_0042'],purpose='monitor')
+        wrappers=[];spawn=synthetic_factory(hung=(device.device_id,))
+        class Unreaped:
+            # Synthetic unreapable poll, real local child; not actual kernel D-state proof.
+            def __init__(self,process):
+                self.process=process;self.hold=True
+                self.pid=process.pid;self.stdin=process.stdin;self.stdout=process.stdout;self.stderr=process.stderr
+            @property
+            def returncode(self):return self.process.returncode
+            def poll(self):return None if self.hold else self.process.poll()
+        def factory(*args):
+            wrapper=Unreaped(spawn(*args));wrappers.append(wrapper);return wrapper
+        args=['--registry','/synthetic/registry','--targets',device.device_id,'--policy','/synthetic/policy','--once']
+        policy=sample_probe_policy(timeout_ms=30)
+        try:
+            with (patch.object(cli,'_read_json',side_effect=[registry_wire(self.registry),
+                    json.loads(canonical_json(asdict(policy)))]),
+                  patch.object(cli,'_adapters',return_value=(self.scheduler_factory(factory),compare_components)),
+                  patch.object(cli,'_packaged_metadata',return_value=(self.bom(),())),
+                  contextlib.redirect_stderr(io.StringIO()) as errors):
+                self.assertEqual(cli.main(args),3)
+            error=json.loads(errors.getvalue())
+            self.assertEqual(error['error'],'CLOSE_NOT_REAPED');self.assertTrue(error['cleanup_required'])
+            self.assertEqual(len(cli._UNCLOSED),1)
+        finally:
+            for wrapper in wrappers:wrapper.hold=False
+            for scheduler in self.schedulers:self.assertTrue(scheduler.close())
+
+
+class MainBCallerTests(unittest.TestCase):
+    def test_missing_or_wrong_registry_plan_blocks_before_factory_build_or_stage(self):
+        with patch.object(sys,'path',[str(ROOT/'tools/fleet_maintenance'),*sys.path]):
+            operations=importlib.import_module('operations');fleet=importlib.import_module('fleet')
+            online=importlib.import_module('online');web_config=importlib.import_module('web_config')
+        registry=sample_registry(('cp_0042',))
+        config=web_config.setup(registry=registry,selected=['cp_0042'],config={'ssh_config':'/synthetic/config'})
+        base=fleet.bind_registry_plan({'device':'cp_0042','commit':fleet.PIN,'unknown_approved':False},
+                                     registry=registry,device='cp_0042')
+        wrong_identity=dict(base['registry_device'],ssh_alias='different-alias')
+        plans=[{k:v for k,v in base.items() if k!='registry_digest'},
+               dict(base,registry_digest='f'*64),dict(base,registry_device=wrong_identity)]
+        with tempfile.TemporaryDirectory(prefix='governance-plan-binding-') as directory:
+            state=Path(directory)
+            for plan in plans:
+                digest,_=online.write_plan(state,plan)
+                factory=Mock(side_effect=AssertionError('SSH before plan binding'))
+                with (patch.object(fleet,'build') as build,patch.object(online,'stage_and_apply') as stage,
+                      self.assertRaises(ValueError)):
+                    operations.execute(state,config,'cp_0042',digest,factory,registry=registry)
+                factory.assert_not_called();build.assert_not_called();stage.assert_not_called()
+        drift=dict(config,registry_digest='f'*64)
+        with self.assertRaises(ValueError):operations.require_config(drift,registry)
 
 
 class LintPremergeTests(unittest.TestCase):
