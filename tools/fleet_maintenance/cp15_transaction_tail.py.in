@@ -1,0 +1,112 @@
+# Generated, immutable canary-specific section; common transaction guards above
+# are copied from the reviewed EEG delta without modifications.
+PINNED_FILES = __PINNED_FILES__
+EXPECTED_BEFORE = __EXPECTED_BEFORE__
+PINNED_MANIFEST_SHA = '__MANIFEST_SHA__'
+
+def check_diagnostic_paths():
+    roots=[PROJECT/'orangepi/runtime']+list((PROJECT/'profiles').glob('*/orangepi/runtime'))
+    for root in roots:
+        try:root_stat=root.lstat()
+        except FileNotFoundError:continue
+        if not stat.S_ISDIR(root_stat.st_mode):raise Abort('unsafe diagnostic runtime parent: '+str(root))
+        path=root/'diagnostics'
+        try:s=path.lstat()
+        except FileNotFoundError:continue
+        if not stat.S_ISDIR(s.st_mode) or stat.S_IMODE(s.st_mode)!=0o700 or s.st_uid!=root_stat.st_uid:
+            raise Abort('unsafe diagnostic directory: '+str(path))
+        for child in path.iterdir():
+            if child.name not in ('events.jsonl','events.jsonl.1','events.jsonl.2','events.jsonl.3'):
+                raise Abort('unexpected diagnostic file')
+            s=child.lstat()
+            if not stat.S_ISREG(s.st_mode) or stat.S_IMODE(s.st_mode)!=0o600 or s.st_uid!=root_stat.st_uid:
+                raise Abort('unsafe diagnostic event file')
+
+def delta_bundle(directory):
+    require_root_private_tree(directory)
+    manifest_path=directory/'manifest.json'
+    if digest(manifest_path)!=PINNED_MANIFEST_SHA:raise Abort('manifest pin mismatch')
+    manifest=json.loads(manifest_path.read_text())
+    if (manifest.get('schema')!=1 or manifest.get('project')!=str(PROJECT)
+            or manifest.get('base_commit')!='f5d03b7b5fb197eb76e78610a0bce672e5cc4853'
+            or manifest.get('candidate_commit')!='__CANDIDATE_COMMIT__'
+            or manifest.get('files')!=PINNED_FILES):raise Abort('canary manifest mismatch')
+    for item in PINNED_FILES:
+        path=directory/'payload'/item['path']
+        if not path.is_file() or path.is_symlink() or path.stat().st_size!=item['size'] or digest(path)!=item['sha256']:
+            raise Abort('canary payload mismatch: '+item['path'])
+    return manifest
+
+def delta_inventory():
+    result=snapshot(EXPECTED_BEFORE)
+    for rel,expected in EXPECTED_BEFORE.items():
+        state=result[rel]
+        if expected is None:
+            if state.get('type')!='absent':raise Abort('new runtime path is not absent: '+rel)
+        elif state.get('type')!='regular' or state.get('sha256')!=expected:
+            raise Abort('baseline mismatch: '+rel)
+    shadow=PROJECT/'profiles/eeg/orangepi/src'
+    if shadow.resolve()!=(PROJECT/'orangepi/src').resolve():raise Abort('EEG profile source shadow')
+    for item in PINNED_FILES:
+        suffix=item['path'][len('orangepi/src/'):]
+        if (shadow/suffix).resolve()!=(PROJECT/item['path']).resolve():raise Abort('EEG source shadow mismatch')
+    import yaml
+    config=PROJECT/'profiles/eeg/orangepi/configs/devices.yaml'
+    if config.is_symlink() or not config.is_file():raise Abort('EEG config missing or symlinked')
+    eeg=(yaml.safe_load(config.read_text()) or {}).get('eeg') or {}
+    if eeg.get('impedance_acceptance_policy','advisory')!='advisory':raise Abort('unreviewed EEG policy')
+    check_diagnostic_paths()
+    return result
+
+def delta_main():
+    global TARGET_DEVICE
+    parser=argparse.ArgumentParser();parser.add_argument('--device',required=True)
+    parser.add_argument('--manifest-sha256',required=True);parser.add_argument('--apply',action='store_true')
+    args=parser.parse_args();TARGET_DEVICE=args.device
+    if TARGET_DEVICE!='cp_0015':raise Abort('canary is limited to cp_0015')
+    if os.geteuid()!=0:raise Abort('requires root')
+    os.umask(0o077);require_device();require_root_private_tree(Path(__file__).absolute())
+    directory=Path(__file__).absolute().parent;manifest=delta_bundle(directory)
+    if args.manifest_sha256!=PINNED_MANIFEST_SHA:raise Abort('approval manifest hash mismatch')
+    files=delta_inventory();assert_idle(api_state());locks=check_locks()
+    if not service_active('embodied-pi-collect') or not service_active('camd'):raise Abort('required service inactive')
+    unit=run(['systemctl','show','embodied-pi-collect','-p','ExecStart','--value']).stdout.decode()
+    if str(PROJECT/'orangepi/scripts/run.sh') not in unit:raise Abort('unexpected controller unit')
+    mainpid=run(['systemctl','show','embodied-pi-collect','-p','MainPID','--value']).stdout.decode().strip()
+    if not mainpid.isdigit() or mainpid=='0':raise Abort('controller PID missing')
+    cmdline=(Path('/proc')/mainpid/'cmdline').read_bytes().replace(b'\0',b' ').decode(errors='replace')
+    if str(PROJECT/'orangepi/src/orangepi_collect/control/launcher.py') not in cmdline:raise Abort('unexpected controller process')
+    pid=camd_pid();protected=protected_snapshot()
+    if not args.apply:
+        print(json.dumps({'status':'dry_run_passed','device':TARGET_DEVICE,'manifest':PINNED_MANIFEST_SHA,'camd_pid':pid,'capture_locks':locks,'protected_entries':len(protected)},sort_keys=True));return
+    maintenance=Path('/var/backups/headring-code');maintenance.mkdir(mode=0o700,exist_ok=True);require_root_private_tree(maintenance)
+    tx=Path(tempfile.mkdtemp(prefix=TARGET_DEVICE+'-cp15-canary-',dir=str(maintenance)));backup_dir=tx/'backup';diag=tx/'diag';diag.mkdir(mode=0o700)
+    record={'device_id':TARGET_DEVICE,'manifest_sha256':PINNED_MANIFEST_SHA,'camd_pid_before':pid,'status':'preparing'}
+    installed=[];meta=None
+    try:
+        write_json(diag/'protected-before.json',protected);stage_and_compile(directory,tx)
+        if delta_inventory()!=files or protected_snapshot()!=protected or camd_pid()!=pid:raise Abort('preflight drift')
+        assert_idle(api_state());check_locks()
+        with stop_controller_and_verify(files) as held:
+            meta=backup_files(PINNED_FILES,backup_dir,files)
+            record.update(status='backed_up',capture_locks_held=held,backup_metadata=str(backup_dir/'metadata.json'))
+            write_json(diag/'transaction.json',record)
+            atomic_install(PINNED_FILES,tx/'stage',meta,files,installed)
+        run(['systemctl','start','embodied-pi-collect'],timeout=60)
+        state=health_check(manifest,pid);check_locks();check_diagnostic_paths()
+        expected=dict(EXPECTED_BEFORE);expected.update({x['path']:x['sha256'] for x in PINNED_FILES})
+        for rel,actual in snapshot(expected).items():
+            if actual.get('type')!='regular' or actual.get('sha256')!=expected[rel]:raise Abort('post-install source mismatch: '+rel)
+        after=protected_snapshot();write_json(diag/'protected-after.json',after)
+        if after!=protected:raise Abort('protected state changed')
+        record.update(status='committed',api_after=state,camd_pid_after=camd_pid(),replaced_paths=installed)
+        write_json(diag/'transaction.json',record)
+        print(json.dumps({'status':'committed','backup':str(backup_dir),'receipt':str(diag/'transaction.json')},sort_keys=True))
+    except Exception as exc:
+        record.update(error_type=type(exc).__name__,error=str(exc)[:500])
+        recover_after_failure(record,diag/'transaction.json',installed,PINNED_FILES,meta,backup_dir,pid)
+        raise
+
+if __name__=='__main__':
+    try:delta_main()
+    except Abort as exc:raise SystemExit('aborted safely: '+str(exc))
