@@ -218,3 +218,20 @@ class DeviceDiagnostics:
         payload=output.getvalue()
         if len(payload)>MAX_BUNDLE:raise ValueError('诊断包超过大小限制，请联系维护人员')
         return payload
+
+
+def export_event_trace(base, destination):
+    """Export only schema-validated event records, never journal or session files."""
+    from diagnostic_events import export_events
+    payload=export_events(Path(base)/'runtime/diagnostics')
+    fd=os.open(str(destination),os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os,'O_NOFOLLOW',0),0o600)
+    with os.fdopen(fd,'wb') as output:output.write(payload)
+
+
+if __name__=='__main__':
+    import argparse
+    parser=argparse.ArgumentParser(description='Export only sanitized diagnostic events')
+    parser.add_argument('--base',required=True)
+    parser.add_argument('--output',required=True)
+    args=parser.parse_args()
+    export_event_trace(args.base,args.output)

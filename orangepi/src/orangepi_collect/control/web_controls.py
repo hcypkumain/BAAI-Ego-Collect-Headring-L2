@@ -186,6 +186,11 @@ class WebControls:
     def voice_prompt_changed(self,active):
         dashboard=getattr(self,'dashboard',None)
         if dashboard is None:return
+        events=getattr(dashboard,'events',None)
+        if events:
+            now=time.monotonic();previous=getattr(self,'_diagnostic_tick',now);self._diagnostic_tick=now
+            lag=max(0,(now-previous)*1000)
+            if lag>1000:events.emit('loop_lag',lag_ms=lag)
         # Speaker.tick dispatches this on the controller thread. Keep it safe
         # and limited to the dashboard's own thread-safe prompting flag.
         dashboard.set_prompting(active)
@@ -492,7 +497,7 @@ class WebControls:
                 elif action in ('impedance_start','impedance_end','impedance_review'):
                     command = {'impedance_start':'IMPEDANCE_START','impedance_end':'IMPEDANCE_END',
                                'impedance_review':'IMPEDANCE_REVIEW'}[action]
-                    self.command(json.dumps(dict(command=command,request_id=uuid.uuid4().hex)))
+                    self.command(json.dumps(dict(command=command,request_id=job.get('request_id') or uuid.uuid4().hex)))
                     self.state_write()
                 elif action=='wrist_camera_settings':
                     output=run_scan([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'control/wrist_settings_worker.py')],

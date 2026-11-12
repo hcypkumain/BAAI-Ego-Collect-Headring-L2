@@ -171,6 +171,10 @@ class Dashboard:
         self.phone_preview_slots=threading.BoundedSemaphore(1)
         self.phone_stream_slots=threading.BoundedSemaphore(3)
         self.lock=threading.Lock();self.snapshot={'state':'starting','revision':0,'devices':[],'selected_devices':[],'worker':{},'session':None,'image':None};self.pending=None;self.busy=False;self.result=None;self.prompting=False
+        self.publish_seq=0;self.published_monotonic=time.monotonic();self.terminal_results=[];self.active_request_id=None;self.active_start_committed=False
+        from diagnostic_events import EventWriter, NullEvents
+        try:self.events=EventWriter(self.base/'runtime/diagnostics')
+        except Exception:self.events=NullEvents()
         from cloud_uploads import UploadManager
         try:self.cloud_uploads=UploadManager(self.base,self.recording_store,self.display_state) if self.recording_store is not None else None
         except Exception:self.cloud_uploads=None
@@ -349,9 +353,14 @@ class Dashboard:
     def publish(self,value):
         value=dict(value);root=value.pop('review_session',None)
         self.demands.state(dict(value,display_blocked=self.privacy.snapshot()['required']))
-        with self.lock:self.snapshot=copy.deepcopy(value);self.review_root=root
+        with self.lock:
+            self.snapshot=copy.deepcopy(value);self.review_root=root
+            self.publish_seq+=1;self.published_monotonic=time.monotonic()
 
     def submit(self,data):
+        request_id=data.get('request_id')
+        if request_id is not None and (not isinstance(request_id,str) or not re.fullmatch(r'[0-9a-f]{32}',request_id)):
+            raise ValueError('无效的请求标识')
         if data.get('action') not in ('privacy_display','privacy_ack'):
             with self.lock:
                 current=self.snapshot.get('collection_context')
@@ -386,6 +395,8 @@ class Dashboard:
             if data.get('action') not in ('collection_mode','stop') and data.get('revision')!=self.snapshot.get('revision'):
                 raise ValueError('流程已变化，请刷新后操作')
             if data.get('action') not in snapshot_actions(dict(self.snapshot,privacy=self.privacy.snapshot())):raise ValueError('当前步骤不允许这个操作')
+            if request_id and (request_id==self.active_request_id or any(r['request_id']==request_id for r in self.terminal_results)):
+                raise ValueError('请求已处理，请查询状态')
             if data['action']=='collection_mode' and data.get('value') not in ('emg','eeg'):
                 raise ValueError('请选择脑电或肌电')
             if data['action']=='reference_list':
@@ -439,6 +450,7 @@ class Dashboard:
                 target=self.privacy.stopping(data.get('privacy_target'),allow_same_session=True)
                 data=dict(data,privacy_target=target)
             self.pending=dict(data);self.result=None
+            self.events.emit('action_submitted', action=data['action'] if data['action'] in ('start','stop','impedance_start','impedance_end','impedance_review','rescan') else 'other', request_id=data.get('request_id'), revision=data.get('revision'))
 
     def set_prompting(self,active):
         with self.lock:self.prompting=bool(active)
@@ -449,11 +461,25 @@ class Dashboard:
     def take(self):
         with self.lock:
             job=self.pending;self.pending=None
-            if job:self.busy=True;self.active_action=job.get('action')
+            if job:
+                self.busy=True;self.active_action=job.get('action');self.active_request_id=job.get('request_id');self.active_start_committed=False
+                self.events.emit('action_taken', action=self.active_action if self.active_action in ('start','stop','impedance_start','impedance_end','impedance_review','rescan') else 'other', request_id=job.get('request_id'), revision=job.get('revision'))
             return job
 
     def complete(self,error=None):
-        with self.lock:self.busy=False;self.result={'ok':not error,'error':error,'time':time.time(),'action':getattr(self,'active_action',None)}
+        with self.lock:
+            self.busy=False;self.result={'ok':not error,'error':error,'time':time.time(),'action':getattr(self,'active_action',None)}
+            action=getattr(self,'active_action',None)
+            request_id=self.active_request_id
+            if request_id:
+                self.terminal_results.append(dict(request_id=request_id,action=action,ok=not bool(error),error=error,publish_seq=self.publish_seq,commit_state=('committed' if self.active_start_committed else 'not_committed') if action=='start' else 'not_applicable'))
+                self.terminal_results=self.terminal_results[-64:]
+            self.active_request_id=None
+            self.events.emit('action_complete', action=action if action in ('start','stop','impedance_start','impedance_end','impedance_review','rescan') else 'other', request_id=request_id, ok=not bool(error), reason='failed' if error else 'ok')
+
+    def note_start_commit(self):
+        with self.lock:
+            if self.active_action=='start':self.active_start_committed=True
 
     def display_state(self):
         """Authoritative display gate without disk, QC, media or impedance parsing."""
@@ -461,6 +487,9 @@ class Dashboard:
             value={key:self.snapshot.get(key) for key in ('state','session','preview_id','image','selected_devices','revision','collection_mode','collection_context')}
             value['busy']=self.busy or self.pending is not None
             value['result']=copy.deepcopy(self.result)
+            value['terminal_results']=copy.deepcopy(self.terminal_results)
+            value['publish_seq']=self.publish_seq
+            value['publish_age_ms']=max(0,round((time.monotonic()-self.published_monotonic)*1000))
             value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state')}
         value['privacy']=self.privacy.snapshot()
         return value

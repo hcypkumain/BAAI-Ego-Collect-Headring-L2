@@ -60,6 +60,24 @@ class DashboardTests(unittest.TestCase):
         self.url='http://127.0.0.1:'+str(self.ui.server.server_port)
         self.ui.publish({'state':'ready','revision':7})
     def tearDown(self):self.ui.close();self.tmp.cleanup()
+    def test_request_terminal_history_survives_later_result_and_tracks_publications(self):
+        self.ui.camera_checks.approved=lambda:True
+        request_id='a'*32
+        self.ui.submit({'action':'start','revision':7,'stop_protocol':'session-stop-v1','request_id':request_id})
+        self.assertEqual(self.ui.take()['request_id'],request_id)
+        self.ui.complete('start rejected')
+        first=self.ui.display_state()
+        self.assertEqual(first['terminal_results'][-1]['request_id'],request_id)
+        self.assertFalse(first['terminal_results'][-1]['ok'])
+        self.assertEqual(first['terminal_results'][-1]['commit_state'],'not_committed')
+        self.ui.submit({'action':'repeat','revision':7})
+        self.ui.take();self.ui.complete()
+        self.ui.publish({'state':'ready','revision':7})
+        later=self.ui.display_state()
+        self.assertEqual(later['result']['action'],'repeat')
+        self.assertEqual(later['terminal_results'][-1]['request_id'],request_id)
+        self.assertGreater(later['publish_seq'],first['terminal_results'][-1]['publish_seq'])
+        self.assertGreaterEqual(later['publish_age_ms'],0)
     def post(self,payload,token=True,origin=None):
         headers={'Content-Type':'application/json'}
         if token:headers['X-Access-Token']=self.ui.token

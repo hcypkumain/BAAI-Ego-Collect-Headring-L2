@@ -502,6 +502,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.voice.say(contract_error+'。请重新准备设备后再开始。')
             return False
         if 'eeg' in (self.selected_devices or ()) and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
+            events=getattr(dashboard,'events',None)
+            if events:events.emit('impedance_gate', reason='unknown', ok=False)
             self.voice.say('请先结束阻抗检查、确认结果，并等待普通脑电采样恢复。')
             return False
         checks=getattr(dashboard,'camera_checks',None)
@@ -543,16 +545,16 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.last_help=['设备所有权未确认，未开始采集'];self.state_write();return False
         if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
             self.voice.say('请先完成脑电阻抗检查，并确认检测已结束、设备配置已恢复。')
-            return
+            return False
         if self.worker_status().get('state')!='ready':
             self.voice.say('设备尚未就绪，请等待准备完成后再点击开始采集。')
-            return
+            return False
         contract_error=self.required_capture_error(self.worker_status())
         if contract_error:
             self.voice.say(contract_error+'。本次没有开始采集，请重新准备。')
             return False
         if fingerprint(devices().get('auto_discovery',{})) != self.usb_fingerprint:
-            self.release_prepared();self.scan_devices();return
+            self.release_prepared();self.scan_devices();return False
         interrupt=getattr(self.voice,'interrupt',None)
         if callable(interrupt):interrupt()
         self.state='countdown'
@@ -562,14 +564,14 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             privacy=self.dashboard.privacy
             if privacy.cancelled or not privacy.ready():return False
             if self.quit:
-                return
+                return False
             if self.worker.poll() is not None or self.worker_status().get('state')!='ready':
                 self.poll()
-                return
+                return False
             if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
                 self.state='ready';self.state_write()
                 self.voice.say('脑电阻抗检查状态已变化，请检查后再开始。')
-                return
+                return False
             started=time.monotonic()
             self.countdown_status['remaining']=remaining
             self.countdown_status['tick_unix_ms']=round(time.time()*1000)
@@ -587,14 +589,14 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         interrupt=getattr(self.voice,'interrupt',None)
         if callable(interrupt):interrupt()
         if 'eeg' in self.selected_devices and not impedance_allows_recording(self.worker_status().get('eeg_impedance')):
-            self.state='ready';self.state_write();return
+            self.state='ready';self.state_write();return False
         # A cancellation or owner failure can arrive during the final countdown sleep.
         # Keep the impedance gate above, and recheck immediately before START.
         if self.quit:
-            return
+            return False
         if not self.worker or self.worker.poll() is not None or self.worker_status().get('state')!='ready':
             self.poll()
-            return
+            return False
         privacy=self.dashboard.privacy
         try:self.camera_registry.verify_owner(self.capture_owner_run,'capture')
         except RegistryError:
@@ -602,7 +604,11 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         contract_error=self.required_capture_error(self.worker_status())
         if contract_error:
             self.last_help=[contract_error+'。本次没有开始采集，请重新准备。'];self.state='ready';self.state_write();return False
-        try:atomic_json(self.path/'screen_privacy_gate.json',privacy.commit())
+        try:
+            proof=privacy.commit()
+            note=getattr(self.dashboard,'note_start_commit',None)
+            if callable(note):note()
+            atomic_json(self.path/'screen_privacy_gate.json',proof)
         except Exception as error:
             if not privacy.committed:raise
             return self._stop_after_start_failure(error)
@@ -620,13 +626,14 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.state='recording'
                 self.state_write()
                 print('RECORDING '+str(self.path),flush=True)
-                if privacy.cancelled or stop_queued or privacy.phase=='stopping':return self.stop_before_prompt()
-                return
+                if privacy.cancelled or stop_queued or privacy.phase=='stopping':
+                    self.stop_before_prompt();return False
+                return True
             if status.get('state') in ('error','success') or self.worker.poll() is not None:
                 if status.get('state')=='error' and privacy.committed:
                     return self._stop_after_start_failure(RuntimeError('采集进程在START确认前报告错误'))
                 self.poll()
-                return
+                return False
             time.sleep(.05)
         return self._stop_after_start_failure(RuntimeError('开始采集确认超时'))
 
@@ -819,13 +826,18 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 self.state_write()
 
     def scan_devices(self,announce=True,quiet=False):
+        events=getattr(getattr(self,'dashboard',None),'events',None)
+        started=time.monotonic()
+        if events:events.emit('scan_start')
         if not self.scan_lock.acquire(False):return False
         try:
             if not self.retry_pending_owner(force=True):return False
             if self.worker or self.state in ('preparing','recording','countdown','finalizing','confirm_stop'):
                 self.last_help=['设备正在准备、采集或收尾，不能扫描'];return False
             return self._scan_devices(announce,quiet)
-        finally:self.scan_lock.release()
+        finally:
+            self.scan_lock.release()
+            if events:events.emit('scan_end',duration_ms=max(0,(time.monotonic()-started)*1000))
 
     def _scan_devices(self,announce=True,quiet=False):
         from required_device_contract import build_contract,validate_scan

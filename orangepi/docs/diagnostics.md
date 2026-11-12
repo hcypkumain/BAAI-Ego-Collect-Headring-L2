@@ -15,6 +15,14 @@
 
 ## 定位入口
 
+候选版本结构化事件位于 `orangepi/runtime/diagnostics/events.jsonl` 及 `.1`–`.3`，最大约 5 MiB × 4；目录 0700、文件 0600。事件队列满或写入失败时丢弃并计数，不阻塞采集控制。以下命令只导出固定字段的事件，不打包原始数据或整段 journal；输出必须是不存在的新文件：
+
+```sh
+python3 orangepi/src/orangepi_collect/control/device_diagnostics.py --base orangepi --output /tmp/headring-events.jsonl
+```
+
+旧网页诊断包与上述固定白名单事件导出是不同功能，不能假定旧包满足本事件导出的脱敏范围；分享前应检查内容。
+
 - `sudo journalctl -u embodied-pi-collect.service -b -n 150 --no-pager`
 - `orangepi/runtime/controller.json`：状态和当前数据目录。
 - `orangepi/runtime/devices.json`：最近一次有效数据扫描。
