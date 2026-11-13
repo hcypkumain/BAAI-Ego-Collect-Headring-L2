@@ -1,0 +1,6 @@
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name>HeadRing CP21</name>
+  <service><type>_headring._tcp</type><port>8765</port><txt-record>device_id=cp_0021</txt-record><txt-record>path=/phone</txt-record><txt-record>scheme=http</txt-record></service>
+</service-group>

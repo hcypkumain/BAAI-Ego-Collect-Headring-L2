@@ -1,0 +1,20 @@
+[Unit]
+Description=HeadRing CP21 USB discovery and installer
+After=local-fs.target
+[Service]
+Type=simple
+User=avahi
+Group=avahi
+ExecStart=/usr/bin/python3 -I -S /opt/headring-usb-entry-persistent/probe.py
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=48M
+TasksMax=12
+CPUQuota=20%
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

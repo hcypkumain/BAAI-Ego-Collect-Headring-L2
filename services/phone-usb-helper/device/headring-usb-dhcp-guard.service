@@ -1,0 +1,19 @@
+[Unit]
+Description=Keep selected HeadRing USB phone on DHCP without changing gadget profile
+After=NetworkManager.service
+Wants=NetworkManager.service
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I -S /opt/headring-usb-entry-persistent/usb_dhcp_guard.py
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=48M
+TasksMax=12
+CPUQuota=15%
+Restart=on-failure
+RestartSec=5
+[Install]
+WantedBy=multi-user.target

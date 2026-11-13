@@ -1,0 +1,28 @@
+[Unit]
+Description=HeadRing CP21 USB fixed entry mDNS publisher
+After=local-fs.target
+
+[Service]
+Type=simple
+User=avahi
+Group=avahi
+Environment=LD_LIBRARY_PATH=/opt/headring-usb-entry-proof/proof-20261113-b524dab0/lib
+ExecStart=/usr/bin/python3 -I -S /opt/headring-usb-entry-persistent/dynamic_guard.py
+RuntimeDirectory=avahi-daemon
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+TimeoutStopSec=5
+KillMode=control-group
+Restart=no
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+MemoryMax=128M
+TasksMax=16
+CPUQuota=25%
+BindReadOnlyPaths=/opt/headring-usb-entry-proof/proof-20261113-b524dab0/etc-avahi:/etc/avahi
+BindReadOnlyPaths=/opt/headring-usb-entry-persistent/services:/etc/avahi/services
+
+[Install]
+WantedBy=multi-user.target
