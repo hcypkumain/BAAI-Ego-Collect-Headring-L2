@@ -1,6 +1,6 @@
 # Offline collection and phone helper
 
-The supported target is an **already initialized arm64 collector**, with its existing hardware runtime, Python virtual environment, systemd collector service, camera daemon, device identity and calibration in place. This is not a bare-OS provisioning image. The offline release contains the complete 121-file collector source baseline `f5d03b7b5fb197eb76e78610a0bce672e5cc4853`, the Android app, the USB discovery services and the pinned Ubuntu Avahi daemon/core library and licences. It does not contain calibration, registry, credentials, datasets, Python virtualenv, camera binaries or signing keys.
+The supported target is an **already initialized arm64 collector**, with its existing hardware runtime, Python virtual environment, systemd collector service, camera daemon, device identity and calibration in place. This is not a bare-OS provisioning image. The offline release contains the complete 121-file collector source baseline `8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3`, which is `f5d03b7` plus the five reviewed EEG advisory files from overlay manifest SHA-256 `36d8059918ce370f7928cc7cd3207e2ac1d26471b3e8dcdef74b98b7888cd62a`, the Android app, the USB discovery services and the pinned Ubuntu Avahi daemon/core library and licences. It does not contain calibration, registry, credentials, datasets, Python virtualenv, camera binaries or signing keys.
 
 The default `apply` handles the entire source baseline and phone service together. If collector source already matches, it does not stop or restart the collector. If source differs, the transaction requires the active collector and camera to report idle, obtains the existing capture lease, backs up the changed files and restarts only the collector after replacing them. Unknown, busy or missing runtime is a refusal, not a partial installation. The former USB debugging helper is optional compatibility and is not installed, started or required by this release.
 
@@ -16,21 +16,22 @@ curl -fL -o "$DEPS/libavahi-core7_0.7-4ubuntu7.3_arm64.deb" https://ports.ubuntu
 export JAVA_HOME=/path/to/jdk17 ANDROID_HOME=/path/to/android-sdk
 export PATH="$JAVA_HOME/bin:$PATH"
 python3 deployment/phone-usb-entry/build_bundle.py \
-  --device cp_0021 --usb-port 7-1.2.2.2 --vid 2717 --pid ff80 \
-  --deps "$DEPS" --apk services/phone-usb-helper/android/artifacts/headring-helper-cp0021-v3.apk \
-  --android-sdk "$ANDROID_HOME" --output headring-cp0021.tar
+  --device cp_0018 --usb-port 7-1.2.2.2 \
+  --deps "$DEPS" --apk /path/to/headring-helper-universal-v4.apk \
+  --signer-sha256 a382787931ef1937c8a318a080b912fdbb5f06ce7de0265d08bc398a12437bfe \
+  --android-sdk "$ANDROID_HOME" --output headring-cp0018.tar
 ```
 
-The builder prints the bundle SHA-256 and release ID. Record that SHA from a trusted channel. The included CP21 APK is the user-validated v3 artifact, SHA-256 `6176b00e6004e4e388c68916f3a0aed0137b912d2b7dfa131de744faca81181a`, certificate SHA-256 `a382787931ef1937c8a318a080b912fdbb5f06ce7de0265d08bc398a12437bfe`. Its signing key is not in this repository. Future updates to an installed APK must use the same external signing key.
+The builder prints the bundle SHA-256 and release ID. Record that SHA from a trusted channel. This branch builds a universal app that accepts device IDs of the form `cp_NNNN`; the target remains explicitly bound by each device bundle and the verified physical USB port. The app uses a separate localhost origin for each connected device and does not silently switch to another ID. More than one candidate requires an explicit user selection. Supported network drivers are `rndis_host`, `cdc_ether` and `cdc_ncm`; device manufacturer and serial number are not used for selection. This does not guarantee all Android phones or tether configurations work.
 
-For a different target, build an APK with the same target identity used in `--device`. Set `HEADRING_DEVICE_ID=cp_0033` (example), `JAVA_HOME`, `ANDROID_HOME`, `ANDROID_KEYSTORE`, `ANDROID_KEY_ALIAS` and `ANDROID_KEYSTORE_PASS`, then run `services/phone-usb-helper/android/build.sh /absolute/path/helper.apk`. Supply the resulting APK and the target's verified USB port, VID and PID to the bundle builder. The builder validates the APK identity and signer; it does not create or store a signing key. Target-selector values are explicit; CP21 is not silently assumed on other devices.
+Build the app with JDK 17, Android platform/build-tools 35, `ANDROID_KEYSTORE`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASS`, and `HEADRING_VERSION_CODE=4`, then run `services/phone-usb-helper/android/build.sh /absolute/path/helper.apk`. The signing key is never included in the bundle. To upgrade the existing app, use its existing signing key; the builder verifies its certificate against the explicitly supplied hash. The signed CP21 v3 artifact in the parent release is retained for provenance but is not a universal app and must not be used for this bundle.
 
 ## Plan, apply and roll back
 
 Transfer the bundle to the target and independently verify its trusted hash before extracting the embedded deployment program. Example, substituting the actual output hash:
 
 ```sh
-BUNDLE=/path/to/headring-cp0021.tar
+BUNDLE=/path/to/headring-cp0018.tar
 SHA256=the_64_hex_digits_printed_by_the_builder
 printf '%s  %s\n' "$SHA256" "$BUNDLE" | sha256sum -c -
 tar -xOf "$BUNDLE" support/deploy_bundle.py > /tmp/headring-offline-deploy.py
@@ -51,6 +52,6 @@ Use the exact release ID printed by the builder. Rollback refuses files altered 
 
 ## Acceptance and limits
 
-The app presents the existing page in an embedded WebView and uses `http://localhost:8765` internally. Discovery uses USB DNS-SD and a bounded USB subnet scan with a read-only identity probe; that self-declared identity is not cryptographic authentication. `DiscoveryProvider` and `Endpoint` are separated for future wireless work, but wireless discovery is not implemented. The user confirmed the CP21 app worked; repeated unplug/replug, reboot, all Android variants and all upload/download paths are not established by that confirmation. The system picker and save dialog handle files; in-app downloads are limited to 32 MB. Vendor battery policies may interrupt background discovery.
+The app presents the existing page in an embedded WebView and uses `http://localhost:8765` internally. Discovery uses USB DNS-SD and a bounded USB subnet scan with a read-only identity probe; that self-declared identity is not cryptographic authentication. `DiscoveryProvider` and `Endpoint` are separated for future wireless work, but wireless discovery is not implemented. The previous CP21 app was confirmed working; this universal version still needs physical-phone acceptance; repeated unplug/replug, reboot, all Android variants and all upload/download paths are not established by that confirmation. The system picker and save dialog handle files; in-app downloads are limited to 32 MB. Vendor battery policies may interrupt background discovery.
 
 The deployment transaction and failure paths are tested using isolated fixtures and mocked system services; no production collector is restarted by those tests. Deployment of this new release itself has not yet been executed or accepted on a physical target.

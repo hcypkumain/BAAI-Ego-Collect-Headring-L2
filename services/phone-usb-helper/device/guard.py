@@ -91,13 +91,12 @@ def metadata(data):
                 or not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", value["interface"])):
             raise Refused("METADATA_INVALID")
         selection = value["selector"]
-        if type(selection) is not dict or set(selection) != {"usb_port", "vid", "pid"}:
+        if type(selection) is not dict or set(selection) != {"usb_port", "drivers"}:
             raise Refused("METADATA_INVALID")
         if type(selection["usb_port"]) is not str or not re.fullmatch(r"[1-9][0-9]*-[1-9][0-9]*(?:\.[1-9][0-9]*)*", selection["usb_port"]):
             raise Refused("METADATA_INVALID")
-        for key in ("vid", "pid"):
-            if type(selection[key]) is not str or not re.fullmatch(r"[0-9a-f]{4}", selection[key]):
-                raise Refused("METADATA_INVALID")
+        if selection["drivers"] != ["cdc_ether", "cdc_ncm", "rndis_host"]:
+            raise Refused("METADATA_INVALID")
         for key, basename in (("binary_path", "avahi-daemon"), ("config_path", "avahi-daemon.conf")):
             if Path(absolute(value[key])).name != basename:
                 raise Refused("METADATA_INVALID")
@@ -117,13 +116,11 @@ class Sysfs:
     def matches(self, name, selection):
         device = (self.root / name / "device").resolve(strict=True)
         driver = (device / "driver").resolve(strict=True).name
-        if driver not in ("rndis_host", "cdc_ncm"):
+        if driver not in selection["drivers"]:
             return False
         for parent in (device,) + tuple(device.parents):
             if parent.name == selection["usb_port"]:
-                vid = secure_read(str(parent / "idVendor"), 4096, False).decode("ascii").strip()
-                pid = secure_read(str(parent / "idProduct"), 4096, False).decode("ascii").strip()
-                return (vid, pid) == (selection["vid"], selection["pid"])
+                return (parent / "idVendor").is_file() and (parent / "idProduct").is_file()
         return False
 
     def state(self, value):
