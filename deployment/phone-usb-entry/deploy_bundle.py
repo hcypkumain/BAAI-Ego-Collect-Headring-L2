@@ -64,6 +64,45 @@ def unit_templates(prefix):
  SERVICES[1]:('[Unit]\nDescription=HeadRing USB discovery and installer\n[Service]\n'+shared+'User=avahi\nGroup=avahi\nRestart=on-failure\nRestartSec=5\nExecStart=/usr/bin/python3 -I -S '+prefix+'/probe.py\n[Install]\nWantedBy=multi-user.target\n').encode(),
  SERVICES[2]:('[Unit]\nDescription=HeadRing selected USB phone DHCP recovery\nAfter=NetworkManager.service\nWants=NetworkManager.service\n[Service]\n'+shared+'Restart=on-failure\nRestartSec=5\nExecStart=/usr/bin/python3 -I -S '+prefix+'/usb_dhcp_guard.py\n[Install]\nWantedBy=multi-user.target\n').encode()}
 
+def inspect_selector(m,files):
+ """Read-only USB network selection; no interface is guessed when ambiguous."""
+ fd,path=tempfile.mkstemp(prefix='headring-usb-selector-',suffix='.py')
+ try:
+  with os.fdopen(fd,'wb') as f:f.write(files['release/guard.py'])
+  spec=importlib.util.spec_from_file_location('offline_usb_selector',path);guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+  meta=guard.metadata(files['release/metadata.json']);require(meta['device_id']==m['device_id'] and meta['selector']==m['selector'],'USB metadata mismatch')
+  sysfs=guard.Sysfs();names=list(sysfs.root.iterdir());require(len(names)<=256,'too many network interfaces');matches=[]
+  for item in names:
+   try:
+    if guard.Sysfs().matches(item.name,meta['selector']):matches.append(item.name)
+   except (OSError,guard.Refused,UnicodeError):pass
+  require(len(matches)<=1,'multiple eligible USB network interfaces; explicit selection required')
+  return {'mode':meta['selector'].get('mode','explicit-port'),'match_count':len(matches),'interface':matches[0] if matches else None}
+ finally:os.unlink(path)
+
+def prior_owned_release(device_id):
+ """Recognize only the intact complete transaction currently owning all units."""
+ present=[(UNITS/name).exists() or (UNITS/name).is_symlink() for name in SERVICES]
+ if not any(present):return {}
+ require(all(present) and STATE.is_dir() and not STATE.is_symlink(),'partial or unknown existing units')
+ journals=list(STATE.glob('transaction-offline-*/journal.json'));require(len(journals)<=64,'too many transactions')
+ matches=[]
+ for journal in journals:
+  check_ancestors(journal)
+  try:
+   j=json.loads(safe_read(journal));entries=j.get('files',[])
+   if j.get('status')!='complete':continue
+   indexed={e['target']:e for e in entries}
+   if not all(str(UNITS/name) in indexed for name in SERVICES):continue
+   if not all(sha(safe_read(UNITS/name))==indexed[str(UNITS/name)]['post_sha'] for name in SERVICES):continue
+   for e in entries:
+    target=Path(e['target']);require(target.exists() and sha(safe_read(target))==e['post_sha'],'previous release modified: '+str(target))
+   prefix=Path('/opt/headring-offline/releases')/j['release_id'];metadata=json.loads(safe_read(prefix/'metadata.json'));require(metadata['device_id']==device_id,'previous release device mismatch')
+   matches.append({'journal_sha256':sha(safe_read(journal)),'release_id':j['release_id'],'units':{name:unit_state(name) for name in SERVICES}})
+  except (KeyError,ValueError,OSError):continue
+ require(len(matches)==1,'existing units not owned by one intact transaction')
+ return matches[0]
+
 def verify_environment(m,files,root):
  require(os.geteuid()==0,'run as root')
  require(platform.system()=='Linux' and platform.machine() in ('aarch64','arm64'),'requires Linux arm64')
@@ -84,6 +123,7 @@ def verify_environment(m,files,root):
   if directory.exists() or directory.is_symlink():
    st=directory.lstat();require(stat.S_ISDIR(st.st_mode) and st.st_uid==0 and not stat.S_IMODE(st.st_mode)&0o022,'unsafe system directory: '+str(directory))
  require(not STATE.is_symlink(),'unsafe state directory')
+ usb=inspect_selector(m,files)
  existing=STATE/('transaction-'+m['release_id'])/'journal.json'
  check_ancestors(existing)
  if existing.exists():
@@ -95,8 +135,8 @@ def verify_environment(m,files,root):
    state=unit_state(name);require(state['active'] and state['enabled'],'installed service not active/enabled: '+name)
   for e in j['files']:
    p=Path(e['target']);require(p.exists() and sha(safe_read(p))==e['post_sha'],'installed file changed: '+str(p))
-  return {'already':True,'collector_changes':[],'legacy_units':{},'release_prefix':m['release_prefix']}
- for name in SERVICES:require(not (UNITS/name).exists(),'new unit already exists: '+name)
+  return {'already':True,'collector_changes':[],'legacy_units':{},'usb':usb,'release_prefix':m['release_prefix']}
+ previous=prior_owned_release(m['device_id'])
  legacy={}
  for name,want in LEGACY.items():
   p=UNITS/name
@@ -104,14 +144,15 @@ def verify_environment(m,files,root):
  # Avoid taking over an unrelated Avahi or UDP port. Legacy entry owns these only when active.
  udp=Path('/proc/net/udp').read_text().splitlines()[1:]+Path('/proc/net/udp6').read_text().splitlines()[1:]
  occupied=any(int(line.split()[1].split(':')[1],16)==5353 for line in udp)
- require(not occupied or legacy.get('headring-usb-entry.service',{}).get('active',False),'UDP 5353 already in use')
+ owned_active=previous.get('units',{}).get(SERVICES[0],{}).get('active',False)
+ require(not occupied or legacy.get('headring-usb-entry.service',{}).get('active',False) or owned_active,'UDP 5353 already in use')
  if occupied:
   rows=cmd(['/usr/bin/ss','-H','-lunp','sport = :5353']).stdout.splitlines();require(rows,'cannot identify UDP 5353 owner')
   for row in rows:
    owners=re.findall(r'pid=([0-9]+)',row);require(owners,'cannot identify UDP 5353 owner')
    for pid in owners:
-    cgroup=safe_read(Path('/proc')/pid/'cgroup',4096).decode();require('/headring-usb-entry.service' in cgroup,'unrelated UDP 5353 owner')
- require(not Path('/run/avahi-daemon').exists() or legacy.get('headring-usb-entry.service',{}).get('active',False),'Avahi runtime already in use')
+    cgroup=safe_read(Path('/proc')/pid/'cgroup',4096).decode();require(('/headring-usb-entry.service' in cgroup and legacy.get('headring-usb-entry.service',{}).get('active',False)) or ('/'+SERVICES[0] in cgroup and owned_active),'unrelated UDP 5353 owner')
+ require(not Path('/run/avahi-daemon').exists() or legacy.get('headring-usb-entry.service',{}).get('active',False) or owned_active,'Avahi runtime already in use')
  diffs=[];prehash={}
  for name,data in files.items():
   if not name.startswith('collector/orangepi/'):continue
@@ -121,7 +162,7 @@ def verify_environment(m,files,root):
   if before!=sha(data):diffs.append(relative)
  require(len([n for n in files if n.startswith('collector/orangepi/')])==121,'collector file count')
  require(not Path(m['release_prefix']).exists(),'release directory already exists')
- return {'collector_changes':diffs,'collector_prehash':prehash,'legacy_units':legacy,'release_prefix':m['release_prefix']}
+ return {'collector_changes':diffs,'collector_prehash':prehash,'legacy_units':legacy,'previous_release':previous,'usb':usb,'release_prefix':m['release_prefix']}
 
 def acquire_capture_guard(files,root):
  data=files['support/services/usb-phone-link/usb_data_host.py'];fd,path=tempfile.mkstemp(prefix='headring-capture-guard-',suffix='.py')
@@ -162,7 +203,7 @@ def rollback(tx,j):
    original=safe_read(Path(e['backup']));require(sha(original)==e['old_sha'],'backup changed: '+str(p));write_atomic(p,original,e['mode'],e['uid'],e['gid'])
   elif p.exists():p.unlink()
  cmd(['/usr/bin/systemctl','daemon-reload'])
- for name,state in j.get('legacy_units',{}).items():
+ for name,state in list(j.get('legacy_units',{}).items())+list(j.get('previous_units',{}).items()):
   if state['enabled']:cmd(['/usr/bin/systemctl','enable',name])
   if state['active']:cmd(['/usr/bin/systemctl','start',name])
  if j.get('collector_stop_intent'):cmd(['/usr/bin/systemctl','start','embodied-pi-collect.service'])
@@ -174,19 +215,19 @@ def apply(m,files,root,plan):
  try:
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   current=verify_environment(m,files,root);require(not current.get('already') and current==plan,'preflight state changed; retry plan')
-  need_capture=bool(plan['collector_changes']) or any(x['active'] for x in plan['legacy_units'].values())
+  need_capture=bool(plan['collector_changes']) or any(x['active'] for x in plan['legacy_units'].values()) or any(x['active'] for x in plan.get('previous_release',{}).get('units',{}).values())
   capture=acquire_capture_guard(files,root) if need_capture else contextlib.nullcontext()
   with capture:
    # Check identity, units and every collector preimage again while the lease is held.
    require(verify_environment(m,files,root)==plan,'state changed after capture lease')
    tx=STATE/('transaction-'+m['release_id']);require(not tx.exists(),'transaction already exists; inspect or roll back');tx.mkdir(mode=0o700)
-   j={'schema':1,'status':'preparing','release_id':m['release_id'],'files':[],'legacy_units':plan['legacy_units'],'collector_stop_intent':False,'collector_changed':bool(plan['collector_changes']),'collector_root':str(root)};save_journal(tx/'journal.json',j)
+   j={'schema':1,'status':'preparing','release_id':m['release_id'],'files':[],'legacy_units':plan['legacy_units'],'previous_units':plan.get('previous_release',{}).get('units',{}),'collector_stop_intent':False,'collector_changed':bool(plan['collector_changes']),'collector_root':str(root)};save_journal(tx/'journal.json',j)
    write_atomic(tx/'capture_guard.py',files['support/services/usb-phone-link/usb_data_host.py'],0o600)
    j['capture_guard_sha']=sha(files['support/services/usb-phone-link/usb_data_host.py']);save_journal(tx/'journal.json',j)
    try:
     if plan['collector_changes']:
      j['collector_stop_intent']=True;save_journal(tx/'journal.json',j);cmd(['/usr/bin/systemctl','stop','embodied-pi-collect.service'])
-    for name,state in plan['legacy_units'].items():
+    for name,state in list(plan['legacy_units'].items())+list(plan.get('previous_release',{}).get('units',{}).items()):
      if state['active'] or state['enabled']:cmd(['/usr/bin/systemctl','disable','--now',name])
     for name,data in files.items():
      if name.startswith('collector/orangepi/'):
@@ -227,11 +268,11 @@ def main():
   require(a.transaction is not None and a.transaction.parent==STATE and re.fullmatch(r'transaction-offline-[0-9a-f]{16}',a.transaction.name),'invalid transaction path');require(os.geteuid()==0,'run as root');lock=os.open(str(STATE/'lock'),os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600);fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   try:
    j=json.loads(safe_read(a.transaction/'journal.json'));require(j['status']!='rolled_back','already rolled back')
-   guard_data=safe_read(a.transaction/'capture_guard.py');require(sha(guard_data)==j['capture_guard_sha'],'capture guard changed');context=acquire_capture_guard({'support/services/usb-phone-link/usb_data_host.py':guard_data},Path(j['collector_root'])) if (j.get('collector_changed') or any(x['active'] for x in j.get('legacy_units',{}).values())) else contextlib.nullcontext()
+   guard_data=safe_read(a.transaction/'capture_guard.py');require(sha(guard_data)==j['capture_guard_sha'],'capture guard changed');context=acquire_capture_guard({'support/services/usb-phone-link/usb_data_host.py':guard_data},Path(j['collector_root'])) if (j.get('collector_changed') or any(x['active'] for x in j.get('legacy_units',{}).values()) or any(x['active'] for x in j.get('previous_units',{}).values())) else contextlib.nullcontext()
    with context:rollback(a.transaction,j)
   finally:os.close(lock)
   print('rollback complete');return
- require(a.bundle is not None,'bundle required');m,files=load_bundle(a.bundle,a.sha256);plan=verify_environment(m,files,a.collector_root);print(json.dumps({'action':a.action,'device_id':m['device_id'],'collector_changes':plan['collector_changes'],'legacy_units':plan['legacy_units'],'release_prefix':plan['release_prefix']}),flush=True)
+ require(a.bundle is not None,'bundle required');m,files=load_bundle(a.bundle,a.sha256);plan=verify_environment(m,files,a.collector_root);print(json.dumps({'action':a.action,'device_id':m['device_id'],'collector_changes':plan['collector_changes'],'legacy_units':plan['legacy_units'],'previous_release':plan.get('previous_release',{}),'usb':plan.get('usb'),'release_prefix':plan['release_prefix']}),flush=True)
  if a.action=='apply':
   if plan.get('already'):print('already installed; no changes')
   else:apply(m,files,a.collector_root,plan);print('deployment complete')

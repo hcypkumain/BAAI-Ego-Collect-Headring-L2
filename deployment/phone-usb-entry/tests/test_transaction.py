@@ -71,6 +71,31 @@ class TransactionTests(unittest.TestCase):
  def test_unchanged_apply_is_noop(self):
   with patch.object(d,'load_bundle',return_value=({'device_id':'cp_0021'},{})),patch.object(d,'verify_environment',return_value={'already':True,'collector_changes':[],'legacy_units':{},'release_prefix':'/test'}),patch.object(d,'apply') as apply,patch('sys.argv',['deploy','apply','--bundle','/test','--sha256','a']):
    d.main();apply.assert_not_called()
+ def test_failed_owned_upgrade_restores_old_units_under_lease(self):
+  m={'release_id':'offline-0123456789abcdef','release_prefix':str(self.root/'release'),'files':{'release/a':{'mode':0o644}}}
+  files={'release/a':b'release','support/services/usb-phone-link/usb_data_host.py':b'fixture'}
+  previous={name:{'active':True,'enabled':True} for name in d.SERVICES}
+  for name in d.SERVICES:(self.units/name).write_bytes(('old-'+name).encode())
+  plan={'collector_changes':[],'collector_prehash':{},'legacy_units':{},'previous_release':{'release_id':'offline-fedcba9876543210','journal_sha256':'0'*64,'units':previous},'release_prefix':m['release_prefix']}
+  lease=[False];events=[]
+  @contextlib.contextmanager
+  def capture(*_):
+   lease[0]=True
+   try:yield
+   finally:lease[0]=False
+  def command(args,*_a,**_kw):
+   self.assertTrue(lease[0]);events.append(args[1:]);return None
+  real=d.backup_and_write
+  def inject(target,data,mode,j,tx):
+   if target==self.units/d.SERVICES[1]:raise OSError('injected unit failure')
+   return real(target,data,mode,j,tx)
+  account=type('Account',(),{'pw_uid':123,'pw_gid':123,'pw_shell':'/usr/sbin/nologin'})();group=type('Group',(),{'gr_gid':123})()
+  with patch.object(d,'verify_environment',return_value=plan),patch.object(d,'acquire_capture_guard',capture),patch.object(d,'cmd',side_effect=command),patch.object(d,'backup_and_write',side_effect=inject),patch.object(d.pwd,'getpwnam',return_value=account),patch.object(d.grp,'getgrnam',return_value=group):
+   with self.assertRaises(OSError):d.apply(m,files,self.collector,plan)
+  for name in d.SERVICES:
+   self.assertEqual((self.units/name).read_bytes(),('old-'+name).encode())
+   self.assertIn(['enable',name],events);self.assertIn(['start',name],events)
+  self.assertFalse(lease[0]);self.assertEqual(json.loads((self.state/'transaction-offline-0123456789abcdef/journal.json').read_text())['status'],'rolled_back')
  def test_busy_explicit_rollback_has_no_writes(self):
   tx=self.state/'transaction-offline-0123456789abcdef';tx.mkdir(parents=True);guard=tx/'capture_guard.py';guard.write_bytes(b'guard')
   (tx/'journal.json').write_text(json.dumps({'status':'complete','capture_guard_sha':sha(b'guard'),'collector_root':str(self.collector),'collector_changed':True,'legacy_units':{}}))

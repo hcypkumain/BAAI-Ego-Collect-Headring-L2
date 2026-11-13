@@ -91,9 +91,12 @@ def metadata(data):
                 or not re.fullmatch(r"[A-Za-z0-9_.-]{1,15}", value["interface"])):
             raise Refused("METADATA_INVALID")
         selection = value["selector"]
-        if type(selection) is not dict or set(selection) != {"usb_port", "drivers"}:
+        if type(selection) is not dict or set(selection) not in ({"usb_port", "drivers"}, {"mode", "drivers"}):
             raise Refused("METADATA_INVALID")
-        if type(selection["usb_port"]) is not str or not re.fullmatch(r"[1-9][0-9]*-[1-9][0-9]*(?:\.[1-9][0-9]*)*", selection["usb_port"]):
+        if "usb_port" in selection:
+            if type(selection["usb_port"]) is not str or not re.fullmatch(r"[1-9][0-9]*-[1-9][0-9]*(?:\.[1-9][0-9]*)*", selection["usb_port"]):
+                raise Refused("METADATA_INVALID")
+        elif selection["mode"] != "unique-usb-network":
             raise Refused("METADATA_INVALID")
         if selection["drivers"] != ["cdc_ether", "cdc_ncm", "rndis_host"]:
             raise Refused("METADATA_INVALID")
@@ -110,17 +113,25 @@ def metadata(data):
 
 class Sysfs:
     """Kernel sysfs links are intentional. Alternate root is internal test injection only."""
-    def __init__(self, root=Path("/sys/class/net")):
-        self.root = root
+    def __init__(self, root=Path("/sys/class/net"), usb_bus=Path("/sys/bus/usb")):
+        self.root, self.usb_bus = root, usb_bus
 
     def matches(self, name, selection):
         device = (self.root / name / "device").resolve(strict=True)
-        driver = (device / "driver").resolve(strict=True).name
+        driver_path = (device / "driver").resolve(strict=True)
+        if ((device / "subsystem").resolve(strict=True) != self.usb_bus.resolve(strict=True)
+                or driver_path.parent != (self.usb_bus / "drivers").resolve(strict=True)):
+            return False
+        driver = driver_path.name
         if driver not in selection["drivers"]:
             return False
         for parent in (device,) + tuple(device.parents):
-            if parent.name == selection["usb_port"]:
-                return (parent / "idVendor").is_file() and (parent / "idProduct").is_file()
+            if not re.fullmatch(r"[1-9][0-9]*-[1-9][0-9]*(?:\.[1-9][0-9]*)*", parent.name):
+                continue
+            if "usb_port" in selection and parent.name != selection["usb_port"]:
+                continue
+            if (parent / "idVendor").is_file() and (parent / "idProduct").is_file():
+                return True
         return False
 
     def state(self, value):
