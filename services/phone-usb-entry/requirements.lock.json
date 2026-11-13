@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "purpose": "Temporary offline Python 3.8 proof; not a maintained security baseline",
+  "packages": [
+    {
+      "name": "zeroconf",
+      "version": "0.136.2",
+      "requires_python": ">=3.8,<4.0",
+      "filename": "zeroconf-0.136.2.tar.gz",
+      "url": "https://files.pythonhosted.org/packages/89/e0/cddc7e2272799e11ea172810fd2f6da58fc7290f9bd3102d6cf2c385cca3/zeroconf-0.136.2.tar.gz",
+      "sha256": "37d223febad4569f0d14563eb8e80a9742be35d0419847b45d84c37fc4224bb4",
+      "size": 238720,
+      "python_prefix": "zeroconf-0.136.2/src/zeroconf/",
+      "licenses": ["zeroconf-0.136.2/COPYING"],
+      "requires": ["ifaddr==0.2.0", "async-timeout==4.0.3; python_version < '3.11'"]
+    },
+    {
+      "name": "ifaddr",
+      "version": "0.2.0",
+      "requires_python": "upstream unspecified; pure Python",
+      "filename": "ifaddr-0.2.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/9c/1f/19ebc343cc71a7ffa78f17018535adc5cbdd87afb31d7c34874680148b32/ifaddr-0.2.0-py3-none-any.whl",
+      "sha256": "085e0305cfe6f16ab12d72e2024030f5d52674afad6911bb1eee207177b8a748",
+      "size": 12314,
+      "python_prefix": "ifaddr/",
+      "licenses": ["ifaddr-0.2.0.dist-info/LICENSE.txt"],
+      "requires": []
+    },
+    {
+      "name": "async-timeout",
+      "version": "4.0.3",
+      "requires_python": ">=3.7",
+      "filename": "async_timeout-4.0.3-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a7/fa/e01228c2938de91d47b307831c62ab9e4001e747789d0b05baf779a6488c/async_timeout-4.0.3-py3-none-any.whl",
+      "sha256": "7405140ff1230c310e51dc27b3145b9092d659ce68ff733fb0cefe3ee42be028",
+      "size": 5721,
+      "python_prefix": "async_timeout/",
+      "licenses": ["async_timeout-4.0.3.dist-info/LICENSE"],
+      "requires": ["typing-extensions>=3.6.5; python_version < '3.8' (outside supported target)"]
+    }
+  ]
+}
