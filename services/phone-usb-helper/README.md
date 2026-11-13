@@ -17,14 +17,14 @@ export JAVA_HOME=/path/to/jdk17 ANDROID_HOME=/path/to/android-sdk
 export PATH="$JAVA_HOME/bin:$PATH"
 python3 deployment/phone-usb-entry/build_bundle.py \
   --device cp_0018 --usb-port 7-1.2.2.2 \
-  --deps "$DEPS" --apk /path/to/headring-helper-universal-v4.apk \
+  --deps "$DEPS" --apk services/phone-usb-helper/android/artifacts/headring-helper-universal-v4.apk \
   --signer-sha256 a382787931ef1937c8a318a080b912fdbb5f06ce7de0265d08bc398a12437bfe \
   --android-sdk "$ANDROID_HOME" --output headring-cp0018.tar
 ```
 
 The builder prints the bundle SHA-256 and release ID. Record that SHA from a trusted channel. This branch builds a universal app that accepts device IDs of the form `cp_NNNN`; the target remains explicitly bound by each device bundle and the verified physical USB port. The app uses a separate localhost origin for each connected device and does not silently switch to another ID. More than one candidate requires an explicit user selection. Supported network drivers are `rndis_host`, `cdc_ether` and `cdc_ncm`; device manufacturer and serial number are not used for selection. This does not guarantee all Android phones or tether configurations work.
 
-Build the app with JDK 17, Android platform/build-tools 35, `ANDROID_KEYSTORE`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASS`, and `HEADRING_VERSION_CODE=4`, then run `services/phone-usb-helper/android/build.sh /absolute/path/helper.apk`. The signing key is never included in the bundle. To upgrade the existing app, use its existing signing key; the builder verifies its certificate against the explicitly supplied hash. The signed CP21 v3 artifact in the parent release is retained for provenance but is not a universal app and must not be used for this bundle.
+Build the app with JDK 17, Android platform/build-tools 35, `ANDROID_KEYSTORE`, `ANDROID_KEY_ALIAS`, `ANDROID_KEYSTORE_PASS`, and `HEADRING_VERSION_CODE=4`, then run `services/phone-usb-helper/android/build.sh /absolute/path/helper.apk`. The signing key is never included in the bundle. To upgrade the existing app, use its existing signing key; the builder verifies its certificate against the explicitly supplied hash. The included universal v4 APK is signed by the same key as the existing CP21 installation; its SHA-256 is `06fb86a3b376b516242d0882c85e5b7cdc9a2773166e4886f58a939161671ea0`.
 
 ## Plan, apply and roll back
 
@@ -52,6 +52,6 @@ Use the exact release ID printed by the builder. Rollback refuses files altered 
 
 ## Acceptance and limits
 
-The app presents the existing page in an embedded WebView and uses `http://localhost:8765` internally. Discovery uses USB DNS-SD and a bounded USB subnet scan with a read-only identity probe; that self-declared identity is not cryptographic authentication. `DiscoveryProvider` and `Endpoint` are separated for future wireless work, but wireless discovery is not implemented. The previous CP21 app was confirmed working; this universal version still needs physical-phone acceptance; repeated unplug/replug, reboot, all Android variants and all upload/download paths are not established by that confirmation. The system picker and save dialog handle files; in-app downloads are limited to 32 MB. Vendor battery policies may interrupt background discovery.
+The app presents the existing page in an embedded WebView and uses a separate internal `http://cp-NNNN.localhost:8765` origin for each selected device. Discovery uses USB DNS-SD and a bounded USB subnet scan with a read-only identity probe; that self-declared identity is not cryptographic authentication. `DiscoveryProvider` and `Endpoint` are separated for future wireless work, but wireless discovery is not implemented. The previous CP21 app was confirmed working; this universal version still needs physical-phone acceptance; repeated unplug/replug, reboot, all Android variants and all upload/download paths are not established by that confirmation. The system picker and save dialog handle files; in-app downloads are limited to 32 MB. Vendor battery policies may interrupt background discovery.
 
 The deployment transaction and failure paths are tested using isolated fixtures and mocked system services; no production collector is restarted by those tests. Deployment of this new release itself has not yet been executed or accepted on a physical target.
