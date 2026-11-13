@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Build a self-contained offline payload without executing package scripts."""
+import argparse, hashlib, io, json, os, re, subprocess, tarfile, tempfile
+from pathlib import Path
+
+BASELINE='f5d03b7b5fb197eb76e78610a0bce672e5cc4853'
+ROOT=Path(__file__).resolve().parents[2]
+PKGS={
+ 'avahi-daemon_0.7-4ubuntu7.3_arm64.deb':('d903ad01bbef69380d77b8c9445a54b23861accd935254a38160d09cd851239f','https://ports.ubuntu.com/ubuntu-ports/pool/main/a/avahi/avahi-daemon_0.7-4ubuntu7.3_arm64.deb'),
+ 'libavahi-core7_0.7-4ubuntu7.3_arm64.deb':('46c94c47184e5942e18596595d410939d2537e985a3acb1268c037e06868f028','https://ports.ubuntu.com/ubuntu-ports/pool/main/a/avahi/libavahi-core7_0.7-4ubuntu7.3_arm64.deb')}
+
+def digest(data): return hashlib.sha256(data).hexdigest()
+def git(*args):return subprocess.check_output(['git','-C',str(ROOT)]+list(args))
+def read_deb(path,expected):
+ raw=path.read_bytes()
+ if digest(raw)!=expected:raise ValueError('dependency hash mismatch: '+path.name)
+ rawtar=subprocess.check_output(['dpkg-deb','--fsys-tarfile',str(path)],timeout=30)
+ with tarfile.open(fileobj=io.BytesIO(rawtar),mode='r:') as t:
+  found={}
+  for m in t:
+   name=m.name.removeprefix('./')
+   if name in ('usr/sbin/avahi-daemon','usr/lib/aarch64-linux-gnu/libavahi-core.so.7.0.2','usr/share/doc/avahi-daemon/copyright','usr/share/doc/libavahi-core7/copyright'):
+    if name in found or not m.isfile() or m.size>4_000_000:raise ValueError('unsafe dependency member')
+    found[name]=t.extractfile(m).read()
+  return found
+
+def main():
+ p=argparse.ArgumentParser();p.add_argument('--device',required=True);p.add_argument('--usb-port',required=True);p.add_argument('--vid',required=True);p.add_argument('--pid',required=True);p.add_argument('--deps',type=Path,required=True);p.add_argument('--apk',type=Path,required=True);p.add_argument('--android-sdk',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+ if not re.fullmatch(r'cp_[0-9]{4}',a.device) or not re.fullmatch(r'[1-9][0-9]*-[1-9][0-9]*(?:\.[1-9][0-9]*)*',a.usb_port) or not all(re.fullmatch(r'[0-9a-f]{4}',v) for v in (a.vid,a.pid)):p.error('invalid identity or selector')
+ apk=a.apk.read_bytes();tool=a.android_sdk/'build-tools/35.0.0';verify=subprocess.run([str(tool/'apksigner'),'verify','--print-certs',str(a.apk)],capture_output=True,text=True,check=True).stdout
+ cert=re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-f]{64})',verify)
+ if not cert:raise ValueError('APK signer not found')
+ xml=subprocess.check_output([str(tool/'aapt2'),'dump','xmltree',str(a.apk),'--file','AndroidManifest.xml'],text=True)
+ pinned=(a.device=='cp_0021' and digest(apk)=='6176b00e6004e4e388c68916f3a0aed0137b912d2b7dfa131de744faca81181a' and cert.group(1)=='a382787931ef1937c8a318a080b912fdbb5f06ce7de0265d08bc398a12437bfe')
+ badging=subprocess.check_output([str(tool/'aapt2'),'dump','badging',str(a.apk)],text=True)
+ if not re.search(r"^package: name='org\.headring\.usbentry'",badging,re.M):raise ValueError('unexpected APK package')
+ entries=re.findall(r'E: meta-data \(line=[^\n]*\)(.*?)(?=\n\s*E:|\Z)',xml,re.S)
+ target=any('org.headring.DEVICE_ID' in x and ('\"'+a.device+'\"') in x for x in entries)
+ if not pinned and not target:raise ValueError('APK target identity does not match')
+ blobs={};deps={}
+ for name,(sha,url) in PKGS.items():deps[name]={'sha256':sha,'url':url};blobs.update(read_deb(a.deps/name,sha))
+ expected=['usr/sbin/avahi-daemon','usr/lib/aarch64-linux-gnu/libavahi-core.so.7.0.2','usr/share/doc/avahi-daemon/copyright','usr/share/doc/libavahi-core7/copyright']
+ if set(blobs)!=set(expected):raise ValueError('dependency members missing')
+ runtime_dir=ROOT/'services/phone-usb-helper/device'
+ seed={'device':a.device,'selector':[a.usb_port,a.vid,a.pid],'apk':digest(apk),'baseline':BASELINE,'builder':digest(Path(__file__).read_bytes()),'installer':digest((ROOT/'deployment/phone-usb-entry/deploy_bundle.py').read_bytes()),'dependencies':{k:v[0] for k,v in PKGS.items()},'runtime':{k:digest((runtime_dir/k).read_bytes()) for k in ('guard.py','dynamic_guard.py','probe.py','usb_dhcp_guard.py')}}
+ rid='offline-'+digest(json.dumps(seed,sort_keys=True).encode())[:16];prefix='/opt/headring-offline/releases/'+rid
+ files={'release/avahi-daemon':blobs[expected[0]],'release/lib/libavahi-core.so.7':blobs[expected[1]],'release/licenses/avahi-daemon.copyright':blobs[expected[2]],'release/licenses/libavahi-core7.copyright':blobs[expected[3]],'release/headring-helper.apk':apk}
+ device_dir=ROOT/'services/phone-usb-helper/device'
+ for name in ('guard.py','dynamic_guard.py','probe.py','usb_dhcp_guard.py'):files['release/'+name]=(device_dir/name).read_bytes()
+ cfg=('[server]\nhost-name=cp-'+a.device[3:]+'\ndomain-name=local\nuse-ipv4=yes\nuse-ipv6=no\nallow-interfaces=usb1\nallow-point-to-point=no\nuse-iff-running=yes\ncheck-response-ttl=yes\ndisallow-other-stacks=yes\nenable-dbus=no\nratelimit-interval-usec=1000000\nratelimit-burst=100\n[wide-area]\nenable-wide-area=no\n[publish]\npublish-addresses=yes\npublish-hinfo=no\npublish-workstation=no\npublish-domain=no\npublish-resolv-conf-dns-servers=no\npublish-aaaa-on-ipv4=no\npublish-a-on-ipv6=no\ndisable-user-service-publishing=yes\n[reflector]\nenable-reflector=no\n').encode()
+ files['release/etc-avahi/avahi-daemon.conf']=cfg;files['release/etc-avahi/hosts']=b''
+ name='HeadRing CP'+str(int(a.device[3:]));files['release/etc-avahi/services/headring.service']=('<?xml version="1.0" standalone="no"?>\n<!DOCTYPE service-group SYSTEM "avahi-service.dtd">\n<service-group><name>'+name+'</name><service><type>_headring._tcp</type><port>8765</port><txt-record>device_id='+a.device+'</txt-record><txt-record>path=/phone</txt-record><txt-record>scheme=http</txt-record></service></service-group>\n').encode()
+ meta={'schema':1,'device_id':a.device,'interface':'usb1','selector':{'usb_port':a.usb_port,'vid':a.vid,'pid':a.pid},'binary_path':prefix+'/avahi-daemon','binary_sha256':digest(files['release/avahi-daemon']),'config_path':prefix+'/etc-avahi/avahi-daemon.conf','config_sha256':digest(cfg)}
+ files['release/metadata.json']=(json.dumps(meta,sort_keys=True,indent=2)+'\n').encode()
+ paths=git('ls-tree','-r','--name-only',BASELINE,'orangepi/src/orangepi_collect').decode().splitlines();paths=[x for x in paths if x.endswith(('.py','.js','.html','.css'))]
+ if len(paths)!=121:raise ValueError('unexpected baseline source count')
+ for path in paths:files['collector/'+path]=git('show',BASELINE+':'+path)
+ for path in ('orangepi/scripts/run.sh','services/usb-phone-link/usb_data_host.py'):files['support/'+path]=git('show',BASELINE+':'+path)
+ files['support/deploy_bundle.py']=(ROOT/'deployment/phone-usb-entry/deploy_bundle.py').read_bytes()
+ modes={path:(0o755 if path=='release/avahi-daemon' else 0o644) for path in files}
+ manifest={'schema':1,'baseline_commit':BASELINE,'device_id':a.device,'selector':meta['selector'],'release_id':rid,'release_prefix':prefix,'apk_sha256':digest(apk),'apk_certificate_sha256':cert.group(1),'dependencies':deps,'files':{k:{'sha256':digest(v),'size':len(v),'mode':modes[k]} for k,v in sorted(files.items())}}
+ files['manifest.json']=(json.dumps(manifest,sort_keys=True,indent=2)+'\n').encode()
+ a.output.parent.mkdir(parents=True,exist_ok=True)
+ with tarfile.open(a.output,'w') as t:
+  for path,data in sorted(files.items()):
+   info=tarfile.TarInfo(path);info.size=len(data);info.mode=0o644;info.mtime=0;info.uid=info.gid=0;info.uname=info.gname='';t.addfile(info,io.BytesIO(data))
+ print(json.dumps({'bundle':str(a.output),'sha256':digest(a.output.read_bytes()),'release_id':rid,'device_id':a.device,'collector_files':len(paths)}))
+if __name__=='__main__':main()
