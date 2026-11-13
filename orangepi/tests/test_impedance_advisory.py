@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'src/orangepi_collect/common'))
 import project_paths
@@ -51,6 +51,25 @@ class AdvisoryTests(unittest.TestCase):
         self.assertEqual(value['labels'],['FC3','C3','O1','Pz','Oz','O2','C4','FC4'])
         wrong=copy.deepcopy(value);wrong['disabled_channels']=[1]
         with self.assertRaises(ValueError):validate(wrong)
+
+    def test_real_profile_loader_default_and_explicit_policy(self):
+        import os
+        with tempfile.TemporaryDirectory() as root:
+            base=Path(root); (base/'configs').mkdir()
+            with patch.object(project_paths,'BASE',base), patch.object(project_paths,'COLLECTION_MODE','eeg'), \
+                 patch('device_discovery.discover',side_effect=lambda v,b:v), \
+                 patch('wrist_calibration.apply',side_effect=lambda v,b:v), \
+                 patch('emg_calibration.apply',side_effect=lambda v,b:v), \
+                 patch('wrist_camera_settings.apply',side_effect=lambda v,b:v), \
+                 patch.dict(os.environ,{},clear=True):
+                for text,expected in (('eeg: {}\n','advisory'),('eeg:\n  impedance_acceptance_policy: strict\n','strict')):
+                    (base/'configs/devices.yaml').write_text(text)
+                    self.assertEqual(project_paths.devices()['eeg']['impedance_acceptance_policy'],expected)
+
+    def test_review_persist_failure_revokes_gate(self):
+        state,_=fixture(reviewed=False);owner=self.owner(state);owner._save.side_effect=RuntimeError('disk error')
+        with self.assertRaises(RuntimeError):owner.handle(dict(command='IMPEDANCE_REVIEW'))
+        self.assertFalse(owner.state['reviewed']);self.assertFalse(owner.state['can_record'])
 
     def test_old_impedance_evidence_cannot_authorize_new_eight_channel_start(self):
         state,frontend=fixture();frontend['enabled_mask']=254
@@ -126,13 +145,32 @@ class AdvisoryTests(unittest.TestCase):
                 self.assertEqual(persisted['quality']['passed'],value<60)
                 self.assertEqual(persisted['channels'][1]['value_kohm'],value)
 
-    def test_failed_or_missing_readings_are_retained_as_advisory(self):
-        state,frontend=fixture()
-        for row in state['channels']:row.update(value_kohm=None,reason='adc_saturated',accepted_samples=0)
+    def test_missing_readings_never_authorize_new_start(self):
+        for count in (1, 8):
+            state,frontend=fixture()
+            for row in state['channels'][:count]:row.update(value_kohm=None,reason='adc_saturated',accepted_samples=0)
+            self.assertFalse(quality.quality_allows_recording(state))
+            with tempfile.TemporaryDirectory() as root:
+                persisted=self.save(root,state,frontend)
+                with self.assertRaises(record.ImpedanceRecordError):
+                    record.validate_preflight(root,persisted,config())
+                historical=record._validate_preflight(root,persisted,config(),require_project_quality=False)
+                self.assertEqual(historical['impedance_acceptance_policy'],'advisory')
+
+    def test_qc_warns_high_and_errors_for_tampered_proof(self):
+        from types import SimpleNamespace
+        from eeg_qc import OmniEegImpedance
         with tempfile.TemporaryDirectory() as root:
-            persisted,gate=self.bind(root,state,frontend)
-            self.assertFalse(persisted['quality']['passed']);self.assertEqual(persisted['valid_channel_count'],0)
-            self.assertEqual(record.validate_start_binding(root,gate,config())['impedance_acceptance_policy'],'advisory')
+            state,frontend=fixture(270.);persisted,gate=self.bind(root,state,frontend)
+            eeg=Path(root)/'eeg'
+            record.atomic_record(eeg/'metadata.json',dict(config=config(),frontend_config=frontend))
+            check=OmniEegImpedance(); result=check.run(SimpleNamespace(dir=eeg))
+            self.assertEqual(result.level,'WARN')
+            self.assertFalse(result.stats['impedance_quality_passed'])
+            self.assertEqual(result.stats['impedance_values_kohm'][LAYOUT[0]],270.)
+            persisted['channels'][0]['value_kohm']=42.
+            record.atomic_record(eeg/'impedance_preflight.json',persisted)
+            self.assertEqual(check.run(SimpleNamespace(dir=eeg)).level,'ERROR')
 
     def test_record_cannot_silently_change_the_configured_policy(self):
         state,frontend=fixture()
