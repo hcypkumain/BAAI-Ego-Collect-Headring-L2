@@ -8,7 +8,7 @@ from pathlib import Path
 import time
 from impedance_estimator import ALGORITHM, SDK_REFERENCE, NORMAL_RECOVERY_MAX_SAMPLES
 from impedance_quality import (POLICY, THRESHOLD_KOHM, assess_impedance, quality_matches,
-    acceptance_policy, ACCEPTANCE_KEY, ADVISORY)
+    acceptance_policy, quality_allows_recording, ACCEPTANCE_KEY, ADVISORY)
 
 SCHEMA_VERSION = 1
 MAX_RECORD_BYTES = 65536
@@ -269,6 +269,8 @@ def _validate_preflight(root, expected_state=None, expected_eeg_config=None,
         quality = assess_impedance(value, expected_mask=frontend['enabled_mask'])
         if not quality_matches(declared_quality, quality):
             raise ImpedanceRecordError('impedance project policy evidence is missing or inconsistent; repeat measurement')
+        if require_project_quality and not quality_allows_recording(value):
+            raise ImpedanceRecordError('impedance measurement incomplete or invalid; repeat measurement')
         if not advisory and quality['passed'] is not True:
             raise ImpedanceRecordError('impedance not passed: every enabled channel must be valid and below 60 kOhm')
     if expected_state is not None:
