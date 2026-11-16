@@ -6,6 +6,8 @@ from pathlib import Path
 BASELINE='8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3'
 BASE_COLLECTOR='f5d03b7b5fb197eb76e78610a0bce672e5cc4853'
 OVERLAY_MANIFEST='36d8059918ce370f7928cc7cd3207e2ac1d26471b3e8dcdef74b98b7888cd62a'
+LEGACY='460c04cb719aca5d73bfe518748bd636c632e2cf'
+LEGACY_LOCK='f424e5f95f5e3d13115b41c9bc66afee46f8ca411ecf4c5707ca7431ee4da483'
 ROOT=Path(__file__).resolve().parents[2]
 PKGS={
  'avahi-daemon_0.7-4ubuntu7.3_arm64.deb':('d903ad01bbef69380d77b8c9445a54b23861accd935254a38160d09cd851239f','https://ports.ubuntu.com/ubuntu-ports/pool/main/a/avahi/avahi-daemon_0.7-4ubuntu7.3_arm64.deb'),
@@ -27,7 +29,7 @@ def read_deb(path,expected):
   return found
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--device',required=True);p.add_argument('--usb-port');p.add_argument('--unique-usb-network',action='store_true');p.add_argument('--deps',type=Path,required=True);p.add_argument('--apk',type=Path,required=True);p.add_argument('--signer-sha256',required=True);p.add_argument('--android-sdk',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('--device',required=True);p.add_argument('--from-commit',choices=(LEGACY,));p.add_argument('--usb-port');p.add_argument('--unique-usb-network',action='store_true');p.add_argument('--deps',type=Path,required=True);p.add_argument('--apk',type=Path,required=True);p.add_argument('--signer-sha256',required=True);p.add_argument('--android-sdk',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
  if not re.fullmatch(r'cp_[0-9]{4}',a.device) or (bool(a.usb_port) and a.unique_usb_network) or (a.usb_port and not re.fullmatch(r'[1-9][0-9]*-[1-9][0-9]*(?:\.[1-9][0-9]*)*',a.usb_port)):p.error('provide exactly one valid USB selector')
  selector={'drivers':['cdc_ether','cdc_ncm','rndis_host']}
  if a.usb_port:selector['usb_port']=a.usb_port
@@ -45,7 +47,7 @@ def main():
  expected=['usr/sbin/avahi-daemon','usr/lib/aarch64-linux-gnu/libavahi-core.so.7.0.2','usr/share/doc/avahi-daemon/copyright','usr/share/doc/libavahi-core7/copyright']
  if set(blobs)!=set(expected):raise ValueError('dependency members missing')
  runtime_dir=ROOT/'services/phone-usb-helper/device'
- seed={'device':a.device,'selector':selector,'apk':digest(apk),'baseline':BASELINE,'builder':digest(Path(__file__).read_bytes()),'installer':digest((ROOT/'deployment/phone-usb-entry/deploy_bundle.py').read_bytes()),'dependencies':{k:v[0] for k,v in PKGS.items()},'runtime':{k:digest((runtime_dir/k).read_bytes()) for k in ('guard.py','dynamic_guard.py','probe.py','usb_dhcp_guard.py')}}
+ seed={'device':a.device,'from_commit':a.from_commit,'selector':selector,'apk':digest(apk),'baseline':BASELINE,'builder':digest(Path(__file__).read_bytes()),'installer':digest((ROOT/'deployment/phone-usb-entry/deploy_bundle.py').read_bytes()),'dependencies':{k:v[0] for k,v in PKGS.items()},'runtime':{k:digest((runtime_dir/k).read_bytes()) for k in ('guard.py','dynamic_guard.py','probe.py','usb_dhcp_guard.py')}}
  rid='offline-'+digest(json.dumps(seed,sort_keys=True).encode())[:16];prefix='/opt/headring-offline/releases/'+rid
  files={'release/avahi-daemon':blobs[expected[0]],'release/lib/libavahi-core.so.7':blobs[expected[1]],'release/licenses/avahi-daemon.copyright':blobs[expected[2]],'release/licenses/libavahi-core7.copyright':blobs[expected[3]],'release/headring-helper.apk':apk}
  device_dir=ROOT/'services/phone-usb-helper/device'
@@ -57,11 +59,18 @@ def main():
  files['release/metadata.json']=(json.dumps(meta,sort_keys=True,indent=2)+'\n').encode()
  paths=git('ls-tree','-r','--name-only',BASELINE,'orangepi/src/orangepi_collect').decode().splitlines();paths=[x for x in paths if x.endswith(('.py','.js','.html','.css'))]
  if len(paths)!=121:raise ValueError('unexpected baseline source count')
+ preimages=None
+ if a.from_commit:
+  old=git('ls-tree','-r','--name-only',LEGACY,'orangepi/src/orangepi_collect').decode().splitlines();old={x for x in old if x.endswith(('.py','.js','.html','.css'))}
+  if len(old)!=111 or not old.issubset(set(paths)):raise ValueError('legacy source list mismatch')
+  preimages={path:(digest(git('show',LEGACY+':'+path)) if path in old else None) for path in sorted(paths)}
+  if digest(json.dumps(preimages,sort_keys=True,separators=(',',':')).encode())!=LEGACY_LOCK:raise ValueError('legacy source lock mismatch')
  for path in paths:files['collector/'+path]=git('show',BASELINE+':'+path)
  for path in ('orangepi/scripts/run.sh','services/usb-phone-link/usb_data_host.py'):files['support/'+path]=git('show',BASELINE+':'+path)
  files['support/deploy_bundle.py']=(ROOT/'deployment/phone-usb-entry/deploy_bundle.py').read_bytes()
  modes={path:(0o755 if path=='release/avahi-daemon' else 0o644) for path in files}
  manifest={'schema':1,'baseline_commit':BASELINE,'base_collector_commit':BASE_COLLECTOR,'collector_overlay_manifest_sha256':OVERLAY_MANIFEST,'device_id':a.device,'selector':meta['selector'],'release_id':rid,'release_prefix':prefix,'apk_sha256':digest(apk),'apk_certificate_sha256':cert.group(1),'dependencies':deps,'files':{k:{'sha256':digest(v),'size':len(v),'mode':modes[k]} for k,v in sorted(files.items())}}
+ if preimages is not None:manifest['source_preimage_commit']=LEGACY;manifest['source_preimage_sha256']=LEGACY_LOCK;manifest['source_preimages']=preimages
  files['manifest.json']=(json.dumps(manifest,sort_keys=True,indent=2)+'\n').encode()
  a.output.parent.mkdir(parents=True,exist_ok=True)
  with tarfile.open(a.output,'w') as t:

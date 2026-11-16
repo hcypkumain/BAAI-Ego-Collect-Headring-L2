@@ -96,6 +96,25 @@ class TransactionTests(unittest.TestCase):
    self.assertEqual((self.units/name).read_bytes(),('old-'+name).encode())
    self.assertIn(['enable',name],events);self.assertIn(['start',name],events)
   self.assertFalse(lease[0]);self.assertEqual(json.loads((self.state/'transaction-offline-0123456789abcdef/journal.json').read_text())['status'],'rolled_back')
+ def test_new_collector_source_removed_on_failed_install(self):
+  missing=self.collector/'src/added.py';self.assertFalse(missing.exists())
+  m={'release_id':'offline-0123456789abcdef','release_prefix':str(self.root/'release'),'files':{'release/a':{'mode':0o644}}}
+  files={'collector/orangepi/src/added.py':b'new-source','release/a':b'release','support/services/usb-phone-link/usb_data_host.py':b'fixture'}
+  plan={'collector_changes':['src/added.py'],'collector_prehash':{'src/added.py':None},'legacy_units':{},'release_prefix':m['release_prefix']}
+  lease=[False]
+  @contextlib.contextmanager
+  def capture(*_):
+   lease[0]=True
+   try:yield
+   finally:lease[0]=False
+  def command(args,*_a,**_k):self.assertTrue(lease[0]);return None
+  real=d.backup_and_write
+  def fail(target,data,mode,j,tx):
+   if str(target).endswith('/release/a'):self.assertTrue(missing.exists());raise OSError('injected')
+   return real(target,data,mode,j,tx)
+  with patch.object(d,'verify_environment',return_value=plan),patch.object(d,'acquire_capture_guard',capture),patch.object(d,'cmd',side_effect=command),patch.object(d,'backup_and_write',side_effect=fail):
+   with self.assertRaises(OSError):d.apply(m,files,self.collector,plan)
+  self.assertFalse(missing.exists());self.assertFalse(lease[0])
  def test_busy_explicit_rollback_has_no_writes(self):
   tx=self.state/'transaction-offline-0123456789abcdef';tx.mkdir(parents=True);guard=tx/'capture_guard.py';guard.write_bytes(b'guard')
   (tx/'journal.json').write_text(json.dumps({'status':'complete','capture_guard_sha':sha(b'guard'),'collector_root':str(self.collector),'collector_changed':True,'legacy_units':{}}))

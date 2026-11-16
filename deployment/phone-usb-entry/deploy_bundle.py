@@ -5,6 +5,8 @@ from pathlib import Path
 
 STATE=Path('/var/lib/headring-offline'); UNITS=Path('/etc/systemd/system')
 SERVICES=('headring-offline-entry.service','headring-offline-discovery.service','headring-offline-dhcp-guard.service')
+LEGACY_SOURCE='460c04cb719aca5d73bfe518748bd636c632e2cf'
+LEGACY_LOCK='f424e5f95f5e3d13115b41c9bc66afee46f8ca411ecf4c5707ca7431ee4da483'
 LEGACY={'headring-usb-entry.service':'0dceecb1ba9dd5492f9e1889a76c1a4331a578d5ea991c8423b3bede9401fa23','headring-usb-discovery.service':'f02dfce84ed78136e394272f836d903a0a40ef3132e13a3059cd32870ecffdb8','headring-usb-dhcp-guard.service':'e5f44747cbbb144a4e2b94544ac2ea357695fe40fb6c1f78fb7b557a5e46b232'}
 def sha(b):return hashlib.sha256(b).hexdigest()
 def require(v,msg):
@@ -51,6 +53,10 @@ def load_bundle(path,expected):
  for name,entry in m['files'].items():
   require(name.startswith(('release/','collector/','support/')) and sha(files[name])==entry['sha256'] and len(files[name])==entry['size'] and entry['mode'] in (0o644,0o755),'manifest mismatch: '+name)
  require(len([x for x in files if x.startswith('collector/orangepi/src/orangepi_collect/')])==121,'wrong collector source count')
+ if 'source_preimages' in m:
+  pre=m['source_preimages'];require(m.get('source_preimage_commit')==LEGACY_SOURCE and m.get('source_preimage_sha256')==LEGACY_LOCK and isinstance(pre,dict),'unknown migration source')
+  require(set(pre)=={x[len('collector/'):] for x in files if x.startswith('collector/orangepi/')},'migration source membership mismatch')
+  require(sha(json.dumps(pre,sort_keys=True,separators=(',',':')).encode())==LEGACY_LOCK,'migration source lock mismatch')
  return m,files
 
 def unit_state(name):
@@ -154,11 +160,20 @@ def verify_environment(m,files,root):
     cgroup=safe_read(Path('/proc')/pid/'cgroup',4096).decode();require(('/headring-usb-entry.service' in cgroup and legacy.get('headring-usb-entry.service',{}).get('active',False)) or ('/'+SERVICES[0] in cgroup and owned_active),'unrelated UDP 5353 owner')
  require(not Path('/run/avahi-daemon').exists() or legacy.get('headring-usb-entry.service',{}).get('active',False) or owned_active,'Avahi runtime already in use')
  diffs=[];prehash={}
+ migration=m.get('source_preimages')
+ if migration is not None:
+  source=root/'src/orangepi_collect';actual=set()
+  for p in source.rglob('*'):
+   if p.is_file() and p.suffix in ('.py','.js','.html','.css') and '__pycache__' not in p.parts:actual.add('orangepi/'+p.relative_to(root).as_posix())
+  expected={name for name,h in migration.items() if h is not None};require(actual==expected,'legacy source file set differs')
  for name,data in files.items():
   if not name.startswith('collector/orangepi/'):continue
   relative=name[len('collector/orangepi/'):];target=root/relative;check_ancestors(target)
-  require(target.exists() and not target.is_symlink(),'collector source missing or symlink: '+relative)
-  before=sha(safe_read(target));prehash[relative]=before
+  require(not target.is_symlink(),'collector source symlink: '+relative)
+  exists=target.exists();before=sha(safe_read(target)) if exists else None
+  if migration is None:require(exists,'collector source missing: '+relative)
+  else:require(before==migration['orangepi/'+relative],'legacy source changed: '+relative)
+  prehash[relative]=before
   if before!=sha(data):diffs.append(relative)
  require(len([n for n in files if n.startswith('collector/orangepi/')])==121,'collector file count')
  require(not Path(m['release_prefix']).exists(),'release directory already exists')
@@ -233,7 +248,8 @@ def apply(m,files,root,plan):
      if name.startswith('collector/orangepi/'):
       relative=name[len('collector/orangepi/'):]
       if relative in plan['collector_changes']:
-       require(sha(safe_read(root/relative))==plan['collector_prehash'][relative],'collector changed since preflight: '+relative)
+       target=root/relative;expected=plan['collector_prehash'][relative]
+       require(not target.is_symlink() and ((expected is None and not target.exists()) or (expected is not None and target.exists() and sha(safe_read(target))==expected)),'collector changed since preflight: '+relative)
        backup_and_write(root/relative,data,0o644,j,tx)
      elif name.startswith('release/'):
       backup_and_write(Path(m['release_prefix'])/name[len('release/'):],data,m['files'][name]['mode'],j,tx)
