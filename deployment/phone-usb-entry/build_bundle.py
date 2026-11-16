@@ -3,11 +3,11 @@
 import argparse, hashlib, io, json, os, re, subprocess, tarfile, tempfile
 from pathlib import Path
 
-BASELINE='7004315fbc567afc5f0d5e9fcd0552f0db46a9c8'
+BASELINE='083155214907c55dc61d78fb34d65b29d12f2b82'
 BASE_COLLECTOR='f5d03b7b5fb197eb76e78610a0bce672e5cc4853'
 OVERLAY_MANIFEST='36d8059918ce370f7928cc7cd3207e2ac1d26471b3e8dcdef74b98b7888cd62a'
 LEGACY='460c04cb719aca5d73bfe518748bd636c632e2cf'
-PREIMAGES={'460c04cb719aca5d73bfe518748bd636c632e2cf':'be3f2734c80c6f1df24de7b4b4c001ff749c0baa2b064f49aa57387b736de3ea','8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3':'bd626687ef27c70d6a6cf6ab83d5567da147af540e6a8e33877a5da06c939aa3'}
+PREIMAGES={'7004315fbc567afc5f0d5e9fcd0552f0db46a9c8':'d636ca9867d09c4d1f57436cb7a8044d171e8b201d0bf1ec1eb0b9b4acb7dc21','460c04cb719aca5d73bfe518748bd636c632e2cf':'be3f2734c80c6f1df24de7b4b4c001ff749c0baa2b064f49aa57387b736de3ea','8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3':'bd626687ef27c70d6a6cf6ab83d5567da147af540e6a8e33877a5da06c939aa3'}
 ROOT=Path(__file__).resolve().parents[2]
 PKGS={
  'avahi-daemon_0.7-4ubuntu7.3_arm64.deb':('d903ad01bbef69380d77b8c9445a54b23861accd935254a38160d09cd851239f','https://ports.ubuntu.com/ubuntu-ports/pool/main/a/avahi/avahi-daemon_0.7-4ubuntu7.3_arm64.deb'),
@@ -62,7 +62,7 @@ def main():
  preimages=None
  if a.from_commit:
   old=git('ls-tree','-r','--name-only',a.from_commit,'orangepi/src/orangepi_collect').decode().splitlines();old={x for x in old if x.endswith(('.py','.js','.html','.css'))}
-  if len(old)!=(111 if a.from_commit==LEGACY else 121) or not old.issubset(set(paths)):raise ValueError('legacy source list mismatch')
+  if len(old)!={'460c04cb719aca5d73bfe518748bd636c632e2cf':111,'8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3':121,'7004315fbc567afc5f0d5e9fcd0552f0db46a9c8':123}[a.from_commit] or not old.issubset(set(paths)):raise ValueError('legacy source list mismatch')
   preimages={path:(digest(git('show',a.from_commit+':'+path)) if path in old else None) for path in sorted(paths)}
   if digest(json.dumps(preimages,sort_keys=True,separators=(',',':')).encode())!=PREIMAGES[a.from_commit]:raise ValueError('legacy source lock mismatch')
  for path in paths:files['collector/'+path]=git('show',BASELINE+':'+path)

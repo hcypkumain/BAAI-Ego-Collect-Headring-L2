@@ -5,7 +5,7 @@ from pathlib import Path
 
 STATE=Path('/var/lib/headring-offline'); UNITS=Path('/etc/systemd/system')
 SERVICES=('headring-offline-entry.service','headring-offline-discovery.service','headring-offline-dhcp-guard.service')
-PREIMAGES={'460c04cb719aca5d73bfe518748bd636c632e2cf':'be3f2734c80c6f1df24de7b4b4c001ff749c0baa2b064f49aa57387b736de3ea','8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3':'bd626687ef27c70d6a6cf6ab83d5567da147af540e6a8e33877a5da06c939aa3'}
+PREIMAGES={'7004315fbc567afc5f0d5e9fcd0552f0db46a9c8':'d636ca9867d09c4d1f57436cb7a8044d171e8b201d0bf1ec1eb0b9b4acb7dc21','460c04cb719aca5d73bfe518748bd636c632e2cf':'be3f2734c80c6f1df24de7b4b4c001ff749c0baa2b064f49aa57387b736de3ea','8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3':'bd626687ef27c70d6a6cf6ab83d5567da147af540e6a8e33877a5da06c939aa3'}
 LEGACY={'headring-usb-entry.service':'0dceecb1ba9dd5492f9e1889a76c1a4331a578d5ea991c8423b3bede9401fa23','headring-usb-discovery.service':'f02dfce84ed78136e394272f836d903a0a40ef3132e13a3059cd32870ecffdb8','headring-usb-dhcp-guard.service':'e5f44747cbbb144a4e2b94544ac2ea357695fe40fb6c1f78fb7b557a5e46b232'}
 def sha(b):return hashlib.sha256(b).hexdigest()
 def require(v,msg):
@@ -45,7 +45,7 @@ def load_bundle(path,expected):
    require(m.isfile() and m.name not in files and not m.name.startswith('/') and all(x not in ('','.','..') for x in m.name.split('/')),'unsafe bundle member')
    total+=m.size;require(m.size<=8_000_000 and total<=30_000_000,'bundle budget exceeded');files[m.name]=t.extractfile(m).read()
  require('manifest.json' in files,'manifest missing');m=json.loads(files.pop('manifest.json'))
- require(m.get('schema')==1 and m.get('baseline_commit')=='7004315fbc567afc5f0d5e9fcd0552f0db46a9c8' and m.get('base_collector_commit')=='f5d03b7b5fb197eb76e78610a0bce672e5cc4853' and m.get('collector_overlay_manifest_sha256')=='36d8059918ce370f7928cc7cd3207e2ac1d26471b3e8dcdef74b98b7888cd62a','wrong manifest baseline')
+ require(m.get('schema')==1 and m.get('baseline_commit')=='083155214907c55dc61d78fb34d65b29d12f2b82' and m.get('base_collector_commit')=='f5d03b7b5fb197eb76e78610a0bce672e5cc4853' and m.get('collector_overlay_manifest_sha256')=='36d8059918ce370f7928cc7cd3207e2ac1d26471b3e8dcdef74b98b7888cd62a','wrong manifest baseline')
  require(re.fullmatch(r'cp_[0-9]{4}',m.get('device_id','')) and re.fullmatch(r'offline-[0-9a-f]{16}',m.get('release_id','')),'invalid release identity')
  require(m.get('release_prefix')=='/opt/headring-offline/releases/'+m['release_id'],'invalid release path')
  require(set(files)==set(m['files']),'manifest membership mismatch')
