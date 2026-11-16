@@ -17,7 +17,12 @@ def policy(base):
 
 class TaskBlocks:
     def __init__(self,base,settings):
-        self.path=Path(base)/'runtime/reference_task_blocks.json'
+        self.round_robin=settings.get('round_robin') is True
+        if self.round_robin:
+            namespace=settings.get('namespace')
+            if not isinstance(namespace,str) or not namespace.startswith('temporary-') or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-' for c in namespace):raise ValueError('临时任务命名空间无效')
+            self.path=Path(base)/'runtime/text_task_blocks'/('blocks-'+namespace+'.json')
+        else:self.path=Path(base)/'runtime/reference_task_blocks.json'
         self.ids=settings['list_ids'];self.size=settings['block_size']
         self.value=dict(version=1,current_task=None,target_size=None,completed_ids=[],finished_tasks=[],pending=None)
         if self.path.exists():
@@ -34,7 +39,12 @@ class TaskBlocks:
                 raise ValueError('任务分组进度无效，请恢复备份')
             self.value=value
 
-    def save(self):_durable(self.path,_encoded(self.value))
+    def save(self):
+        if self.round_robin:
+            parent=self.path.parent
+            if parent.is_symlink():raise ValueError('临时任务状态目录无效')
+            parent.mkdir(mode=0o700,exist_ok=True)
+        _durable(self.path,_encoded(self.value))
 
     def task(self,entry):
         item=entry['snapshot']['items'][entry['index']]
@@ -49,7 +59,7 @@ class TaskBlocks:
         if identifier not in self.value['completed_ids']:self.value['completed_ids'].append(identifier)
         self.value['pending']=None
         if len(self.value['completed_ids'])==self.value['target_size']:
-            self.value['finished_tasks']=list(dict.fromkeys(self.value['finished_tasks']+[task]))
+            if not self.round_robin:self.value['finished_tasks']=list(dict.fromkeys(self.value['finished_tasks']+[task]))
             self.value.update(current_task=None,target_size=None,completed_ids=[])
         self.save()
 
@@ -82,6 +92,13 @@ class TaskBlocks:
         current=self.value['current_task']
         if self.size=='all' and current is not None and not groups.get(current):
             self.value.update(current_task=None,target_size=None,completed_ids=[],pending=None);current=None
+        if current is None and self.round_robin:
+            counts=self.round_counts()
+            available=[task for task in self.ids if groups.get(task) and counts.get(task,0)<50]
+            if not available:raise ValueError('本轮文字任务已完成，没有下一项任务')
+            lowest=min(counts.get(task,0)//self.size for task in available)
+            current=secrets.choice([task for task in self.ids if task in available and counts.get(task,0)//self.size==lowest])
+            self.value.update(current_task=current,target_size=min(self.size-(counts.get(current,0)%self.size),50-counts.get(current,0)),completed_ids=[],pending=None)
         if current is None:
             minimum=1 if self.size=='all' else self.size
             candidates=[task for task,rows in groups.items() if len(rows)>=minimum and task not in self.value['finished_tasks']]
@@ -92,8 +109,13 @@ class TaskBlocks:
                 self.switch_task(current,self._known_snapshot,self._known_completed)
             else:self.value.update(current_task=current,target_size=target,completed_ids=[],pending=None)
         rows=[e for e in groups.get(current,[]) if self.image(e) not in self.value['completed_ids']]
-        if not rows:raise ValueError('当前任务没有剩余图片，请检查任务库')
-        chosen=choose_image(rows);self.value['pending']=self.image(chosen);self.save()
+        if self.round_robin and self.value['pending'] is not None:
+            chosen=next((entry for entry in rows if self.image(entry)==self.value['pending']),None)
+            if chosen is None:raise ValueError('本次任务正在等待质检或恢复，请先处理结果')
+        else:
+            if not rows:raise ValueError('当前任务没有剩余图片，请检查任务库')
+            chosen=choose_image(rows)
+        self.value['pending']=self.image(chosen);self.save()
         return chosen
 
     def _switch_task_all(self,identifier,snapshot,completed_paths):
@@ -130,7 +152,18 @@ class TaskBlocks:
             finished_tasks=[x for x in self.value['finished_tasks'] if x!=identifier])
         self.save();return True
 
+    def round_counts(self):
+        counts={task:0 for task in self.ids}
+        completed=set(getattr(self,'_known_completed',()))
+        for i,item in enumerate(getattr(self,'_known_snapshot',{}).get('items',[])):
+            if item['relative_path'] in completed:
+                task=self.task(dict(snapshot=self._known_snapshot,index=i))
+                if task in counts:counts[task]+=1
+        return counts
+
     def status(self):
-        return dict(selection_mode='task_until_exhausted' if self.size=='all' else 'task_blocks_random_without_replacement',block_size=self.value['target_size'] or self.size,
+        result=dict(selection_mode='task_until_exhausted' if self.size=='all' else 'task_blocks_random_without_replacement',block_size=self.value['target_size'] or self.size,
                     block_completed=len(self.value['completed_ids']),block_task_id=self.value['current_task'],
-                    manual_task_switch=True,allowed_task_ids=list(self.ids))
+                    manual_task_switch=not self.round_robin,allowed_task_ids=list(self.ids))
+        if self.round_robin:result.update(round_robin=True,task_completed=self.round_counts().get(self.value['current_task'],0),task_target=50)
+        return result

@@ -23,7 +23,7 @@
   document.querySelector('main').append(panel);
   const viewer = document.createElement('div'); viewer.id = 'phone-viewer'; viewer.hidden = true;
   viewer.setAttribute('role', 'dialog'); viewer.setAttribute('aria-label', '参考图细节'); viewer.setAttribute('aria-modal', 'true');
-  viewer.innerHTML = `<div class="phone-row"><button id="phone-close">返回</button><button id="phone-minus">缩小</button><button id="phone-plus">放大</button><button id="phone-reset">复位</button><button id="phone-reference-retry" hidden>重新加载原图</button></div><p id="phone-reference-history"></p><p id="phone-zoom-label">1× · 双指缩放、拖动查看原图细节</p><div id="phone-viewport"><img id="phone-detail" alt="参考图细节" draggable="false"></div>`;
+  viewer.innerHTML = `<div class="phone-row"><button id="phone-close">返回</button><button id="phone-minus">缩小</button><button id="phone-plus">放大</button><button id="phone-reset">复位</button><button id="phone-reference-retry" hidden>重新加载原图</button></div><p id="phone-reference-history"></p><p id="phone-zoom-label">1× · 双指缩放、拖动查看原图细节</p><div id="phone-viewport"><img id="phone-detail" alt="参考图细节" draggable="false"><pre id="phone-text-detail" hidden></pre></div>`;
   document.body.append(viewer);
   let shell = null;
   let referenceLibrary = null;
@@ -82,6 +82,7 @@
    const key=referenceIdentity();
    if(!safe()||snapshot.privacy?.required!==false||snapshot.privacy?.stop_confirmed!==true||!snapshot.image){clearReferenceMemory();referenceKey='';referenceLoaded=false;return;}
    if(referenceKey!==key){clearReferenceMemory();referenceKey=key;referenceTries=0;referenceLoaded=false;}
+   if(snapshot.reference_image_state?.kind==='text'){stopReferenceTimers();referenceThumb.removeAttribute('src');referenceThumb.classList.add('hidden');referenceLoad.hidden=true;return;}
    referenceReload.disabled=false;
    if(referenceThumb.complete&&referenceThumb.naturalWidth){referenceLoaded=true;stopReferenceTimers();referenceLoad.hidden=true;return;}
    if(referenceLoaded)return;
@@ -141,7 +142,7 @@
    shell?.suspend();
    const hadReplay = mode === 'replay'; epoch++; zoomVersion++; replayVersion++;qcVersion++; stopPlaying(false); clearTimeout(zoomTimer);
    for (const controller of pending) controller.abort(); pending.clear(); pointers.clear();
-   clearImage('phone-detail'); clearImage('phone-replay-image'); viewer.hidden = true; $('phone-player').hidden = true;
+   clearImage('phone-detail'); $('phone-text-detail').textContent='';$('phone-text-detail').hidden=true;clearImage('phone-replay-image'); viewer.hidden = true; $('phone-player').hidden = true;
    $('phone-list').replaceChildren(); $('phone-pages').hidden = true; mode = ''; session = stream = null;
    $('phone-qc').hidden=true;$('phone-qc-findings').replaceChildren();
    $('phone-plot').getContext('2d').clearRect(0,0,900,420);
@@ -151,7 +152,7 @@
    // The cover hides all content. Preserve navigation, forms and list selection
    // through a short reconnection; cancel optional traffic and live decoders.
    const protection=options.protection?.()?.snapshot?.privacy;if(mode==='reference'&&protection?.phase==='idle'&&protection.required===false)resumeReferenceKey=referenceIdentity();else resumeReferenceKey='';
-   stopPlaying();shell?.pause();clearReferenceMemory();clearImage('phone-detail');viewer.hidden=true;if(mode==='reference'){mode='';zoomVersion++;}
+   stopPlaying();shell?.pause();clearReferenceMemory();clearImage('phone-detail');$('phone-text-detail').textContent='';$('phone-text-detail').hidden=true;viewer.hidden=true;if(mode==='reference'){mode='';zoomVersion++;}
    for(const controller of pending)controller.abort();pending.clear();
   }
   async function showImage(id, response, identity, versionValid) {
@@ -303,13 +304,21 @@
    image.style.transform='translate(-50%,-50%) translate('+panX+'px,'+panY+'px) scale('+zoom+')';
    $('phone-zoom-label').textContent=Number(zoom.toFixed(2))+'× · 双指连续缩放，单指拖动';
   }
-  function requestPaint(){if(refFrame===null)refFrame=requestAnimationFrame(paintReference);}
+  function requestPaint(){if(!$('phone-text-detail').hidden)return;if(refFrame===null)refFrame=requestAnimationFrame(paintReference);}
   async function reference(reload=false){
    if(!safe()||!options.status()?.image)return;
    const force=reload===true,key=referenceIdentity();if(force){referenceBlob=null;referenceBlobKey='';}
    begin('reference');zoom=1;panX=panY=refWidth=refHeight=0;viewer.hidden=false;$('phone-close').focus();$('phone-zoom-label').textContent='正在载入原图…';$('phone-reference-retry').hidden=true;
-   const identity=epoch,version=++zoomVersion;
+   const identity=epoch,version=++zoomVersion,isText=options.status()?.reference_image_state?.kind==='text';
+   viewport.classList.toggle('text-mode',isText);$('phone-detail').hidden=isText;$('phone-text-detail').hidden=!isText;$('phone-text-detail').textContent='';
+   for(const id of ['phone-minus','phone-plus','phone-reset'])$(id).hidden=isText;
    try{
+    if(isText){
+     const response=await request('/api/reference');if(!response.ok)throw Error('任务说明暂不可用');
+     const value=await response.json();if(identity!==epoch||viewer.hidden||!safe()||version!==zoomVersion||key!==referenceIdentity())return;
+     if(value.kind!=='text'||typeof value.reference_text!=='string')throw Error('任务说明格式无效');
+     $('phone-text-detail').textContent=[typeof value.name==='string'?value.name.trim():'',value.reference_text].filter(Boolean).join('\n\n');$('phone-zoom-label').textContent='任务说明';return;
+    }
     let response;
     if(referenceBlob&&referenceBlobKey===key)response=new Response(referenceBlob,{headers:{'Content-Type':referenceBlob.type||'image/png'}});
     else response=await request('/api/reference');
@@ -328,10 +337,10 @@
     midpoint:points.length>1?{x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2}:points[0]};
   }
   viewport.addEventListener('pointerdown',event=>{
-   if(!safe()||viewer.hidden)return;event.preventDefault();viewport.setPointerCapture(event.pointerId);pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});rebase();
+   if(!safe()||viewer.hidden||!$('phone-text-detail').hidden)return;event.preventDefault();viewport.setPointerCapture(event.pointerId);pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});rebase();
   });
   viewport.addEventListener('pointermove',event=>{
-   if(!gesture||!pointers.has(event.pointerId)||!safe())return;event.preventDefault();pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});const points=[...pointers.values()];
+   if(!gesture||!pointers.has(event.pointerId)||!safe()||!$('phone-text-detail').hidden)return;event.preventDefault();pointers.set(event.pointerId,{x:event.clientX,y:event.clientY});const points=[...pointers.values()];
    if(points.length>1&&gesture.distance>0){
     const bounds=viewport.getBoundingClientRect(),mid={x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2};
     zoom=Math.max(1,Math.min(16,gesture.zoom*Math.hypot(points[1].x-points[0].x,points[1].y-points[0].y)/gesture.distance));
@@ -340,9 +349,9 @@
    }else{panX=gesture.panX+points[0].x-gesture.first.x;panY=gesture.panY+points[0].y-gesture.first.y;}
    requestPaint();
   });
-  function endPointer(event){pointers.delete(event.pointerId);rebase();requestPaint();}
+  function endPointer(event){if(!$('phone-text-detail').hidden)return;pointers.delete(event.pointerId);rebase();requestPaint();}
   viewport.addEventListener('pointerup',endPointer);viewport.addEventListener('pointercancel',endPointer);
-  viewport.addEventListener('wheel',event=>{if(!safe()||viewer.hidden)return;event.preventDefault();changeZoom(zoom*Math.exp(-event.deltaY*.002));},{passive:false});
+  viewport.addEventListener('wheel',event=>{if(!safe()||viewer.hidden||!$('phone-text-detail').hidden)return;event.preventDefault();changeZoom(zoom*Math.exp(-event.deltaY*.002));},{passive:false});
   if(global.ResizeObserver)new ResizeObserver(()=>requestPaint()).observe(viewport);
   async function audio(action, address) {
    if(shell?.openHeadphones){shell.openHeadphones();return;}
@@ -357,6 +366,7 @@
    } catch (error) { report(error); }
   }
   $('reference-image').onclick=reference;
+  $('reference-text-button').onclick=reference;
   $('phone-reference-retry').onclick=()=>reference(true);
   $('phone-close').onclick=() => {suspend();$('reference-image').focus();};
   $('phone-minus').onclick=() => changeZoom(zoom/2); $('phone-plus').onclick=() => changeZoom(zoom*2);

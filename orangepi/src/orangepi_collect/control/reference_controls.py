@@ -151,10 +151,12 @@ class ReferenceControlsMixin:
             from task_block_sampling import TaskBlocks
             settings=self.reference_catalog.task_block_policy
             self._reference_task_blocks=TaskBlocks(BASE,settings) if settings else None
+            self._base_reference_task_blocks=self._reference_task_blocks
             self.reference_catalog.import_legacy(_legacy_paths(PROJECT,ledger))
             self._reference_preferences=_preferences(BASE)
             self.collector_id=self._reference_preferences['collector_id']
             identifier=self._reference_preferences['selected_list_id']
+            self._configure_text_blocks(identifier)
             if selected_image and (explicit_image or identifier=='all'):
                 self._reference_cli_image=selected_image;self._reference_cli_force=True
                 if not self.reference_catalog.single_list_mode:identifier='all'
@@ -215,6 +217,18 @@ class ReferenceControlsMixin:
             self.state=getattr(self,'_usb_import_previous_state','device_confirm')
             if self.state=='exhausted' and self.images:self.state='idle'
             self.state_write()
+
+    def _text_blocks_for(self,identifier):
+        item=self.reference_catalog._load().get('lists',{}).get(identifier,{})
+        ids=item.get('text_task_list_ids')
+        if ids is None:return getattr(self,'_base_reference_task_blocks',None)
+        from project_paths import COLLECTION_MODE
+        if COLLECTION_MODE!='eeg':raise ValueError('请先切换脑电模式，再选择临时脑电任务池')
+        from task_block_sampling import TaskBlocks
+        return TaskBlocks(self._reference_base,dict(list_ids=list(ids),block_size=5,round_robin=True,namespace=item['text_task_namespace']))
+
+    def _configure_text_blocks(self,identifier):
+        self._reference_task_blocks=self._text_blocks_for(identifier)
 
     def reference_can_change(self):
         return (getattr(self,'state',None) in SAFE_STATES and getattr(self,'worker',None) is None
@@ -307,7 +321,7 @@ class ReferenceControlsMixin:
         item=next((v for v in (getattr(self,'_reference_snapshot',None) or {}).get('items',[]) if v['relative_path']==relative),None)
         value=dict(getattr(self,'_reference_histories',{}).get(relative,dict(state='unattempted',ever_recorded=False,attempt_count=0,collected=False)),
                     id=item['id'] if item else None,name=item['name'] if item else Path(image).stem,
-                    manual=bool(item and item['id']==getattr(self,'_reference_manual_id',None)))
+                    manual=bool(item and item['id']==getattr(self,'_reference_manual_id',None)),kind=item.get('kind','image') if item else 'image')
         path=getattr(self,'path',None)
         if (getattr(self,'worker',None) is not None and getattr(self,'state','') in ('recording','confirm_stop','finalizing','error')
                 and path and (path/'start_gate.json').is_file()):
@@ -327,6 +341,7 @@ class ReferenceControlsMixin:
         return secrets.choice(fresh or errors or entries)
 
     def select_reference_image(self,value=None,next_image=False):
+        if getattr(getattr(self,'_reference_task_blocks',None),'round_robin',False):raise ValueError('临时脑电任务按每五次轮换，不能手动跳过当前任务')
         if getattr(self,'_reference_task_blocks',None):
             from manual_reference import choose
             return choose(self,value,next_image=next_image)
@@ -468,22 +483,26 @@ class ReferenceControlsMixin:
                 except (ValueError,OSError):pass
 
     def select_reference_list(self,value):
-        if getattr(self,'_reference_task_blocks',None):
+        blocks=getattr(self,'_reference_task_blocks',None)
+        requested=value.get('list_id') if isinstance(value,dict) else None
+        target=self.reference_catalog._load().get('lists',{}).get(requested,{}) if self.reference_catalog is not None else {}
+        if blocks and not getattr(blocks,'round_robin',False) and not target.get('text_task_list_ids'):
             from manual_reference import choose
             return choose(self,value,list_only=True)
-        if getattr(self,'_reference_task_blocks',None):return self._select_task_block_list(value)
         if not self.reference_can_change():raise ValueError('当前正在准备或采集，结束本段后再选择列表')
         if (not isinstance(value,dict) or set(value)!={'list_id','catalog_revision'}
                 or not valid_id(value['list_id']) or type(value['catalog_revision']) is not int
                 or not 0<=value['catalog_revision']<=9007199254740991):
             raise ValueError('参考图列表选择无效')
         snapshot=self.reference_catalog.freeze_list(value['list_id'],value['catalog_revision'],include_completed=True)
+        next_blocks=self._text_blocks_for(value['list_id'])
         preferences=dict(self._reference_preferences,selected_list_id=snapshot['list_id'])
         try:_save_preferences(self._reference_base,preferences)
         except (OSError,ValueError) as error:
             self.reference_error='列表选择未保存，请重试：'+str(error)
             self._reference_preferences_error=self.reference_error
             raise
+        self._reference_task_blocks=next_blocks
         self._reference_preferences=preferences;self._reference_cli_image=None;self._reference_cli_force=False;self.selected_image=None
         self._reference_retry=None;self._deferred_catalog_revision=None
         self._reference_completed=_completed_paths(self._reference_project,self._reference_ledger)
@@ -538,6 +557,14 @@ class ReferenceControlsMixin:
 
     def reference_set_raw_metadata(self,value):
         if self._reference_active:
+            selection=self._reference_active.get('selection') or {}
+            if (selection.get('asset') or {}).get('kind')=='text':
+                import hashlib
+                from text_reference import read
+                raw=Path(self.image).read_bytes()
+                if hashlib.sha256(raw).hexdigest()!=selection['asset']['sha256']:raise ValueError('文字任务内容已变化')
+                payload=read(raw)
+                value.update(reference_kind='text',reference_text=payload['reference_text'],reference_text_payload=payload)
             if self._reference_active.get('scene_snapshot'):
                 value['reference_bundle']=copy.deepcopy(self._reference_active['scene_snapshot'])
                 value['reference_layout_status']='bundle_snapshot'
@@ -550,6 +577,11 @@ class ReferenceControlsMixin:
         selection=active.get('selection')
         if selection:
             value['reference_selection']=copy.deepcopy(selection)
+            if selection['asset'].get('kind')=='text':
+                raw=active.get('raw_meta') or {}
+                for key in ('reference_kind','reference_text','reference_text_payload'):
+                    if key not in raw:raise ValueError('文字任务冻结元数据缺失')
+                    value[key]=copy.deepcopy(raw[key])
             if active.get('scene_snapshot'):
                 value['reference_bundle']=copy.deepcopy(active['scene_snapshot'])
                 value['reference_layout_status']='bundle_snapshot'

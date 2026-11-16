@@ -202,6 +202,11 @@ class ReferenceCatalog:
             if item.get('origin') not in ('legacy', 'upload') or type(item.get('deleted')) is not bool:
                 raise ValueError('invalid image state')
             ReferenceCatalog._relative(item.get('path'))
+            kind=item.get('kind','image')
+            if kind not in ('image','text'):
+                raise ValueError('invalid reference kind')
+            if kind=='text' and (item.get('origin')!='upload' or not re.fullmatch(r'_uploads/_temporary_text/temporary-[a-z0-9-]{1,80}/text_[0-9a-f]{32}/occurrence_[0-9]{4}\.text\.json',item['path'])):
+                raise ValueError('invalid text reference path')
             if not isinstance(item.get('name'), str) or len(item['name'].encode('utf-8')) > 384:
                 raise ValueError('invalid image name')
         for identifier, item in lists.items():
@@ -391,6 +396,7 @@ class ReferenceCatalog:
         return [value['lists'][identifier] for identifier in value['list_order']
                 if self.task_block_policy is None or identifier in self.task_block_policy['list_ids']
                 if not value['lists'][identifier]['deleted'] and not value['lists'][identifier].get('hidden', False)
+                and not value['lists'][identifier].get('text_task_namespace')
                 and value['lists'][identifier].get('sampling_enabled', True)
                 and (value['lists'][identifier].get('bundle') or {}).get('state') != 'importing']
 
@@ -453,7 +459,7 @@ class ReferenceCatalog:
                     remaining=sum(not self._completed(image, completed_paths) for image in images),
                     readonly=item['readonly'], deleted=item['deleted'], hidden=item.get('hidden', False),
                     sampling_enabled=item.get('sampling_enabled', True) and not item.get('hidden', False), tags=item.get('tags', []),
-                    import_pending=(item.get('bundle') or {}).get('state')=='importing'))
+                    import_pending=(item.get('bundle') or {}).get('state')=='importing',text_task_pool=bool(item.get('text_task_list_ids'))))
             return dict(version=1, revision=value['revision'], total=len(identifiers), offset=offset,
                         next_offset=offset+limit if offset+limit < len(identifiers) else None, lists=rows)
 
@@ -468,7 +474,7 @@ class ReferenceCatalog:
             brief = dict(id=item['id'], name=item['name'], count=len(active),
                 remaining=sum(not self._completed(image, completed_paths) for image in active),
                 readonly=item['readonly'], deleted=item['deleted'],import_pending=(item.get('bundle') or {}).get('state')=='importing')
-            brief.update(hidden=item.get('hidden', False), sampling_enabled=item.get('sampling_enabled', True) and not item.get('hidden', False), tags=item.get('tags', []))
+            brief.update(hidden=item.get('hidden', False), sampling_enabled=item.get('sampling_enabled', True) and not item.get('hidden', False), tags=item.get('tags', []),text_task_pool=bool(item.get('text_task_list_ids')))
             scene = item.get('scene')
             if scene:
                 brief['scene'] = dict(task=scene.get('task'), notes=scene.get('notes'),
@@ -476,6 +482,8 @@ class ReferenceCatalog:
             rows = [dict(id=image['id'], name=image['name'], origin=image['origin'],
                          completed=self._completed(image, completed_paths), deleted=image['deleted'])
                     for image in images[offset:offset+limit]]
+            for row,image in zip(rows,images[offset:offset+limit]):
+                if image.get('kind')=='text':row['kind']='text'
             return dict(version=1, revision=value['revision'], list=brief, total=len(images),
                 offset=offset, next_offset=offset+limit if offset+limit < len(images) else None, items=rows)
 
@@ -760,16 +768,42 @@ class ReferenceCatalog:
             if self.task_block_policy and list_id not in ['all','pool']+self.task_block_policy['list_ids']:
                 raise CatalogError('此列表不在本机采集任务范围内','sampling_scope',409)
             item = self._list(value, list_id)
+            if item.get('text_task_namespace') and not item.get('text_task_list_ids'):
+                raise CatalogError('请从临时脑电任务池进入，任务按每五次轮换','text_pool_required',409)
             if item.get('hidden', False):
                 raise CatalogError('隐藏列表不参与采集，请先在隐藏列表页恢复', 'hidden_list', 409)
             if list_id == 'all':item = self._list(value, 'pool')
             if (item.get('bundle') or {}).get('state')=='importing':raise CatalogError('任务包导入未完成，请先继续导入','bundle_incomplete',409)
             images = [image for image in self._active_items(value, item)
                 if include_completed or not self._completed(image, completed_paths)]
+            has_text=any(image.get('kind')=='text' for image in images)
+            if has_text and not item.get('text_task_list_ids'):
+                raise CatalogError('文字任务必须从临时脑电任务池进入','text_pool_required',409)
+            if item.get('text_task_list_ids'):
+                namespace=item.get('text_task_namespace');groups=item['text_task_list_ids']
+                if (not isinstance(namespace,str) or not isinstance(groups,list) or len(groups)!=20 or len(set(groups))!=20
+                        or len(images)!=1000 or any(image.get('kind')!='text' or not image['path'].startswith('_uploads/_temporary_text/'+namespace+'/') for image in images)):
+                    raise CatalogError('临时脑电任务池已变化，请联系管理员','text_pool_invalid',409)
+                expected=[]
+                for group in groups:
+                    child=value['lists'].get(group)
+                    if not child or child.get('text_task_namespace')!=namespace or child.get('deleted') or len(child.get('items',[]))!=50:
+                        raise CatalogError('临时脑电任务分组已变化','text_pool_invalid',409)
+                    expected.extend(child['items'])
+                if len(set(expected))!=1000 or set(expected)!={image['id'] for image in images}:
+                    raise CatalogError('临时脑电任务次数已变化','text_pool_invalid',409)
             items = [dict(id=image['id'], name=image['name'], origin=image['origin'],
                 relative_path=(self.library/self._relative(image['path'])).relative_to(self.project).as_posix(),
                 original_filename=image.get('original_filename', image['name'])) for image in images]
-            sources = self._sampling_lists(value) if item['id'] == 'pool' else [item]
+            for asset,image in zip(items,images):
+                if image.get('kind')=='text':asset['kind']='text'
+            text_ids=item.get('text_task_list_ids')
+            if text_ids is not None:
+                if (not isinstance(text_ids,list) or not text_ids or len(text_ids)!=len(set(text_ids)) or
+                        any(identifier not in value['lists'] or value['lists'][identifier].get('text_task_namespace')!=item.get('text_task_namespace') for identifier in text_ids)):
+                    raise CatalogError('文字任务池配置无效')
+                sources=[value['lists'][identifier] for identifier in text_ids]
+            else:sources = self._sampling_lists(value) if item['id'] == 'pool' else [item]
             scenes = {}
             for asset in items:
                 rows = [row for row in sources if asset['id'] in row['items']]

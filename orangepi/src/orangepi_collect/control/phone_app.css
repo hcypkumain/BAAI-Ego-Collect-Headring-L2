@@ -110,3 +110,7 @@ body.phone-app #phone-settings-dialog #settings-card{margin:0;flex-shrink:0}body
 #phone-headphone-panel [data-hp="controls"]{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}#phone-headphone-panel [data-hp="controls"] button:last-child{grid-column:1/-1}
 /* Task-pool controls retain labels without crowding the collection workflow. */
 .phone-reference-sampling{display:grid;gap:10px;margin:12px 0}.phone-pool-row{padding:12px;border:1px solid var(--line);border-radius:10px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;min-width:0}#phone-reference-library .phone-pool-row>label{display:flex;align-items:flex-start;gap:10px;overflow-wrap:anywhere}.phone-pool-row input[type=checkbox]{width:20px;height:20px;flex-shrink:0;accent-color:var(--accent)}.phone-pool-row details{padding:0;grid-column:1/-1}.phone-pool-row details input{width:100%;margin:8px 0}.phone-pool-row details button{margin:4px;max-width:100%}.phone-pool-row>button{justify-self:start;align-self:start}
+
+#phone-text-detail{white-space:pre-wrap;overflow:auto;overflow-wrap:anywhere;height:100%;margin:0;font:inherit;line-height:1.6;user-select:text;touch-action:pan-y}#phone-text-detail[hidden]{display:none}
+
+#phone-viewport.text-mode{touch-action:pan-y}

@@ -197,6 +197,7 @@
   function openSettings(){if(!safe())return;settingsOpen=true;settings.hidden=false;stopLive();}
   function updateWorkflow(){
    abandon.hidden=!(snapshot?.actions?.includes('abandon')||snapshot?.actions?.includes('discard_recording'))||['device_confirm','idle','exhausted'].includes(snapshot?.state);abandon.disabled=!safe()||snapshot?.busy||options.pending?.();referenceEntry.disabled=!safe()||!snapshot?.image||!['ready','preparing'].includes(snapshot?.state);
+   referenceEntry.textContent=snapshot?.reference_image_state?.kind==='text'?'查看本段任务说明':'查看本段参考图';
    text($('phone-reference-state-text'),global.describeReferenceState(snapshot?.reference_image_state)+((snapshot?.task_list?.tags||[]).length?' · 标签：'+snapshot.task_list.tags.join(' / '):''));
    $('phone-pick-reference').disabled=referenceChoicesBusy||!safe()||!snapshot?.actions?.includes('select_reference')||snapshot?.busy;
    $('phone-use-reference').disabled=referenceChoicesBusy||!referenceChoiceRevision||!safe()||!snapshot?.actions?.includes('select_reference')||snapshot?.busy;
@@ -285,7 +286,9 @@
    text($('phone-task-name'),task.name||'请先选择参考图列表');
    $('phone-task-name').title=(task.tags||[]).join(' · ');
    const countsValid=Number.isSafeInteger(total)&&Number.isSafeInteger(remaining)&&total>=0&&remaining>=0&&remaining<=total;
-   text($('phone-task-counts'),countsValid?'已完成 '+(total-remaining)+' · 剩余 '+remaining+' / '+total:'等待 Pi 返回进度');
+   if(task.round_robin){
+    text($('phone-task-counts'),task.block_task_id?'本组成功 '+task.block_completed+'/'+task.block_size+'；当前任务累计 '+task.task_completed+'/'+task.task_target:'下一段切换任务');
+   }else text($('phone-task-counts'),countsValid?'已完成 '+(total-remaining)+' · 剩余 '+remaining+' / '+total:'等待 Pi 返回进度');
    const taskProgress=$('phone-task-progress');taskProgress.max=countsValid?Math.max(1,total):1;if(countsValid)taskProgress.value=total-remaining;else taskProgress.removeAttribute('value');
    const nextStep=value.state!=='device_confirm'&&value.reference_image_state?.manual&&value.reference_image_state.collected&&!value.worker?.pid?'已手选已采集图，可点击“重采所选图”主动重采。':value.state==='device_confirm'?'下一步：核对已连接设备，再点击“确认设备，继续”。':value.state==='confirm_stop'?'下一步：确认保存或重采；保存确认完成后才会换下一张图。':value.state==='exhausted'||countsValid&&remaining===0&&!value.worker?.pid?'当前列表已无待采集图，请上传新图或切换任务列表。':value.state==='failed_wait'?'下一步：查看错误提示，处理后点击“准备本段”重试原图。':value.state==='idle'?'下一步：点击“'+global.piPrepareLabel(value)+'”，抽取并准备任务；此时尚未正式录制。':value.state.startsWith('wrist_')||['emg_manual','emg_pairing','preparing','ready'].includes(value.state)?'下一步：进入“采集步骤”，按当前提示继续。':value.state==='finalizing'?'正在收尾与质量检查，请等待 Pi 返回保存结果。':'按当前采集步骤继续，页面状态由 Pi 确认。';
    text($('phone-next-step'),nextStep);

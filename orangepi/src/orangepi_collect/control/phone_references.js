@@ -37,7 +37,7 @@
    if(current()&&loaded&&target===selected){await uploadFiles(chosen);return;}
    pendingSelection={files:chosen,listId:target};resumeOffered=false;
   };
-   function controls(){if(!use)return;const editable=!busy&&loaded&&!!key&&!(usbSubmitting||usbUnknown||usbServerActive());
+   function controls(){if(!use)return;use.textContent=list?.text_task_pool?'用此脑电任务池采集':manualTasks()?'切换到此列表':singleList()?'用此列表采集':'启用混合抽取';const editable=!busy&&loaded&&!!key&&!(usbSubmitting||usbUnknown||usbServerActive());
    use.disabled=!editable||trash||hiddenView||(manualTasks()&&(!switchAllowed(selected)||!list||list.remaining===0||list.sampling_enabled===false))||(singleList()&&(!list||list.import_pending||['pool','all'].includes(selected)))||!(status().actions||[]).includes('reference_list');
    for(const node of root.querySelectorAll('[data-switch-task]')){const id=node.dataset.switchTask,current=id===activeTask();node.textContent=current?'当前列表':'切换到此列表';node.disabled=!editable||!switchAllowed(id)||current||node.dataset.unavailable==='true'||!(status().actions||[]).includes('reference_list');}
    files.disabled=!editable||trash||hiddenView;uploadLabel.classList.toggle('disabled',files.disabled);createButton.disabled=!editable||trash||hiddenView;newName.disabled=!editable||trash||hiddenView;more.hidden=next===null;
@@ -56,7 +56,7 @@
    root.replaceChildren();root.hidden=false;
    const label=el('label','参考图列表');select=el('select');select.id='phone-reference-select';select.setAttribute('aria-label','参考图列表');label.append(select);
    refresh=button('刷新',()=>key?load(selected):open());trashButton=button('回收站',()=>{trash=!trash;hiddenView=false;load('all');});hiddenButton=button('隐藏列表',()=>{hiddenView=!hiddenView;trash=false;load('pool');});hiddenButton.id='phone-reference-hidden';const toolbar=row();toolbar.append(refresh,hiddenButton,trashButton);
-   use=button(manualTasks()?'切换到此列表':singleList()?'用此列表采集':'启用混合抽取',()=>{if(!use.disabled)action('reference_list',{list_id:(singleList()||manualTasks())?selected:'pool',catalog_revision:revision});},'primary');use.id='phone-reference-use';
+   use=button(manualTasks()?'切换到此列表':singleList()?'用此列表采集':'启用混合抽取',()=>{if(!use.disabled)action('reference_list',{list_id:(list?.text_task_pool||singleList()||manualTasks())?selected:'pool',catalog_revision:revision});},'primary');use.id='phone-reference-use';
    count=el('p','','phone-hint');count.id='phone-reference-count';
    activeList=el('p','','phone-hint');activeList.id='phone-reference-active-list';
    sampling=el('section','','phone-reference-sampling');sampling.id='phone-reference-sampling';
@@ -116,12 +116,12 @@
    count.textContent=trash?(list.deleted?'回收站列表：图片与已采集数据保留。':'回收站：删除的图片可恢复，已采集数据保留。'):list.name+' · '+list.remaining+' / '+list.count+' 张待采集'+(list.readonly?' · 上传时自动新建列表':'');
    if(reset&&trash&&list.deleted){const restore=button('恢复此列表',()=>mutate({action:'restore_list',id:list.id},true));restore.id='phone-reference-restore-list';items.append(restore);}
    const jobs=[];
-   for(const item of data.items){const card=el('article','','phone-reference-item'),thumb=el('img');thumb.alt=item.name;thumb.loading='lazy';const title=el('b',item.name),detail=el('small',item.deleted?'已删除':item.completed?'已完成采集':'待采集'),actions=row();
-    actions.append(button('放大查看',()=>{if(!thumb.src)return;preview.querySelector('img').src=thumb.src;preview.hidden=false;preview.querySelector('button').focus();}));
+   for(const item of data.items){const isText=item.kind==='text',card=el('article','','phone-reference-item'),thumb=el(isText?'span':'img');if(isText)thumb.textContent='文字任务';else{thumb.alt=item.name;thumb.loading='lazy';}const title=el('b',item.name),detail=el('small',item.deleted?'已删除':item.completed?'已完成采集':'待采集'),actions=row();
+    if(!isText)actions.append(button('放大查看',()=>{if(!thumb.src)return;preview.querySelector('img').src=thumb.src;preview.hidden=false;preview.querySelector('button').focus();}));
     actions.append(button(item.deleted?'恢复图片':'删除图片',()=>{
      if(item.deleted){mutate({action:'restore_image',id:item.id});return;}
      actions.replaceChildren(el('span','删除这张图？'),button('确认删除',()=>mutate({action:'delete_image',id:item.id}),'danger'),button('取消',()=>loadItems(true)));
-    }));card.append(thumb,title,detail,actions);items.append(card);jobs.push({thumb,item});
+    }));card.append(thumb,title,detail,actions);items.append(card);if(!isText)jobs.push({thumb,item});
    }
    if(reset&&!data.items.length)items.append(el('p',trash?'回收站没有图片。':'此列表暂无参考图，点击“上传图片”添加。','phone-hint'));
    controls();

@@ -268,8 +268,14 @@ class Dashboard:
                         image=Path(image).resolve();image.relative_to((owner.base.parent/'configs/environments').resolve())
                         if image.stat().st_size>64*1024*1024:raise ValueError()
                         raw=image.read_bytes();after=owner.display_state()
-                        if after['privacy'].get('required') or before.get('image')!=after.get('image'):
+                        if (after['privacy'].get('required') or not after['privacy'].get('stop_confirmed') or before.get('image')!=after.get('image') or before.get('reference_image_state')!=after.get('reference_image_state')):
                             self.send(423,{'error':'参考图上下文已变化'});return
+                        if (before.get('reference_image_state') or {}).get('kind')=='text':
+                            from text_reference import read
+                            relative=image.relative_to((owner.base.parent/'configs/environments').resolve()).as_posix()
+                            if not re.fullmatch(r'_uploads/_temporary_text/temporary-[a-z0-9-]{1,80}/text_[0-9a-f]{32}/occurrence_[0-9]{4}\.text\.json',relative):raise ValueError()
+                            payload=read(raw)
+                            self.send(200,{'kind':'text','scene':payload['scene'],'name':payload['name'],'reference_text':payload['reference_text']});return
                         self.send(200,raw,'image/png' if raw[:8]==b'\x89PNG\r\n\x1a\n' else 'image/jpeg')
                     except (OSError,ValueError,TypeError):self.send(404,{'error':'未选择参考图像'})
                     return
@@ -460,6 +466,8 @@ class Dashboard:
         with self.lock:
             value={key:self.snapshot.get(key) for key in ('state','session','preview_id','image','selected_devices','revision','collection_mode','collection_context')}
             value['busy']=self.busy or self.pending is not None
+            reference=self.snapshot.get('reference_image_state') or {}
+            value['reference_image_state']={'kind':reference.get('kind','image')} if isinstance(reference,dict) else {'kind':'image'}
             value['result']=copy.deepcopy(self.result)
             value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state')}
         value['privacy']=self.privacy.snapshot()

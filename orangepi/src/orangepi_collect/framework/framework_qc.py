@@ -374,7 +374,7 @@ def _frozen_reference_selection(old_meta, reference_queue=None):
     asset=value['asset']
     fields={'id','name','origin','relative_path','sha256'}
     if (not isinstance(asset,dict) or not fields<=set(asset)
-            or not set(asset)<=fields|{'original_filename','tags','source_lists'} or not token(asset['id'])
+            or not set(asset)<=fields|{'original_filename','tags','source_lists','kind'} or not token(asset['id'])
             or not text(asset['name']) or asset['origin'] not in ('upload','legacy')
             or not digest(asset['sha256'])
             or ('original_filename' in asset and not text(asset['original_filename']))):
@@ -392,7 +392,18 @@ def _frozen_reference_selection(old_meta, reference_queue=None):
             or asset['sha256']!=old_meta.get('reference_sha256')):
         raise ValueError('reference selection differs from the frozen image')
     upload_root='configs/environments/_uploads/'
-    if asset['origin']=='upload':
+    kind=asset.get('kind','image')
+    if kind not in ('image','text'):raise ValueError('invalid frozen reference kind')
+    if kind=='text':
+        from text_reference import canonical, validate, occurrence_id
+        payload=validate(old_meta.get('reference_text_payload'))
+        expected=upload_root+'_temporary_text/'+payload['namespace']+'/'+payload['task_id']+'/occurrence_%04d.text.json'%payload['occurrence']
+        if (asset['origin']!='upload' or relative!=expected or asset['id']!=occurrence_id(payload['namespace'],payload['task_id'],payload['occurrence'])
+                or old_meta.get('reference_kind')!='text' or old_meta.get('reference_text')!=payload['reference_text']
+                or hashlib.sha256(canonical(payload)).hexdigest()!=asset['sha256']
+                or not _uploaded_reference_matches_queue(value,reference_queue)):
+            raise ValueError('text reference evidence mismatch')
+    elif asset['origin']=='upload':
         if relative!=upload_root+asset['id']+'_1.png':
             if not relative.startswith(upload_root) or not _uploaded_reference_matches_queue(value,reference_queue):
                 raise ValueError('uploaded reference path does not match its asset identity')
@@ -450,6 +461,8 @@ def _write_pi_session_metadata(path,summary,timestamps,old_meta,names):
         meta.update(reference_selection=selection,reference_list_id=selection['list_id'],
                     reference_list_name=selection['list_name'],reference_queue_sha256=selection['queue_sha256'],
                     reference_position=selection['position'],reference_total=selection['total'])
+    if selection is not None and selection['asset'].get('kind')=='text':
+        meta.update(reference_kind='text',reference_text=old_meta['reference_text'],reference_text_payload=old_meta['reference_text_payload'])
     if uploaded:
         meta.update(environment=None,scene=None,objects=None,notes=None,
                     task_name=selection['asset']['name'],reference_layout_status='bundle_snapshot' if old_meta.get('reference_bundle') else 'not_provided')

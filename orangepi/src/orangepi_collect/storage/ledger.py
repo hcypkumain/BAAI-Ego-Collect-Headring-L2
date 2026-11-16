@@ -263,7 +263,10 @@ def valid_used(entry,image=None):
     return False
 
 def images():
-    return sorted(p for p in LIBRARY.rglob('*.png') if re.search(r'(?:_\d+|\d+_combo\d+_r\d+)$',p.stem))
+    pictures=(p for p in LIBRARY.rglob('*.png') if re.search(r'(?:_\d+|\d+_combo\d+_r\d+)$',p.stem))
+    text_root=LIBRARY/'_uploads/_temporary_text'
+    text=(p for p in text_root.glob('temporary-*/text_*/occurrence_*.text.json') if p.is_file() and not p.is_symlink()) if text_root.is_dir() and not text_root.is_symlink() else ()
+    return sorted(list(pictures)+list(text))
 
 def unused():
     result=[];cache={}
