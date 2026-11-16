@@ -309,6 +309,23 @@ class RecordingStore:
                     raise ValueError('本段放弃请求不匹配')
                 stop=json.loads(bounded(source/'stop_gate.json'))
                 if stop.get('recording_active') is not False:raise ValueError('本段尚未确认停止')
+                # Never purge a failed or unverifiable recording on retry. The
+                # recorder can replace status with 'discarded', so inspect both
+                # the original native summary and the final summary.
+                started=(source/'start_gate.json').exists()
+                summaries=[]
+                for name in ('native_capture_summary.json','capture_summary.json'):
+                    f=source/name
+                    if not f.exists():continue
+                    try:value=json.loads(bounded(f))
+                    except (OSError,ValueError,TypeError):
+                        raise ValueError('采集结果无法核验，已保留本段数据，请在采集管理中检查')
+                    if not isinstance(value,dict):raise ValueError('采集结果无效，已保留本段数据，请在采集管理中检查')
+                    summaries.append(value)
+                if started and not (source/'native_capture_summary.json').is_file():
+                    raise ValueError('录制结果缺失，已保留本段数据，请在采集管理中检查')
+                if any(v.get('status') in ('error','failed','interrupted','qc_error') or v.get('capture_status') in ('error','failed','interrupted','qc_error') or bool(v.get('errors')) for v in summaries):
+                    raise ValueError('本段采集出现错误，已保留已有数据，请在采集管理中检查')
             pi=meta.get('pi') if isinstance(meta.get('pi'),dict) else meta
             reference=meta.get('reference_image') or pi.get('reference_image')
             if reference:

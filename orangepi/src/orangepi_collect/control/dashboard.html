@@ -293,6 +293,58 @@ body.privacy-login #login,body.privacy-login #login *{visibility:visible!importa
 })(window);
 
 </script>
+<script id="task-block-editor-core">
+// Shared by desktop and the moved phone settings card. No device clock is used.
+function createTaskBlockEditor(options){
+ let epoch=0,identity=null,draft='',dirty=false,generation=0,pending=null,feedback='',snapshot=null;
+ const hex=/^[0-9a-f]{32}$/,hash=/^[0-9a-f]{64}$/;
+ function number(text){if(typeof text!=='string'||!/^\d+$/.test(text))return null;const n=Number(text);return Number.isSafeInteger(n)&&n>=1&&n<=5000?n:null;}
+ function known(s){return s&&typeof s.collection_context==='string'&&s.collection_context&&['eeg','emg'].includes(s.collection_mode)&&typeof s.privacy?.instance==='string'&&s.privacy.instance;}
+ function invalidate(){epoch++;identity=null;pending=null;snapshot=null;draft='';dirty=false;feedback='';generation++;}
+ function observe(s){
+  if(!s)return;
+  const parts=[s.collection_context||null,['eeg','emg'].includes(s.collection_mode)?s.collection_mode:null,s.privacy?.instance||null,s.system?.boot_id||null,s.system?.controller_pid||null];
+  if(identity&&parts.some((v,i)=>v!=null&&identity[i]!=null&&v!==identity[i]))invalidate();
+  if(!known(s))return;
+  identity=identity?parts.map((v,i)=>v==null?identity[i]:v):parts;snapshot=s;
+  const setting=s.task_block_settings;
+  if(!dirty&&!pending){const v=setting?.enabled===true&&s.collection_mode==='eeg'?setting.configured_size:null;draft=Number.isSafeInteger(v)&&v>=1&&v<=5000?String(v):'';}
+  const p=pending,r=s.task_block_size_result;
+  if(!p||p.epoch!==epoch||!r||r.action!=='task_block_size'||r.client_request_id!==p.nonce||r.collection_context!==p.context||r.collection_mode!==p.mode||r.submitted_revision!==p.revision||r.requested_value!==p.value||!hex.test(r.request_id||'')||(p.requestId&&r.request_id!==p.requestId))return;
+  if(p.phase==='提交中'||p.phase==='协议异常')return; // Do not bypass a malformed receipt.
+  p.requestId=r.request_id;
+  if(r.ok===true&&r.outcome==='applied'){
+   const rb=r.readback;
+   if(!rb||rb.configured_size!==p.value||!hash.test(rb.policy_revision||'')||setting?.configured_size!==p.value||setting?.policy_revision!==rb.policy_revision||setting?.enabled!==true)return;
+   pending=null;if(generation===p.generation){dirty=false;draft=String(p.value);feedback='本次已保存：'+p.value+'；仅下一个任务块生效。';}else feedback='上一值 '+p.value+' 本次已保存；当前草稿尚未提交。';
+  }else if(r.ok===false&&['rejected','write_failed','uncertain'].includes(r.outcome)){
+   pending=null;feedback='本次未确认：'+(r.error||'执行或持久化结果未确认')+'；请核对当前读回，旧操作可能已执行。';
+  }
+ }
+ function edit(text){draft=text;dirty=true;generation++;feedback='草稿尚未提交。';}
+ function ready(s,env){const p=s?.privacy,t=s?.task_block_settings;return !!(known(s)&&s.collection_mode==='eeg'&&p.required===false&&p.stop_confirmed===true&&p.phase==='idle'&&t?.enabled===true&&t.can_change===true&&hash.test(t.policy_revision||'')&&Number.isSafeInteger(s.revision)&&s.actions?.includes('task_block_size')&&env.online&&env.unlocked&&env.visible&&!env.inFlight&&env.crypto&&typeof env.crypto.getRandomValues==='function'&&!pending);}
+ function begin(value,s,env){
+  if(!ready(s,env)||number(String(value))!==value||!Number.isSafeInteger(value))return null;
+  const bytes=new Uint8Array(16);try{env.crypto.getRandomValues(bytes);}catch(e){feedback='安全随机数不可用，无法提交。';return null;}
+  if(!dirty||draft!==String(value)){draft=String(value);dirty=true;generation++;}
+  const nonce=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
+  pending={nonce,requestId:null,context:s.collection_context,mode:s.collection_mode,revision:s.revision,value,generation,epoch,started:options.now(),phase:'提交中'};feedback='正在提交，尚未保存。';return pending;
+ }
+ function current(p){return !!p&&pending===p&&p.epoch===epoch;}
+ function receipt(p,status,data){
+  if(!current(p))return;
+  const r=data?.request;
+  if(status===202&&data?.accepted===true&&r?.action==='task_block_size'&&hex.test(r.request_id||'')&&r.client_request_id===p.nonce&&r.collection_context===p.context&&r.collection_mode===p.mode&&r.submitted_revision===p.revision&&r.requested_value===p.value&&(!p.requestId||p.requestId===r.request_id)){p.requestId=r.request_id;p.phase='已受理';feedback='已受理，等待执行与配置读回；尚未保存。';}
+  else if([400,401,403,409].includes(status)){pending=null;feedback='请求被拒绝：'+(data?.error||'请核对状态')+'；草稿保留。';}
+  else{p.phase=status===202?'协议异常':'未确认';feedback=status===202?'本次未确认：受理回执不匹配，请核对后放弃等待。':'本次未确认，继续核对结果；请勿自动重试。';}
+  if(current(p)&&snapshot)observe(snapshot);
+ }
+ function unknown(p){if(current(p)){p.phase='未确认';feedback='本次未确认，连接中断或回执异常；请勿自动重试。';if(snapshot)observe(snapshot);}}
+ function abandon(){if(!pending)return;pending=null;feedback='已放弃等待；旧操作可能已执行，请核对当前读回后再提交。';}
+ function view(){return {draft,dirty,pending,feedback,epoch,timeout:!!pending&&options.now()-pending.started>15000,snapshot};}
+ return {number,observe,edit,ready,begin,receipt,unknown,abandon,invalidate,current,view};
+}
+</script>
 <script>
 'use strict';
 const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
@@ -302,6 +354,38 @@ let wristPolicyDirty=false,wristPolicyPending=null,privacyScreen=null,phoneCompa
 const settingsDraft=window.createDashboardSettingsDraft();
 let token=accessCodeRequired?(accessFragment||sessionStorage.getItem('pi-access')||''):'',status=null,inFlight=false,lastReference='',lastResult=0,online=false,lastBoot='',lastController=null;
 let collectionContext=null;
+const taskBlockEditor=createTaskBlockEditor({now:()=>performance.now()});
+let taskBlockHttp=null;
+const taskBlockSection=document.createElement('section');
+taskBlockSection.innerHTML='<label for="task-block-size">下一任务块大小</label><p id="task-block-readback" class="muted">等待同步</p><div class="row"><input id="task-block-size" type="text" inputmode="numeric" autocomplete="off" placeholder="1–5000" aria-label="下一任务块大小"><button id="task-block-save">保存</button></div><small>仅下一个任务块生效；本块目标保持不变。历史“全部”只能读取，不能写入。</small><p id="task-block-feedback" aria-live="polite"></p><button id="task-block-abandon" hidden>放弃等待</button>';
+$('#settings-card .settings').append(taskBlockSection);
+function taskBlockEnvironment(){return {online,unlocked:!!privacyScreen&&!privacyScreen.isLocked()&&!modeIntent,visible:!document.hidden,inFlight,crypto:window.crypto};}
+function invalidateTaskBlock(){taskBlockEditor.invalidate();if(taskBlockHttp){taskBlockHttp=null;inFlight=false;}}
+function observeTaskBlock(s){const epoch=taskBlockEditor.view().epoch;taskBlockEditor.observe(s);if(epoch!==taskBlockEditor.view().epoch&&taskBlockHttp){taskBlockHttp=null;inFlight=false;}}
+function renderTaskBlock(s){
+ const state=taskBlockEditor.view(),t=s?.task_block_settings,enabled=s?.collection_mode==='eeg'&&t?.enabled===true;
+ const display=v=>v==='all'?'全部（历史设置）':Number.isSafeInteger(v)&&v>=1?v:'未知';
+ $('#task-block-readback').textContent=enabled?'当前已读回：'+display(t.configured_size)+'；本块目标：'+display(t.current_target)+(t.count_basis==='saved'?'；按成功保存条数轮换，不等待质检回执':'；按完整质检合格条数轮换')+(t.reason?'；'+t.reason:''):'当前已读回：未知'+(t?.reason?'；'+t.reason:'');
+ const input=$('#task-block-size');if(input.value!==state.draft)input.value=state.draft;
+ input.disabled=!online||!privacyScreen||privacyScreen.isLocked()||document.hidden||!enabled;
+ $('#task-block-save').disabled=!taskBlockEditor.ready(s,taskBlockEnvironment())||taskBlockEditor.number(state.draft)===null;
+ $('#task-block-feedback').textContent=state.feedback+(state.timeout?' 等待较久，仍未确认；可继续等待或放弃等待。':'')+(!window.crypto||typeof window.crypto.getRandomValues!=='function'?' 浏览器不支持安全随机数，无法提交。':'');
+ $('#task-block-abandon').hidden=!state.pending;
+}
+$('#task-block-size').oninput=e=>{taskBlockEditor.edit(e.target.value);renderTaskBlock(status);};
+$('#task-block-save').onclick=()=>{const value=taskBlockEditor.number(taskBlockEditor.view().draft);if(value!==null)act('task_block_size',value);};
+$('#task-block-abandon').onclick=()=>{if(confirm('放弃等待后可以重新提交，但旧操作可能已经执行或稍后执行。请先核对当前读回。确定放弃等待吗？')){taskBlockEditor.abandon();renderTaskBlock(status);}};
+async function submitTaskBlockSize(value){
+ const s=status,p=taskBlockEditor.begin(value,s,taskBlockEnvironment());if(!p){renderTaskBlock(s);return false;}
+ const owner={};taskBlockHttp=owner;inFlight=true;renderTaskBlock(s);
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),6000);
+ try{
+  const res=await fetch('/api/action',{method:'POST',headers:{'Content-Type':'application/json',...authHeaders(),'X-Collection-Context':p.context},body:JSON.stringify({action:'task_block_size',value:p.value,revision:p.revision,collection_context:p.context,policy_revision:s.task_block_settings.policy_revision,client_request_id:p.nonce}),signal:controller.signal});
+  let data=null;try{data=await res.json();}catch(e){}
+  taskBlockEditor.receipt(p,res.status,data);return res.status===202&&data?.accepted===true&&p.phase==='已受理';
+ }catch(e){taskBlockEditor.unknown(p);return false;}
+ finally{clearTimeout(timer);if(taskBlockHttp===owner){taskBlockHttp=null;inFlight=false;renderTaskBlock(status);await poll();}}
+}
 const MODE_INTENT_KEY='pi-mode-switch-intent-v1';
 let modeIntent=null,modeReloadQueued=false,latestDisplayTruth=null;
 try{const saved=JSON.parse(sessionStorage.getItem(MODE_INTENT_KEY)||'null');if(saved&&['emg','eeg'].includes(saved.target)&&Date.now()-saved.started<120000)modeIntent=saved;else sessionStorage.removeItem(MODE_INTENT_KEY);}catch{}
@@ -332,7 +416,7 @@ async function boundedJson(url,config={},milliseconds=5000){
  const work=(async()=>{const response=await fetch(url,{...config,signal:controller.signal,cache:'no-store'});const value=await response.json();return {response,value};})();
  try{return await Promise.race([work,deadline]);}finally{clearTimeout(timer);controller.abort();}
 }
-function reloadModePage(){if(!modeReloadQueued){modeReloadQueued=true;suspendVisibleMedia();location.reload();}}
+function reloadModePage(){if(!modeReloadQueued){invalidateTaskBlock();modeReloadQueued=true;suspendVisibleMedia();location.reload();}}
 async function requestCollectionMode(target){
  if(!['emg','eeg'].includes(target)||inFlight||modeIntent||!online||privacyScreen?.isLocked())return false;
  inFlight=true;let sent=false,accepted=false;
@@ -623,6 +707,7 @@ function renderImpedance(s){
 }
 
 function render(s){
+ observeTaskBlock(s);renderTaskBlock(s);
  const settingsState=settingsDraft.observe(s);
  const system=s.system||{};
  if(lastBoot&&system.boot_id&&lastBoot!==system.boot_id){
@@ -715,9 +800,10 @@ function render(s){
   const device=match&&(s.devices||[]).find(d=>d.name===match[1]);
   warnings.push(match?'画面间隔提示：'+(device?.label||cameraNames[match[1]]||match[1])+' 两帧间隔 '+(Number(match[2])/1e6).toFixed(1)+' 毫秒，可能存在延迟或丢帧。此提示本身不会停止录制；请以当前录制状态为准。':s.worker.last_warning);
  }$('#notice').classList.toggle('hidden',!warnings.length);$('#notice').textContent=[...new Set(warnings)].join('；');
- if(s.result&&s.result.time!==lastResult){lastResult=s.result.time;if(s.result.error)toast(s.result.error)}
+ if(s.result&&s.result.action!=='task_block_size'&&s.result.time!==lastResult){lastResult=s.result.time;if(s.result.error)toast(s.result.error)}
 }
 async function act(action,value){
+ if(action==='task_block_size')return submitTaskBlockSize(value);
  if(action==='collection_mode')return requestCollectionMode(value);
  if(modeIntent)return false;
  if(inFlight||!online||!status?.actions?.includes(action)||privacyScreen?.isLocked())return;
@@ -738,7 +824,8 @@ async function readStatus(){
  if(display.camera)query.set('camera',display.camera);
  const {response:res,value}=await boundedJson('/api/status?'+query,{headers:authHeaders()},5000);
  if(res.status===401){privacyScreen?.unauthorized();$('#login').classList.remove('hidden');throw Error('访问码无效')}
- if(!res.ok)throw Error(value.error||'连接失败');
+  if(!res.ok)throw Error(value.error||'连接失败');
+  observeTaskBlock(value);
  if(value.state==='mode_switching'&&value.mode_switch_target&&!modeIntent)beginModeIntent(value.mode_switch_target,collectionContext||value.collection_context);
  if(collectionContext&&value.collection_context&&collectionContext!==value.collection_context){beginModeIntent(value.collection_mode,collectionContext);reloadModePage();throw Error('正在加载新的采集模式');}
  collectionContext=value.collection_context||null;privacyScreen?.authorized();return value;
@@ -757,12 +844,12 @@ async function poll(){
   let s;
   try{s=await readStatus();const privacy=await privacyScreen.synchronize(s);if(!privacy.accepted)return;s=privacy.snapshot}
   catch(error){
-   privacyScreen.disconnected();online=false;clearEmgDraft();renderEmg(status);$('#connection span').textContent='连接中断 · 正在重连';$('#connection').style.background='#fbe2dc';
+    privacyScreen.disconnected();online=false;renderTaskBlock(status);clearEmgDraft();renderEmg(status);$('#connection span').textContent='连接中断 · 正在重连';$('#connection').style.background='#fbe2dc';
    $$('button[data-action],button[data-impedance-action]').forEach(b=>b.disabled=true);$('#set-volume').disabled=true;$('#eeg-filter').disabled=true;$('#set-eeg-filter').disabled=true;$('#wrist-fps-policy').disabled=true;$('#set-wrist-fps-policy').disabled=true;
    if(!$('#login').classList.contains('hidden'))$('#login-error').textContent=error.message;
    return;
   }
-  online=true;lastStatusReceivedAt=performance.now();if(accessCodeRequired)sessionStorage.setItem('pi-access',token);$('#login').classList.add('hidden');
+   online=true;observeTaskBlock(s);lastStatusReceivedAt=performance.now();if(accessCodeRequired)sessionStorage.setItem('pi-access',token);$('#login').classList.add('hidden');
   $('#connection span').textContent='已连接 Pi';$('#connection').style.background='';
   try{
    // Keep the exact trusted snapshot for the privacy gate. The fallback is
@@ -848,7 +935,7 @@ setInterval(()=>privacyScreen.tick(),250);
 phoneCompanion=window.createPhoneCompanion({status:()=>status,unlocked:()=>online&&!privacyScreen.isLocked(),headers:authHeaders,action:act,
  protection:()=>privacyScreen.presentation(),pending:()=>inFlight||!!modeIntent,modeReady:modeActionReady,requiresCode:accessCodeRequired,refresh:poll,
  acceptToken:value=>{if(accessCodeRequired&&typeof value==='string'&&value.length>=24&&value.length<=511){token=value;sessionStorage.setItem('pi-access',token)}poll()},
- beforeSwitch:()=>{privacyScreen.disconnected();online=false},drawSignal:name=>drawSignal(name,status?.signals?.[name]||{}),renderWrist:()=>renderWrist(status)});
+ beforeSwitch:()=>{invalidateTaskBlock();privacyScreen.disconnected();online=false;renderTaskBlock(status)},drawSignal:name=>drawSignal(name,status?.signals?.[name]||{}),renderWrist:()=>renderWrist(status)});
 async function statusLoop(){if(!document.hidden)await poll();setTimeout(statusLoop,status?.state==='countdown'||status?.privacy?.phase==='arming'?100:750)}
 if(!phoneCompanion?.managesPreview)setInterval(frames,500);setInterval(()=>{if(!document.hidden&&!privacyScreen.isLocked()&&status?.state==='emg_manual'&&$('#emg-card').getClientRects().length)renderEmg(status)},500);statusLoop();
 </script><!-- PI_CAPTURE_STATUS_FIX=20261105.4 --></body></html>

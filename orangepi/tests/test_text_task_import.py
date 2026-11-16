@@ -73,7 +73,12 @@ class TextImportTests(unittest.TestCase):
   o=Owner()
   with patch.object(project_paths,'COLLECTION_MODE','eeg'),patch.object(reference_controls,'_save_preferences'),patch.object(reference_controls,'_completed_paths',return_value=()),patch.object(reference_controls,'_reserved_paths',return_value=()):
    o.select_reference_list({'list_id':res['pool_id'],'catalog_revision':self.catalog.revision});self.assertTrue(o._reference_task_blocks.round_robin);self.assertEqual(o._reference_snapshot['total'],1000)
-   oldid=next(iter(self.original['lists']));o.select_reference_list({'list_id':oldid,'catalog_revision':self.catalog.revision});self.assertIsNone(o._reference_task_blocks)
+  with patch.object(project_paths,'COLLECTION_MODE','eeg'),patch.object(reference_controls,'_save_preferences'),patch.object(reference_controls,'_completed_paths',return_value=()),patch.object(reference_controls,'_reserved_paths',return_value=()):
+   oldid=next(iter(self.original['lists']));o.select_reference_list({'list_id':oldid,'catalog_revision':self.catalog.revision})
+   self.assertFalse(o._reference_task_blocks.round_robin);self.assertEqual(o._reference_task_blocks.count_basis,'saved')
+   self.assertEqual(o._reference_task_blocks.size,5)
+   o.select_reference_list({'list_id':res['pool_id'],'catalog_revision':self.catalog.revision})
+   self.assertTrue(o._reference_task_blocks.round_robin);self.assertEqual(o._reference_task_blocks.count_basis,'saved')
   o=Owner()
   with patch.object(project_paths,'COLLECTION_MODE','eeg'),patch.object(reference_controls,'_save_preferences',side_effect=OSError('fail')):
    with self.assertRaises(OSError):o.select_reference_list({'list_id':res['pool_id'],'catalog_revision':self.catalog.revision})

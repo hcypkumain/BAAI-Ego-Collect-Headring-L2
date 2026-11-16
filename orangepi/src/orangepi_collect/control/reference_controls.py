@@ -4,16 +4,18 @@ No hardware access. Catalog mutations share the exact store passed to Dashboard.
 Heartbeat/status methods only read cached values. Hashing occurs at prepare.
 """
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
 import secrets
 import stat
 import tempfile
+import threading
 import time
 import uuid
 
-from reference_catalog import ReferenceCatalog, CatalogError, unique_json, valid_id
+from reference_catalog import ReferenceCatalog, CatalogError, unique_json, valid_id, _durable, _encoded
 from reference_credentials import ReferenceCredentials
 from session_naming import collector_id, reserve_session_dir, AllocationDurabilityError
 
@@ -41,6 +43,27 @@ def _preferences(base):
         raise ValueError('参考图设置格式无效')
     value['collector_id']=collector_id(value['collector_id'])
     return value
+
+
+def _task_block_policy(base):
+    path=Path(base)/'configs/task_block_policy.json'
+    fd=os.open(str(path),os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0))
+    try:
+        info=os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size>1048576:raise ValueError('无效的任务分组配置')
+        raw=os.read(fd,1048577)
+    finally:os.close(fd)
+    if len(raw)>1048576:raise ValueError('任务分组配置过大')
+    value=unique_json(raw)
+    if (not isinstance(value,dict) or set(value) not in ({'version','list_ids','block_size'},{'version','list_ids','block_size','count_basis'})
+            or type(value['version']) is not int or value['version']!=1
+            or not isinstance(value['list_ids'],list) or not value['list_ids']
+            or any(not valid_id(i) for i in value['list_ids'])
+            or len(set(value['list_ids']))!=len(value['list_ids'])
+            or not (value['block_size']=='all' or (type(value['block_size']) is int and 1<=value['block_size']<=5000))
+            or value.get('count_basis','saved') not in ('qualified','saved')):
+        raise ValueError('任务分组配置无效')
+    return value,hashlib.sha256(raw).hexdigest()
 
 
 def _save_preferences(base,value):
@@ -126,7 +149,25 @@ def reference_cli_queue(base,project,ledger,selected=None):
 
 
 class ReferenceControlsMixin:
+    def _assert_controller_thread(self):
+        if (getattr(self,'_controller_thread',None) is not threading.current_thread()
+                or getattr(self,'_controller_thread_id',None)!=threading.get_ident()):
+            raise RuntimeError('controller actor thread required')
+        if getattr(self,'_task_block_write_active',False):
+            raise RuntimeError('task block write in progress')
+
+    def _reference_mutation_started(self):
+        self._assert_controller_thread()
+        if type(getattr(self,'ui_revision',None)) is not int or self.ui_revision<0:
+            raise RuntimeError('controller revision unavailable')
+        self.ui_revision+=1
+
     def init_references(self,selected_image=None,explicit_image=False):
+        if hasattr(self,'_controller_thread') or hasattr(self,'_controller_thread_id'):
+            self._assert_controller_thread()
+        else:
+            self._controller_thread=threading.current_thread();self._controller_thread_id=threading.get_ident()
+            self.ui_revision=0;self._task_block_write_active=False
         from project_paths import BASE,PROJECT
         import ledger
         self._reference_base=Path(BASE);self._reference_project=Path(PROJECT);self._reference_ledger=ledger
@@ -221,11 +262,22 @@ class ReferenceControlsMixin:
     def _text_blocks_for(self,identifier):
         item=self.reference_catalog._load().get('lists',{}).get(identifier,{})
         ids=item.get('text_task_list_ids')
-        if ids is None:return getattr(self,'_base_reference_task_blocks',None)
         from project_paths import COLLECTION_MODE
+        from task_block_sampling import TaskBlocks,ensure_default_policy
+        if ids is None:
+            blocks=getattr(self,'_base_reference_task_blocks',None)
+            if blocks is None and COLLECTION_MODE=='eeg':
+                settings=ensure_default_policy(self._reference_base,self.reference_catalog._load())
+                if settings is not None:
+                    self.reference_catalog.task_block_policy=settings
+                    blocks=TaskBlocks(self._reference_base,settings)
+                    self._base_reference_task_blocks=blocks
+            return blocks
         if COLLECTION_MODE!='eeg':raise ValueError('请先切换脑电模式，再选择临时脑电任务池')
-        from task_block_sampling import TaskBlocks
-        return TaskBlocks(self._reference_base,dict(list_ids=list(ids),block_size=5,round_robin=True,namespace=item['text_task_namespace']))
+        # Text pools already define groups of five; an unrelated image policy
+        # must not silently change a scoped text pool's group size.
+        return TaskBlocks(self._reference_base,dict(list_ids=list(ids),block_size=5,count_basis='saved',
+            round_robin=True,namespace=item['text_task_namespace']))
 
     def _configure_text_blocks(self,identifier):
         self._reference_task_blocks=self._text_blocks_for(identifier)
@@ -285,6 +337,140 @@ class ReferenceControlsMixin:
         value['can_switch']=self.reference_can_switch_list()
         return value
 
+    def _task_block_owner_recovery_safe(self):
+        return (getattr(self,'scan_cleanup_pending',None) is False
+                and getattr(self,'owner_reconcile_pending',None) is False
+                and hasattr(self,'pending_camera_owner') and self.pending_camera_owner is None)
+
+    def task_block_settings(self):
+        """Publish policy evidence and the same eligibility used by the setter."""
+        from project_paths import BASE,COLLECTION_CONTEXT
+        blocks=getattr(self,'_reference_task_blocks',None)
+        result=dict(enabled=False,configured_size=None,current_target=None,policy_revision=None,
+                     can_change=False,reason='任务分组设置写入尚未启用')
+        if blocks is None or Path(getattr(self,'_reference_base',''))!=Path(BASE):return result
+        if getattr(blocks,'round_robin',False):
+            return dict(result,enabled=True,configured_size=blocks.size,current_target=blocks.value['target_size'],
+                count_basis=blocks.count_basis,reason='文字任务池独立保存进度，按保存条数自动轮换')
+        path=Path(BASE)/'configs/task_block_policy.json'
+        try:
+            fd=os.open(str(path),os.O_RDONLY|getattr(os,'O_NOFOLLOW',0)|getattr(os,'O_NONBLOCK',0))
+            try:
+                info=os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_size>1048576:raise ValueError('无效的任务分组配置')
+                raw=os.read(fd,1048577)
+            finally:os.close(fd)
+            if len(raw)>1048576:raise ValueError('任务分组配置过大')
+            value=unique_json(raw)
+            if (not isinstance(value,dict) or set(value) not in ({'version','list_ids','block_size'},{'version','list_ids','block_size','count_basis'})
+                    or type(value['version']) is not int or value['version']!=1
+                    or value['list_ids']!=blocks.ids or value['block_size']!=blocks.size
+                    or value.get('count_basis','saved')!=getattr(blocks,'count_basis','saved')
+                    or not (value['block_size']=='all' or (type(value['block_size']) is int and 1<=value['block_size']<=5000))):
+                raise ValueError('任务分组配置已变化')
+            result.update(enabled=True,configured_size=value['block_size'],current_target=blocks.value['target_size'],
+                          count_basis=getattr(blocks,'count_basis','saved'),policy_revision=hashlib.sha256(raw).hexdigest())
+            try:
+                self._task_block_write_check(COLLECTION_CONTEXT,getattr(self,'ui_revision',None),result['policy_revision'],None)
+                result.update(can_change=True,reason=None)
+            except Exception as error:
+                result['reason']=str(error) or '当前状态不允许修改'
+        except (OSError,ValueError,TypeError,KeyError):
+            result['reason']='任务分组配置不可读取或与当前状态不一致'
+        return result
+
+    def _task_block_write_check(self, expected_context, expected_revision, expected_policy_revision, job):
+        from project_paths import BASE,COLLECTION_MODE,COLLECTION_CONTEXT
+        if (COLLECTION_MODE!='eeg' or not isinstance(expected_context,str) or not expected_context
+                or expected_context!=COLLECTION_CONTEXT or Path(self._reference_base)!=Path(BASE)
+                or type(expected_revision) is not int or type(getattr(self,'ui_revision',None)) is not int
+                or expected_revision!=self.ui_revision):raise ValueError('采集上下文或流程已变化')
+        required=('worker','capture_owner_run','capture_registry_cleanup_pending','_reference_active',
+                  '_reference_retry','_reference_reserved','_reference_task_blocks','reference_catalog',
+                  '_reference_preferences','state','quit')
+        if any(not hasattr(self,k) for k in required):raise ValueError('采集状态未知')
+        if not self._task_block_owner_recovery_safe():raise ValueError('设备所有权清理或恢复未确认')
+        blocks=self._reference_task_blocks
+        if (self.state not in SAFE_STATES or self.quit or getattr(self,'switch_requested',False)
+                or self.worker is not None or self.capture_owner_run is not None
+                or self.capture_registry_cleanup_pending is not False
+                or self._reference_active is not None or self._reference_retry is not None
+                or not isinstance(self._reference_reserved,(tuple,list))
+                or (self._reference_reserved and getattr(blocks,'count_basis','saved')!='saved')
+                or getattr(self,'_reference_transaction',None) is not None
+                or blocks is None or self.reference_catalog is None or self._reference_preferences is None):
+            raise ValueError('采集或恢复状态不允许修改')
+        if (blocks.value['pending'] is not None or blocks.unresolved()
+                or (blocks.awaiting_qc() and getattr(blocks,'count_basis','saved')!='saved')):
+            raise ValueError('任务分组仍有待处理记录')
+        dashboard=getattr(self,'dashboard',None)
+        if dashboard is None:raise ValueError('控制台不可用')
+        privacy=dashboard.privacy.snapshot()
+        if (not isinstance(privacy,dict) or privacy.get('required') is not False
+                or privacy.get('stop_confirmed') is not True or privacy.get('phase')!='idle'):
+            raise ValueError('采集隐私状态未确认安全')
+        if job is None:
+            with dashboard.lock:
+                if dashboard.busy or dashboard.pending is not None:raise ValueError('控制台正忙')
+        else:
+            if (not isinstance(job,dict) or job.get('value')!=job.get('requested_value')
+                    or job.get('collection_context')!=expected_context
+                    or job.get('submitted_revision')!=expected_revision
+                    or job.get('revision')!=expected_revision
+                    or job.get('policy_revision')!=expected_policy_revision
+                    or not dashboard.execution_matches(job)):
+                raise ValueError('任务分组执行凭证无效')
+        policy,revision=_task_block_policy(BASE)
+        if (revision!=expected_policy_revision or policy['list_ids']!=blocks.ids
+                or policy['block_size']!=blocks.size
+                or policy.get('count_basis','saved')!=getattr(blocks,'count_basis','saved')
+                or self.reference_catalog.task_block_policy!=policy):
+            raise ValueError('任务分组配置已变化')
+        return Path(BASE),policy
+
+    def set_task_block_size(self,value,*,expected_context,expected_revision,expected_policy_revision,job=None):
+        """Persist next-block size on the controller actor; never dispatches a job."""
+        self._assert_controller_thread()
+        result=dict(ok=False,outcome='rejected',error=None,readback=None,settings=None)
+        if type(value) is not int or not 1<=value<=5000:
+            result['error']='每任务参考图数应为 1 到 5000 的整数';return result
+        if job is not None and (not isinstance(job,dict) or job.get('requested_value')!=value):
+            result['error']='任务分组执行凭证无效';return result
+        try:
+            base,policy=self._task_block_write_check(expected_context,expected_revision,expected_policy_revision,job)
+            self._task_block_write_active=True
+            try:
+                base,policy=self._task_block_write_check(expected_context,expected_revision,expected_policy_revision,job)
+                candidate=dict(policy,block_size=value)
+                try:
+                    _durable(base/'configs/task_block_policy.json',_encoded(candidate))
+                    outcome='applied';error=None
+                except Exception as exc:
+                    outcome=('write_failed' if (isinstance(exc,CatalogError) and exc.committed is False) or isinstance(exc,OSError)
+                             else 'uncertain')
+                    error=str(exc)
+                from project_paths import BASE,COLLECTION_MODE,COLLECTION_CONTEXT
+                if Path(BASE)!=base or COLLECTION_MODE!='eeg' or COLLECTION_CONTEXT!=expected_context:
+                    result.update(outcome='uncertain' if outcome!='write_failed' else outcome,error='采集上下文已变化')
+                    return result
+                try:
+                    actual,revision=_task_block_policy(base)
+                    if actual['list_ids']!=policy['list_ids']:raise ValueError('任务范围已变化')
+                    self._reference_task_blocks.size=actual['block_size']
+                    self.reference_catalog.task_block_policy=actual
+                    result['readback']=dict(configured_size=actual['block_size'],policy_revision=revision)
+                    result['settings']=self.task_block_settings()
+                    if outcome=='applied' and actual!=candidate:
+                        outcome='uncertain';error='写后配置读回不匹配'
+                except Exception as exc:
+                    if outcome=='applied':outcome='uncertain'
+                    error='配置读回失败：'+str(exc)
+                result.update(ok=outcome=='applied',outcome=outcome,error=error)
+                return result
+            finally:self._task_block_write_active=False
+        except Exception as exc:
+            result['error']=str(exc);return result
+
     def reference_image_title(self):
         active=getattr(self,'_reference_active',None)
         if active and active.get('selection'):
@@ -341,7 +527,9 @@ class ReferenceControlsMixin:
         return secrets.choice(fresh or errors or entries)
 
     def select_reference_image(self,value=None,next_image=False):
-        if getattr(getattr(self,'_reference_task_blocks',None),'round_robin',False):raise ValueError('临时脑电任务按每五次轮换，不能手动跳过当前任务')
+        if getattr(getattr(self,'_reference_task_blocks',None),'round_robin',False):raise ValueError('临时脑电任务按保存条数轮换，不能手动跳过当前任务')
+        if getattr(self,'_reference_transaction',None) is not None:
+            raise ValueError('参考图事务恢复未确认，请保留本段并联系维护人员')
         if getattr(self,'_reference_task_blocks',None):
             from manual_reference import choose
             return choose(self,value,next_image=next_image)
@@ -403,8 +591,8 @@ class ReferenceControlsMixin:
             entries=[retry]+[entry for entry in entries if entry['index']!=retry['index']]
         blocks=getattr(self,'_reference_task_blocks',None)
         if blocks:
-            blocks.reconcile(snapshot,self._reference_completed)
-            entries=[e for e in entries if blocks.task(e) not in blocks.value['finished_tasks']]
+            blocks.reconcile(snapshot,self._reference_completed,getattr(self,'_reference_reserved',()))
+            # TaskBlocks owns round selection, including the next round.
         self._reference_snapshot=snapshot;self._reference_entries=entries
         self.images=[entry['path'] for entry in entries]
         self._update_reference_task()
@@ -432,12 +620,14 @@ class ReferenceControlsMixin:
             if blocks and blocks.value['current_task']:
                 source=next((v for v in asset.get('source_lists',[]) if v['id']==blocks.value['current_task']),None)
                 if source:
-                    done=len(blocks.value['completed_ids']);target=blocks.value['target_size']
+                    done=blocks.status()['block_completed'];target=blocks.value['target_size']
                     self._reference_task.update(name=source['name'],total=target,remaining=target-done,position=done+1)
         if not blocks and getattr(self,'_reference_manual_id',None):
             self._reference_task['remaining']=sum(v['path'].relative_to(self._reference_project).as_posix() not in set(self._reference_completed) for v in entries)
 
     def reference_refresh(self,force=False):
+        if getattr(self,'_reference_transaction',None) is not None:
+            raise ValueError('参考图切换恢复未确认，请保留本段并联系维护人员')
         if getattr(self,'reference_catalog',None) is None or getattr(self,'_reference_preferences',None) is None:
             return False
         current=self._reference_snapshot
@@ -450,6 +640,7 @@ class ReferenceControlsMixin:
         self._reference_reserved=_reserved_paths(self._reference_project,self._reference_ledger)
         self.refresh_reference_histories()
         identifier=current['list_id'] if self._reference_cli_image and current else self._reference_preferences['selected_list_id']
+        if getattr(self,'_reference_task_blocks',None) is None:self._configure_text_blocks(identifier)
         try:snapshot=self.reference_catalog.freeze_list(identifier,self.reference_catalog.revision,include_completed=True)
         except CatalogError as error:
             if error.code not in ('hidden_list','deleted','not_found'):raise
@@ -484,6 +675,8 @@ class ReferenceControlsMixin:
                 except (ValueError,OSError):pass
 
     def select_reference_list(self,value):
+        if getattr(self,'_reference_transaction',None) is not None:
+            raise ValueError('参考图事务恢复未确认，请保留本段并联系维护人员')
         blocks=getattr(self,'_reference_task_blocks',None)
         requested=value.get('list_id') if isinstance(value,dict) else None
         target=self.reference_catalog._load().get('lists',{}).get(requested,{}) if self.reference_catalog is not None else {}
@@ -513,6 +706,7 @@ class ReferenceControlsMixin:
         self.state_write()
 
     def reference_begin_preparation(self):
+        self._reference_mutation_started()
         if self._reference_active is not None:
             raise ValueError('当前参考图仍在准备或采集中，请结束本段后再抽取')
         self.reference_refresh()
@@ -598,6 +792,7 @@ class ReferenceControlsMixin:
             except Exception as error:self.reference_error='参考图锁未能解除，请联系维护人员：'+str(error)
 
     def reference_prepare_failed(self,error,path=None):
+        self._reference_mutation_started()
         active=getattr(self,'_reference_active',None)
         if active:self._reference_retry=active['entry']
         self.reference_release_pin();self._reference_active=None
@@ -610,12 +805,16 @@ class ReferenceControlsMixin:
         except Exception:pass  # Advisory voice must not turn a recoverable prepare failure fatal.
 
     def reference_reaped(self):
+        self._reference_mutation_started()
         active=getattr(self,'_reference_active',None)
         outcome=getattr(self,'_reference_reap_outcome',None);self._reference_reap_outcome=None
         if outcome in ('success','pending_qc'):self._reference_cli_force=False;self._reference_manual_id=None
         if active and outcome=='success':
             blocks=getattr(self,'_reference_task_blocks',None)
             if blocks:blocks.success(active['entry'])
+        elif active and outcome=='pending_qc':
+            blocks=getattr(self,'_reference_task_blocks',None)
+            if blocks:blocks.defer(active['entry'])
         if active:
             self._reference_retry=None if outcome in ('success','pending_qc') or getattr(self,'quit',False) else active['entry']
         self.reference_release_pin();self._reference_active=None
@@ -623,6 +822,7 @@ class ReferenceControlsMixin:
         except (OSError,ValueError,RecursionError) as error:self.reference_error='参考图进度暂未更新：'+str(error)
 
     def reference_close(self):
+        self._reference_mutation_started()
         manager=getattr(self,'usb_task_importer',None)
         if manager is not None:manager.close()
         worker=getattr(self,'worker',None)

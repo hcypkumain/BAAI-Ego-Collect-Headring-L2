@@ -74,8 +74,15 @@
   legacy.append($('review-card'),$('device-rows').closest('.card'),$('phone-install'),$('phone-awake'));
   pages.overview.innerHTML='<section class="card phone-home-state"><div><h2 id="phone-home-title">等待 Pi 状态</h2><p id="phone-home-detail">连接后显示真实采集流程</p></div><div class="phone-home-entries"></div></section><div id="phone-native-metrics"></div><div id="phone-device-list"></div><div id="phone-overview-actions" class="actions"></div><p id="phone-home-hint" class="phone-hint"></p>';
   const taskCard=document.createElement('section');taskCard.className='card phone-task-card';taskCard.innerHTML='<div class="phone-task-heading"><small>当前采集任务</small><span>每段随机抽图</span></div><b id="phone-task-name">等待任务列表</b><div class="phone-task-progress"><progress id="phone-task-progress" aria-label="参考图完成进度"></progress><small id="phone-task-counts"></small></div><p id="phone-next-step" class="phone-hint"></p>';
+  const blockInfo=document.createElement('p');blockInfo.className='phone-hint';blockInfo.id='phone-block-info';taskCard.append(blockInfo,button('任务块设置',()=>openSettings()));
   const profileCard=document.createElement('section');profileCard.className='card';profileCard.innerHTML='<h3>采集版本</h3><div class="actions"><button id="phone-mode-emg" data-action="collection_mode">肌电</button><button id="phone-mode-eeg" data-action="collection_mode">脑电</button></div><p id="phone-mode-note" class="phone-hint"></p>';pages.overview.prepend(profileCard);
-  for(const mode of ['emg','eeg'])$('phone-mode-'+mode).onclick=()=>options.action('collection_mode',mode);
+  function requestCollectionMode(mode){
+   if(!['emg','eeg'].includes(mode))return false;
+   const label=mode==='eeg'?'脑电版（含肌电）':'肌电版';
+   if(global.confirm('是否确认切换到“'+label+'”？\n切换会重新加载采集界面，取消将保持当前模式。')!==true)return false;
+   return options.action('collection_mode',mode);
+  }
+  for(const mode of ['emg','eeg'])$('phone-mode-'+mode).onclick=()=>requestCollectionMode(mode);
   pages.overview.insertBefore(taskCard,$('phone-native-metrics'));
   const dailyCard=document.createElement('section');dailyCard.className='card phone-task-card';dailyCard.id='phone-daily-collection';dailyCard.innerHTML='<small id="phone-daily-label">今日已保存采集时长（北京时间）</small><b id="phone-daily-duration">正在读取…</b><p id="phone-daily-detail" class="phone-hint">确认保存后累计，待主机质检单独显示</p>';
   const dailyExport=button('导出今日汇总（TXT）',()=>downloadDaily().catch(error=>{text($('phone-daily-detail'),error.message);}));dailyExport.id='phone-daily-export';dailyCard.append(dailyExport);pages.overview.insertBefore(dailyCard,$('phone-native-metrics'));
@@ -281,13 +288,16 @@
    text($('phone-home-detail'),['finalizing','confirm_stop','recording'].includes(value.state)?truth.detail:deviceHint);
    const devices=value.devices||[],chosen=value.selected_devices||[];
    const task=value.task_list||{};let total=task.total,remaining=task.remaining;
+   const block=value.task_block_settings,fmt=n=>n==='all'?'全部（历史设置）':Number.isSafeInteger(n)&&n>=1?String(n):'未知';
+   const savedBasis=task.block_count_basis==='saved';
+   text(blockInfo,value.collection_mode==='eeg'&&block?.enabled===true?'本块目标：'+fmt(block.current_target)+' · 下块配置：'+fmt(block.configured_size)+(savedBasis?' · 已保存：'+(task.block_saved??0)+'；保存满 N 条即轮换，不等待质检回执。':' · 待 QC：'+(Number.isSafeInteger(task.block_pending_qc)?task.block_pending_qc:'未知'))+' · 恢复：'+(task.recovery_required===true?'需要处理':task.recovery_required===false?'无需处理':'未知')+'；新配置仅下块生效。':'任务块状态等待同步或当前不可用。');
    if(task.manual_task_switch&&Number.isSafeInteger(task.block_size)&&Number.isSafeInteger(task.block_completed)){total=task.block_size;remaining=Math.max(0,total-task.block_completed);}
    const referenceHint=$('phone-reference-status')?.querySelector('small');if(referenceHint&&task.selection_scope==='single_list')referenceHint.textContent='ERROR 可保留但不算成功；WARN 不判失败。仅在当前列表内随机抽取，完成后手动切换；重采保持同一张。';
    text($('phone-task-name'),task.name||'请先选择参考图列表');
    $('phone-task-name').title=(task.tags||[]).join(' · ');
    const countsValid=Number.isSafeInteger(total)&&Number.isSafeInteger(remaining)&&total>=0&&remaining>=0&&remaining<=total;
    if(task.round_robin){
-    text($('phone-task-counts'),task.block_task_id?'本组成功 '+task.block_completed+'/'+task.block_size+'；当前任务累计 '+task.task_completed+'/'+task.task_target:'下一段切换任务');
+    text($('phone-task-counts'),task.block_task_id?'本组已保存 '+task.block_completed+'/'+task.block_size+'；当前任务已保存 '+task.task_completed+'/'+task.task_target:'下一段切换任务');
    }else text($('phone-task-counts'),countsValid?'已完成 '+(total-remaining)+' · 剩余 '+remaining+' / '+total:'等待 Pi 返回进度');
    const taskProgress=$('phone-task-progress');taskProgress.max=countsValid?Math.max(1,total):1;if(countsValid)taskProgress.value=total-remaining;else taskProgress.removeAttribute('value');
    const nextStep=value.state!=='device_confirm'&&value.reference_image_state?.manual&&value.reference_image_state.collected&&!value.worker?.pid?'已手选已采集图，可点击“重采所选图”主动重采。':value.state==='device_confirm'?'下一步：核对已连接设备，再点击“确认设备，继续”。':value.state==='confirm_stop'?'下一步：确认保存或重采；保存确认完成后才会换下一张图。':value.state==='exhausted'||countsValid&&remaining===0&&!value.worker?.pid?'当前列表已无待采集图，请上传新图或切换任务列表。':value.state==='failed_wait'?'下一步：查看错误提示，处理后点击“准备本段”重试原图。':value.state==='idle'?'下一步：点击“'+global.piPrepareLabel(value)+'”，抽取并准备任务；此时尚未正式录制。':value.state.startsWith('wrist_')||['emg_manual','emg_pairing','preparing','ready'].includes(value.state)?'下一步：进入“采集步骤”，按当前提示继续。':value.state==='finalizing'?'正在收尾与质量检查，请等待 Pi 返回保存结果。':'按当前采集步骤继续，页面状态由 Pi 确认。';

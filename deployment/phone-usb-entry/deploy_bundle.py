@@ -52,6 +52,9 @@ def load_bundle(path,expected):
  for name,entry in m['files'].items():
   require(name.startswith(('release/','collector/','support/')) and sha(files[name])==entry['sha256'] and len(files[name])==entry['size'] and entry['mode'] in (0o644,0o755),'manifest mismatch: '+name)
  require(len([x for x in files if x.startswith('collector/orangepi/src/orangepi_collect/')])==123,'wrong collector source count')
+ require(m.get('task_rotation')=={'block_size':5,'count_basis':'saved','progress_version':4,'preserve_existing_n':True},'saved-count deployment policy missing')
+ source_index={name[len('collector/'):]:{'sha256':sha(data),'size':len(data)} for name,data in files.items() if name.startswith('collector/orangepi/')}
+ require(m.get('collector_source_sha256')==sha(json.dumps(source_index,sort_keys=True,separators=(',',':')).encode()),'collector source index mismatch')
  if 'source_preimages' in m:
   pre=m['source_preimages'];require(m.get('source_preimage_commit') in PREIMAGES and m.get('source_preimage_sha256')==PREIMAGES[m['source_preimage_commit']] and isinstance(pre,dict),'unknown migration source')
   require(set(pre)=={x[len('collector/'):] for x in files if x.startswith('collector/orangepi/')},'migration source membership mismatch')
@@ -199,7 +202,50 @@ def backup_and_write(target,data,mode,j,tx):
  j['files'].append(entry);save_journal(tx/'journal.json',j)
  write_atomic(target,data,entry['mode'] if entry['existed'] else mode,entry['uid'] if entry['existed'] else 0,entry['gid'] if entry['existed'] else 0);entry['phase']='written';save_journal(tx/'journal.json',j)
 
+def task_state_paths(root):
+ bases=[root]+[p for p in (root.parent/'profiles').glob('*/orangepi') if p.is_dir()]
+ paths=set()
+ for base in bases:
+  paths.update((base/'configs/task_block_policy.json',base/'runtime/reference_task_blocks.json'))
+  paths.update((base/'runtime/text_task_blocks').glob('blocks-temporary-*.json'))
+  catalog=base/'runtime/reference_library/catalog.json'
+  if catalog.is_file():
+   value=json.loads(safe_read(catalog))
+   for row in value.get('lists',{}).values():
+    namespace=row.get('text_task_namespace')
+    if isinstance(namespace,str) and re.fullmatch(r'temporary-[a-z0-9-]{1,80}',namespace):
+     paths.add(base/'runtime/text_task_blocks'/('blocks-'+namespace+'.json'))
+ require(len(paths)<=512,'too many task state files')
+ return sorted(paths)
+
+def backup_task_state(root,tx,j):
+ entries=[];total=0
+ for number,path in enumerate(task_state_paths(root)):
+  check_ancestors(path);require(not path.is_symlink(),'task state symlink')
+  entry={'target':str(path),'existed':path.exists()}
+  if entry['existed']:
+   data=safe_read(path,1_000_000);total+=len(data);require(total<=16_000_000,'task state backup too large')
+   info=path.stat();saved=tx/('task-state-%04d'%number);write_atomic(saved,data,0o600)
+   entry.update(backup=str(saved),sha256=sha(data),mode=stat.S_IMODE(info.st_mode),uid=info.st_uid,gid=info.st_gid)
+  entries.append(entry)
+ j['task_state_backup']=entries;save_journal(tx/'journal.json',j)
+
+def restore_task_state(tx,j):
+ for entry in j.get('task_state_backup',[]):
+  target=Path(entry['target']);check_ancestors(target);require(not target.is_symlink(),'task state target symlink')
+  if entry['existed']:
+   data=safe_read(Path(entry['backup']));require(sha(data)==entry['sha256'],'task state backup changed')
+   write_atomic(target,data,entry['mode'],entry['uid'],entry['gid'])
+  elif target.exists():target.unlink()
+
 def rollback(tx,j):
+ # After a completed deployment, never silently overwrite subsequent capture
+ # progress. Failed-install rollback still restores its pre-start migration data.
+ if j.get('status')=='complete' and j.get('task_state_backup'):
+  for entry in j['task_state_backup']:
+   path=Path(entry['target'])
+   require((entry['existed'] and path.is_file() and sha(safe_read(path))==entry['sha256'])
+           or (not entry['existed'] and not path.exists()),'task progress changed; coordinate state restore from transaction backup before rollback')
  # Refuse a rollback if any managed file was independently modified.
  for e in j['files']:
   if e['existed']:require(sha(safe_read(Path(e['backup'])))==e['old_sha'],'backup changed: '+e['target'])
@@ -216,6 +262,7 @@ def rollback(tx,j):
   if e['existed']:
    original=safe_read(Path(e['backup']));require(sha(original)==e['old_sha'],'backup changed: '+str(p));write_atomic(p,original,e['mode'],e['uid'],e['gid'])
   elif p.exists():p.unlink()
+ restore_task_state(tx,j)
  cmd(['/usr/bin/systemctl','daemon-reload'])
  for name,state in list(j.get('legacy_units',{}).items())+list(j.get('previous_units',{}).items()):
   if state['enabled']:cmd(['/usr/bin/systemctl','enable',name])
@@ -241,6 +288,7 @@ def apply(m,files,root,plan):
    try:
     if plan['collector_changes']:
      j['collector_stop_intent']=True;save_journal(tx/'journal.json',j);cmd(['/usr/bin/systemctl','stop','embodied-pi-collect.service'])
+     backup_task_state(root,tx,j)
     for name,state in list(plan['legacy_units'].items())+list(plan.get('previous_release',{}).get('units',{}).items()):
      if state['active'] or state['enabled']:cmd(['/usr/bin/systemctl','disable','--now',name])
     for name,data in files.items():

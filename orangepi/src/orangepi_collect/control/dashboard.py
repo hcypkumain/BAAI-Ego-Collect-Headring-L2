@@ -83,6 +83,11 @@ def preparation_state(state):
     return state in ('device_confirm','idle','failed_wait','exhausted','preparing','ready','emg_manual','emg_pairing') or state.startswith('wrist_')
 
 
+def task_block_privacy_safe(value):
+    return (isinstance(value,dict) and value.get('required') is False
+            and value.get('stop_confirmed') is True and value.get('phase')=='idle')
+
+
 def actions_for(state, impedance=None):
     actions=_base_actions_for(state,impedance)
     if preparation_state(state):actions=actions+['abandon']
@@ -150,6 +155,13 @@ def snapshot_actions(snapshot):
     if (snapshot.get('state') in ('device_confirm','idle','failed_wait','exhausted')
             and snapshot.get('task_list',{}).get('can_change') is True):
         actions=actions+['reference_list']
+    settings=snapshot.get('task_block_settings')
+    if (snapshot.get('state') in ('device_confirm','idle','failed_wait','exhausted')
+            and snapshot.get('collection_mode')=='eeg' and isinstance(snapshot.get('collection_context'),str)
+            and snapshot['collection_context'] and isinstance(settings,dict)
+            and settings.get('enabled') is True and settings.get('can_change') is True
+            and task_block_privacy_safe(snapshot.get('privacy'))):
+        actions.append('task_block_size')
     return actions
 
 
@@ -171,6 +183,7 @@ class Dashboard:
         self.phone_preview_slots=threading.BoundedSemaphore(1)
         self.phone_stream_slots=threading.BoundedSemaphore(3)
         self.lock=threading.Lock();self.snapshot={'state':'starting','revision':0,'devices':[],'selected_devices':[],'worker':{},'session':None,'image':None};self.pending=None;self.busy=False;self.result=None;self.prompting=False
+        self.active_task_block_job=None;self.task_block_size_result=None
         from cloud_uploads import UploadManager
         try:self.cloud_uploads=UploadManager(self.base,self.recording_store,self.display_state) if self.recording_store is not None else None
         except Exception:self.cloud_uploads=None
@@ -342,8 +355,10 @@ class Dashboard:
                     if not 0<length<=2048:raise ValueError('请求太大或为空')
                     data=json.loads(self.rfile.read(length))
                     if not isinstance(data,dict):raise ValueError('无效操作')
-                    owner.submit(data)
-                    self.send(202,{'accepted':True})
+                    if data.get('action')=='task_block_size' and supplied!=data.get('collection_context'):
+                        raise ValueError('采集模式已变化，请刷新页面后操作')
+                    receipt=owner.submit(data)
+                    self.send(202,{'accepted':True,'request':receipt} if receipt is not None else {'accepted':True})
                 except (ValueError,TypeError,json.JSONDecodeError) as exc:self.send(409,{'error':str(exc)})
         import startup_status
         startup_status.handoff()
@@ -387,6 +402,31 @@ class Dashboard:
                 raise ValueError('采集模式已变化，请刷新页面后操作')
             current_stop=(data.get('action')=='stop'
                 and self.privacy.target_matches(data.get('privacy_target'),allow_same_session=True))
+            is_block=data.get('action')=='task_block_size'
+            if is_block:
+                required={'action','value','revision','collection_context','policy_revision'}
+                if set(data) not in (required,required|{'client_request_id'}):raise ValueError('任务分组请求字段无效')
+                context=self.snapshot.get('collection_context');settings=self.snapshot.get('task_block_settings')
+                if (not isinstance(context,str) or not context or data.get('collection_context')!=context
+                        or self.snapshot.get('collection_mode')!='eeg'
+                        or type(data.get('revision')) is not int or type(self.snapshot.get('revision')) is not int
+                        or data['revision']!=self.snapshot['revision']):raise ValueError('采集模式或流程版本无效')
+                if (type(data.get('value')) is not int or not 1<=data['value']<=5000):raise ValueError('每任务参考图数应为 1 到 5000 的整数')
+                if (not isinstance(settings,dict) or settings.get('enabled') is not True or settings.get('can_change') is not True
+                        or not isinstance(data.get('policy_revision'),str)
+                        or re.fullmatch('[0-9a-f]{64}',data['policy_revision']) is None
+                        or data['policy_revision']!=settings.get('policy_revision')):raise ValueError('任务分组配置不可修改或已变化')
+                nonce=data.get('client_request_id')
+                if 'client_request_id' in data and (not isinstance(nonce,str) or re.fullmatch('[0-9a-f]{32}',nonce) is None):raise ValueError('请求标识无效')
+                if self.busy or self.pending is not None:raise ValueError('正在执行上一步，请等待')
+                try:privacy=self.privacy.snapshot()
+                except Exception:privacy=None
+                if not task_block_privacy_safe(privacy):raise ValueError('采集隐私状态未确认安全')
+                if nonce is not None:
+                    previous=getattr(self,'task_block_size_result',None)
+                    active=getattr(self,'active_task_block_job',None)
+                    if any(isinstance(v,dict) and v.get('client_request_id')==nonce for v in (self.pending,active,previous)):
+                        raise ValueError('请求标识已使用，请勿重复提交')
             if ((self.busy and not self.prompting) or self.pending is not None) and not current_stop:
                 raise ValueError('正在执行上一步，请等待')
             if data.get('action') not in ('collection_mode','stop') and data.get('revision')!=self.snapshot.get('revision'):
@@ -444,6 +484,12 @@ class Dashboard:
             if data['action']=='stop':
                 target=self.privacy.stopping(data.get('privacy_target'),allow_same_session=True)
                 data=dict(data,privacy_target=target)
+            if is_block:
+                receipt=dict(action='task_block_size',request_id=secrets.token_hex(16),client_request_id=data.get('client_request_id'),
+                    collection_context=context,collection_mode='eeg',submitted_revision=data['revision'],requested_value=data['value'])
+                self.pending=dict(data,request_id=receipt['request_id'],collection_mode='eeg',submitted_revision=data['revision'],requested_value=data['value'],client_request_id=data.get('client_request_id'))
+                self.result=None
+                return receipt
             self.pending=dict(data);self.result=None
 
     def set_prompting(self,active):
@@ -455,11 +501,46 @@ class Dashboard:
     def take(self):
         with self.lock:
             job=self.pending;self.pending=None
-            if job:self.busy=True;self.active_action=job.get('action')
+            if job:
+                self.busy=True;self.active_action=job.get('action')
+                self.active_task_block_job=copy.deepcopy(job) if job.get('action')=='task_block_size' else None
             return job
 
-    def complete(self,error=None):
-        with self.lock:self.busy=False;self.result={'ok':not error,'error':error,'time':time.time(),'action':getattr(self,'active_action',None)}
+    def execution_matches(self,job):
+        with self.lock:
+            active=getattr(self,'active_task_block_job',None)
+            return bool(isinstance(job,dict) and isinstance(active,dict) and job==active
+                and job.get('action')=='task_block_size' and self.busy and self.pending is None
+                and self.snapshot.get('collection_context')==active.get('collection_context')
+                and self.snapshot.get('collection_mode')==active.get('collection_mode')
+                and type(self.snapshot.get('revision')) is int and self.snapshot['revision']==active.get('submitted_revision'))
+
+    def complete(self,error=None,task_block_details=None,expected_job=None):
+        with self.lock:
+            active=getattr(self,'active_task_block_job',None)
+            if expected_job is not None and (not self.busy or not isinstance(active,dict) or active!=expected_job):
+                raise ValueError('任务分组执行身份已变化')
+            if task_block_details is not None and active is None:raise ValueError('没有活动的任务分组请求')
+            if task_block_details is not None and (not isinstance(task_block_details,dict)
+                    or set(task_block_details)!={'outcome','readback'}
+                    or task_block_details['outcome'] not in ('applied','rejected','write_failed','uncertain')):
+                raise ValueError('任务分组结果无效')
+            if task_block_details is not None:
+                readback=task_block_details['readback']
+                if readback is not None and (not isinstance(readback,dict) or set(readback)!={'configured_size','policy_revision'}
+                        or not (readback['configured_size']=='all' or (type(readback['configured_size']) is int and 1<=readback['configured_size']<=5000))
+                        or not isinstance(readback['policy_revision'],str) or re.fullmatch('[0-9a-f]{64}',readback['policy_revision']) is None):
+                    raise ValueError('任务分组配置读回无效')
+                if task_block_details['outcome']=='applied' and (error or readback is None or readback['configured_size']!=active['requested_value']):
+                    raise ValueError('任务分组成功结果缺少匹配的读回')
+            self.busy=False;self.result={'ok':not error,'error':error,'time':time.time(),'action':getattr(self,'active_action',None)}
+            if active is not None:
+                receipt={key:active[key] for key in ('action','request_id','client_request_id','collection_context','collection_mode','submitted_revision','requested_value')}
+                details=copy.deepcopy(task_block_details) if task_block_details is not None else {'outcome':'rejected','readback':None}
+                if task_block_details is None and not error:error='任务分组操作未返回确认结果'
+                receipt.update(ok=not error and details.get('outcome')=='applied',error=error,outcome=details.get('outcome','rejected'),readback=details.get('readback'))
+                self.task_block_size_result=receipt;self.result.update(copy.deepcopy(receipt))
+            self.active_task_block_job=None
 
     def display_state(self):
         """Authoritative display gate without disk, QC, media or impedance parsing."""
@@ -469,18 +550,22 @@ class Dashboard:
             reference=self.snapshot.get('reference_image_state') or {}
             value['reference_image_state']={'kind':reference.get('kind','image')} if isinstance(reference,dict) else {'kind':'image'}
             value['result']=copy.deepcopy(self.result)
+            value['task_block_size_result']=copy.deepcopy(getattr(self,'task_block_size_result',None))
             value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state')}
         value['privacy']=self.privacy.snapshot()
         return value
 
     def status(self,include_signals=None,include_review=True):
         with self.lock:
-            data=copy.deepcopy(self.snapshot);data.update(busy=self.busy or self.pending is not None,result=self.result)
+            data=copy.deepcopy(self.snapshot);data.update(busy=self.busy or self.pending is not None,result=copy.deepcopy(self.result),task_block_size_result=copy.deepcopy(getattr(self,'task_block_size_result',None)))
             review_root=self.review_root
             data['speaking']=self.prompting
+            data['privacy']=self.privacy.snapshot()
             data['actions']=[] if self.pending is not None or (self.busy and not self.prompting) else snapshot_actions(data)
+            if self.busy:data['actions']=[action for action in data['actions'] if action!='task_block_size']
         data['can_skip_speech']=data['speaking'] and bool(data['actions'])
         data['privacy']=self.privacy.snapshot()
+        if not task_block_privacy_safe(data['privacy']):data['actions']=[a for a in data['actions'] if a!='task_block_size']
         data['camera_check']=self.camera_checks.status()
         if isinstance(data.get('eeg_impedance'),dict):
             from impedance_quality import assess_impedance

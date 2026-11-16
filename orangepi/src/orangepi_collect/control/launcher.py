@@ -122,6 +122,9 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.stop_pending=False
         self.stop_requested_path=None
         self.warned_data_gap=False
+        self.scan_cleanup_pending=False
+        self.owner_reconcile_pending=False
+        self.pending_camera_owner=None
         if not smoke:ledger.migrate_legacy()
         self.init_references(selected_image,explicit_image=explicit_image)
         self.exit_code=0
@@ -181,6 +184,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             else:raise publish_error
 
     def switch_collection_mode(self,mode):
+        self._assert_controller_thread()
         from collection_profiles import provision
         if mode not in ('emg','eeg'):raise ValueError('请选择脑电或肌电')
         if mode==COLLECTION_MODE:return
@@ -347,6 +351,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         return ('必需设备未全部在线或没有有效数据：'+','.join(missing)) if missing else None
 
     def prepare(self):
+        self._reference_mutation_started()
         if getattr(self,'capture_registry_cleanup_pending',False):
             self.state='failed_wait';self.last_help=['设备退出已确认，但所有权记录清理未确认；为避免重复占用硬件，暂不能开始下一段，请联系维护人员。']
             try:self.state_write()
@@ -489,6 +494,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.poll()
 
     def begin(self):
+        from manual_reference import prepared_start_error
+        reference_error=prepared_start_error(self)
+        if reference_error:
+            self.owner_command_error=reference_error;self.voice.say(reference_error);return False
         dashboard=getattr(self,'dashboard',None)
         privacy=getattr(dashboard,'privacy',None)
         if privacy is None:
@@ -602,6 +611,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         contract_error=self.required_capture_error(self.worker_status())
         if contract_error:
             self.last_help=[contract_error+'。本次没有开始采集，请重新准备。'];self.state='ready';self.state_write();return False
+        from manual_reference import prepared_start_error
+        reference_error=prepared_start_error(self)
+        if reference_error:
+            self.owner_command_error=reference_error;self.last_help=[reference_error];self.state='ready';self.state_write();return False
         try:atomic_json(self.path/'screen_privacy_gate.json',privacy.commit())
         except Exception as error:
             if not privacy.committed:raise
@@ -677,6 +690,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.poll()
 
     def poll_discard(self):
+        self._assert_controller_thread()
         if self.worker.poll() is None:
             if time.monotonic()<=self.discard_deadline:return
             # A wedged owner must release every device before any file removal.
@@ -752,6 +766,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         return True
 
     def poll_stop(self):
+        self._assert_controller_thread()
         privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
         stop_pending=getattr(self,'stop_pending',False)
         if not stop_pending and (privacy is None or not privacy.committed):return
@@ -1158,6 +1173,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.voice.say(emg_calibration.PROMPTS['done'])
 
     def poll_hotplug(self):
+        self._assert_controller_thread()
         if self.state == 'emg_pairing':
             self.poll_emg_pairing()
             return
@@ -1254,6 +1270,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         except (OSError,ValueError,TypeError,RegistryError):return False
 
     def owner_finished(self):
+        self._assert_controller_thread()
         if getattr(self,'capture_owner_released',False):
             return self._persist_owner_exit_proof()
         run=getattr(self,'capture_owner_run',None)
@@ -1296,6 +1313,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         return self._persist_owner_exit_proof()
 
     def reap(self):
+        self._assert_controller_thread()
         self.worker.wait(timeout=2)
         if not self.owner_finished():return False
         try:
@@ -1309,6 +1327,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         return True
 
     def poll(self):
+        self._assert_controller_thread()
         tick=getattr(self.voice,'tick',None)
         if callable(tick):tick()
         if not self.worker:
@@ -1468,6 +1487,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.voice.say('本段已保存并完成检验。'+hint+'可以回看录像，或手动点击准备下一段。')
 
     def key(self,key):
+        self._assert_controller_thread()
         if self.state in ('usb_importing','usb_import_recovery') and key!='q':return False
         if key in ('a','b','c','d','enter','escape'):
             interrupt=getattr(self.voice,'interrupt',None)
@@ -1548,7 +1568,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                     self.reference_prepare_failed(error);return
                 self.prepare()
             elif self.state in ('preparing','ready'):
-                self.begin()
+                return self.begin()
             elif self.state=='recording':
                 self.stop_before_prompt()
             elif self.state=='confirm_stop':
@@ -1557,6 +1577,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.keyboard.discard()
 
     def stop_worker(self):
+        self._assert_controller_thread()
         interrupt=getattr(self.voice,'interrupt',None)
         if callable(interrupt):interrupt()
         if self.quit:self.voice.silent=True
@@ -1585,6 +1606,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.reap()
 
     def run(self):
+        self._assert_controller_thread()
         signal.signal(signal.SIGTERM,lambda *a:setattr(self,'quit',True))
         signal.signal(signal.SIGINT,lambda *a:setattr(self,'quit',True))
         try:

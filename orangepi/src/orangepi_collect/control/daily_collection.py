@@ -101,6 +101,7 @@ class DailyCollection:
         self.error = None
         self.lock = threading.RLock()
         self.refresh_lock = threading.Lock()
+        self.refresh_generation = 0
         self.export_lock = threading.Lock()
         self.ledger_cache = {}
         self.file_cache = {}
@@ -125,12 +126,21 @@ class DailyCollection:
                     self.error = str(error)[:200]
             self.stop.wait(5)
 
-    def refresh(self):
+    def refresh(self, wait=False):
         if self.busy(refresh=True):
             return False
-        if not self.refresh_lock.acquire(False):
+        with self.lock:
+            generation = self.refresh_generation
+        # Exports can join a running refresh instead of failing immediately.
+        # Background refreshes remain non-blocking; bound request latency.
+        if not self.refresh_lock.acquire(timeout=20 if wait else 0):
             return False
         try:
+            if self.busy(refresh=True):
+                return False
+            with self.lock:
+                if wait and self.refresh_generation != generation:
+                    return True
             _, volume = self.store.roots()
             with self.lock:
                 records = copy.deepcopy(self.records)
@@ -215,6 +225,7 @@ class DailyCollection:
                 if changed:
                     atomic_json(self.path, dict(version=1, timezone='Asia/Shanghai', updated_at=updated, records=records))
                 self.records, self.updated, self.error = records, updated, None
+                self.refresh_generation += 1
             return True
         finally:
             self.refresh_lock.release()
@@ -301,8 +312,10 @@ class DailyCollection:
     def _export(self, day='today'):
         if self.busy():
             raise ValueError('请结束采集准备或录制后再导出每日汇总')
-        if not self.refresh():
+        if not self.refresh(wait=True):
             raise ValueError('每日统计正在更新，请稍后重试')
+        if self.busy():
+            raise ValueError('请结束采集准备或录制后再导出每日汇总')
         day = self.snapshot(day)['day']
         _, volume = self.store.roots()
         directory = volume / 'delivery/daily-summaries'

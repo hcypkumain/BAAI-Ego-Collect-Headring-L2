@@ -765,9 +765,10 @@ class ReferenceCatalog:
             value = self._load()
             if value['revision'] != expected_revision:
                 raise CatalogError('图库已更新，请刷新列表后再选择', 'revision_conflict', 409)
-            if self.task_block_policy and list_id not in ['all','pool']+self.task_block_policy['list_ids']:
-                raise CatalogError('此列表不在本机采集任务范围内','sampling_scope',409)
             item = self._list(value, list_id)
+            if (self.task_block_policy and list_id not in ['all','pool']+self.task_block_policy['list_ids']
+                    and not item.get('text_task_list_ids')):
+                raise CatalogError('此列表不在本机采集任务范围内','sampling_scope',409)
             if item.get('text_task_namespace') and not item.get('text_task_list_ids'):
                 raise CatalogError('请从临时脑电任务池进入，任务按每五次轮换','text_pool_required',409)
             if item.get('hidden', False):

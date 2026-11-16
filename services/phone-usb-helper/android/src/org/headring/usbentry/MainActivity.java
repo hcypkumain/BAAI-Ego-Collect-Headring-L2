@@ -2,88 +2,244 @@ package org.headring.usbentry;
 
 import android.Manifest;
 import android.app.Activity;
-import android.content.Context;
-import android.content.Intent;
+import android.content.*;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.Bundle;
-import android.os.Handler;
+import android.os.*;
 import android.util.Base64;
-import android.view.View;
-import android.webkit.CookieManager;
-import android.webkit.JavascriptInterface;
-import android.webkit.ValueCallback;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebResourceResponse;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
+import android.view.*;
+import android.webkit.*;
 import android.widget.*;
 import java.io.*;
 import java.util.UUID;
 
 public final class MainActivity extends Activity {
- private static final String HOME="http://localhost:8765/phone";
+ private static final String HOME="http://localhost:"+EntryAddress.PORT+"/phone";
  private static final int PICK=101,SAVE=102;
  private final Handler handler=new Handler();
- private TextView status; private LinearLayout settings; private WebView web; private ValueCallback<Uri[]> chooser;
- private File pendingBlob; private String pendingName,pendingMime; private FileOutputStream blobStream; private long blobExpected,blobWritten,blobSerial;
- private String lastDevice=""; private boolean firstLoad=true; private volatile String pageToken=""; private final SaveBridge bridge=new SaveBridge();
- public void onCreate(Bundle b){super.onCreate(b);
+ private TextView status;
+ private TextView connectionTitle,connectionNote,deviceSummary,pendingName;
+ private ScrollView panel;
+ private LinearLayout nativePane,advancedSection,exportSection;
+ private Button choose,scan,savePending,enter,back;
+ private CheckBox awake;
+ private EditText manualAddress;
+ private int buttonMode=-1;
+ private android.app.AlertDialog candidateDialog;
+ private UiSession session;
+ private boolean resumed;
+
+ /** Retain the actual WebView and its file callback, not an old Activity. */
+ private static final class UiSession {
+  final MutableContextWrapper context;
+  final ExportStore exports;
+  final Handler handler=new Handler(Looper.getMainLooper());
+  final PageRecovery recovery=new PageRecovery();
+  final WebTheme theme;
+  WebView web;
+  ValueCallback<Uri[]> chooser;
+  String chooserDevice="",lastDevice="";
+  volatile String token="";
+  volatile MainActivity activity;
+  long connectionRevision=-1,navigation,blobSerial;
+  String uiNonce="";
+  long uiNavigation=-1;
+  boolean nativeRequested;
+  boolean picking;
+  volatile boolean saving;
+  UiSession(Activity owner)throws IOException{context=new MutableContextWrapper(owner);exports=new ExportStore(owner.getFilesDir());WebTheme loaded;try{loaded=new WebTheme(owner);}catch(IOException e){loaded=null;}theme=loaded;}
+  void toast(String text){handler.post(()->{MainActivity a=activity;if(a!=null)Toast.makeText(a,text,Toast.LENGTH_LONG).show();});}
+ }
+ public void onCreate(Bundle saved){
+  super.onCreate(saved);
+  Object retained=getLastNonConfigurationInstance();
+  try{session=retained instanceof UiSession?(UiSession)retained:new UiSession(this);}
+  catch(IOException e){Toast.makeText(this,"无法准备导出目录，请检查手机剩余空间",Toast.LENGTH_LONG).show();finish();return;}
+  session.context.setBaseContext(this);session.activity=this;
   if(android.os.Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},21);
-  LinearLayout root=new LinearLayout(this);root.setOrientation(1);root.setFitsSystemWindows(true);
-  LinearLayout bar=new LinearLayout(this);Button home=new Button(this);home.setText("采集页面");Button setup=new Button(this);setup.setText("连接设置");bar.addView(home,new LinearLayout.LayoutParams(0,-2,1));bar.addView(setup,new LinearLayout.LayoutParams(0,-2,1));root.addView(bar);
-  ScrollView panel=new ScrollView(this);settings=new LinearLayout(this);settings.setPadding(28,16,28,20);settings.setOrientation(1);
-  TextView help=new TextView(this);help.setText("连接头环并打开 USB 网络共享。助手会自动发现目标设备。若仍显示等待，可输入设备当前地址进行一次连接和接口学习。请保持助手通知运行。");settings.addView(help);
-  EditText ip=new EditText(this);ip.setSingleLine(true);ip.setHint("设备当前地址（仅首次诊断）");settings.addView(ip);
-  Button test=new Button(this);test.setText("连接并记住USB接口");settings.addView(test);test.setOnClickListener(v->{Intent i=new Intent(this,EntryService.class);i.setAction("manual_probe");i.putExtra("ip",ip.getText().toString().trim());startForegroundService(i);});
-  Button scan=new Button(this);scan.setText("搜索头环");settings.addView(scan);scan.setOnClickListener(v->{Intent i=new Intent(this,EntryService.class);i.setAction("scan_candidates");startForegroundService(i);});
-  Button choose=new Button(this);choose.setText("选择已发现的头环");settings.addView(choose);choose.setOnClickListener(v->{java.util.List<Endpoint> entries=Diagnostics.candidates;if(entries.isEmpty()){Toast.makeText(this,"请先搜索头环",Toast.LENGTH_SHORT).show();return;}String[] labels=new String[entries.size()];for(int k=0;k<labels.length;k++)labels[k]=entries.get(k).deviceId+" ("+entries.get(k).address.getHostAddress()+")";new android.app.AlertDialog.Builder(this).setTitle("选择头环").setItems(labels,(dialog,which)->{Endpoint e=entries.get(which);Intent i=new Intent(this,EntryService.class);i.setAction("select_candidate");i.putExtra("key",e.deviceId+"@"+e.address.getHostAddress());startForegroundService(i);}).setNegativeButton("取消",null).show();});
-  status=new TextView(this);status.setTextSize(13);status.setTextIsSelectable(true);settings.addView(status);panel.addView(settings);root.addView(panel);
-  web=new WebView(this);web.getSettings().setJavaScriptEnabled(true);web.getSettings().setDomStorageEnabled(true);web.getSettings().setMediaPlaybackRequiresUserGesture(false);web.getSettings().setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW);web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(true);web.getSettings().setAllowFileAccessFromFileURLs(false);web.getSettings().setAllowUniversalAccessFromFileURLs(false);CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(web,false);web.addJavascriptInterface(bridge,"HeadRingSave");
+  LinearLayout root=UiTheme.column(this);root.setBackgroundColor(android.graphics.Color.BLACK);
+  root.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets.consumeSystemWindowInsets();});
+  createConnectionPage(root,saved);
+  if(session.web==null){session.web=new WebView(session.context);configureSettings(session.web);}
+  WebView web=session.web;ViewParent previous=web.getParent();if(previous instanceof ViewGroup)((ViewGroup)previous).removeView(web);
+  bindWeb(web);web.setBackgroundColor(android.graphics.Color.BLACK);root.addView(web,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);
+  boolean nativeOpen=saved!=null&&saved.getBoolean("settings_open",false)||web.getUrl()==null;
+  nativePane.setVisibility(nativeOpen?View.VISIBLE:View.GONE);web.setVisibility(nativeOpen?View.GONE:View.VISIBLE);root.requestApplyInsets();
+  if(retained==null&&saved!=null)web.restoreState(saved);
+  startForegroundService(new Intent(this,EntryService.class));refresh();
+ }
+ private void createConnectionPage(LinearLayout root,Bundle saved){
+  nativePane=UiTheme.column(this);nativePane.setBackgroundColor(UiTheme.BACKGROUND);root.addView(nativePane,new LinearLayout.LayoutParams(-1,0,1));
+  LinearLayout toolbar=new LinearLayout(this);toolbar.setGravity(Gravity.CENTER_VERTICAL);toolbar.setPadding(UiTheme.dp(this,12),UiTheme.dp(this,4),UiTheme.dp(this,12),UiTheme.dp(this,4));toolbar.setMinimumHeight(UiTheme.dp(this,56));
+  back=new Button(this);back.setText("返回采集");UiTheme.button(back,false);back.setCompoundDrawables(UiTheme.icon(this,true,UiTheme.PRIMARY),null,null,null);back.setCompoundDrawablePadding(UiTheme.dp(this,6));back.setOnClickListener(v->openCollection());toolbar.addView(back,new LinearLayout.LayoutParams(-2,-2));
+  TextView title=UiTheme.text(this,"USB 连接管理",18,UiTheme.INK,true);title.setPadding(UiTheme.dp(this,12),0,0,0);toolbar.addView(title,new LinearLayout.LayoutParams(0,-2,1));nativePane.addView(toolbar,new LinearLayout.LayoutParams(-1,-2));
+  panel=new ScrollView(this);panel.setFillViewport(true);panel.setClipToPadding(false);nativePane.addView(panel,new LinearLayout.LayoutParams(-1,0,1));
+  LinearLayout settings=UiTheme.column(this);settings.setPadding(UiTheme.dp(this,20),UiTheme.dp(this,18),UiTheme.dp(this,20),UiTheme.dp(this,32));panel.addView(settings);
+  LinearLayout summary=UiTheme.surface(this);
+  connectionTitle=UiTheme.text(this,"等待连接头环",24,UiTheme.INK,true);summary.addView(connectionTitle);UiTheme.gap(summary,10);
+  connectionNote=UiTheme.text(this,"连接 USB 数据线，并在手机系统中开启 USB 网络共享。",16,UiTheme.MUTED,false);summary.addView(connectionNote);UiTheme.gap(summary,16);
+  deviceSummary=UiTheme.text(this,"尚未选择头环",16,UiTheme.PRIMARY,true);deviceSummary.setCompoundDrawables(UiTheme.icon(this,false,UiTheme.PRIMARY),null,null,null);deviceSummary.setCompoundDrawablePadding(UiTheme.dp(this,10));summary.addView(deviceSummary);settings.addView(summary,new LinearLayout.LayoutParams(-1,-2));UiTheme.gap(settings,20);
+  scan=new Button(this);scan.setText("搜索头环");UiTheme.button(scan,true);scan.setOnClickListener(v->search());settings.addView(scan,new LinearLayout.LayoutParams(-1,-2));UiTheme.gap(settings,10);
+  choose=new Button(this);choose.setText("选择已验证的头环");UiTheme.button(choose,false);choose.setOnClickListener(v->chooseDevice());settings.addView(choose,new LinearLayout.LayoutParams(-1,-2));UiTheme.gap(settings,10);
+  enter=new Button(this);enter.setText("进入采集工作台");UiTheme.button(enter,true);enter.setOnClickListener(v->openCollection());settings.addView(enter,new LinearLayout.LayoutParams(-1,-2));UiTheme.gap(settings,24);
+  TextView help=UiTheme.text(this,"首次连接",16,UiTheme.INK,true);settings.addView(help);UiTheme.gap(settings,8);
+  settings.addView(UiTheme.text(this,"连接 USB 数据线后，在手机系统设置中开启 USB 网络共享。搜索过程中，已验证的头环即可选择。",15,UiTheme.MUTED,false));UiTheme.gap(settings,24);
+  LinearLayout preference=UiTheme.surface(this);awake=new CheckBox(this);awake.setText("前台保持亮屏");awake.setTextSize(16);awake.setTextColor(UiTheme.INK);awake.setButtonTintList(android.content.res.ColorStateList.valueOf(UiTheme.PRIMARY));awake.setMinHeight(UiTheme.dp(this,48));awake.setChecked(getSharedPreferences("usb",MODE_PRIVATE).getBoolean("keep_awake",true));preference.addView(awake);
+  preference.addView(UiTheme.text(this,"仅在 App 前台生效；切到后台后会释放。",14,UiTheme.MUTED,false));awake.setOnCheckedChangeListener((button,checked)->{getSharedPreferences("usb",MODE_PRIVATE).edit().putBoolean("keep_awake",checked).apply();updateAwake();});settings.addView(preference,new LinearLayout.LayoutParams(-1,-2));UiTheme.gap(settings,16);
+  exportSection=UiTheme.surface(this);exportSection.addView(UiTheme.text(this,"有文件等待保存",16,UiTheme.INK,true));UiTheme.gap(exportSection,8);pendingName=UiTheme.text(this,"",14,UiTheme.MUTED,false);exportSection.addView(pendingName);UiTheme.gap(exportSection,12);
+  savePending=new Button(this);savePending.setText("继续保存文件");UiTheme.button(savePending,false);savePending.setOnClickListener(v->promptSave());exportSection.addView(savePending,new LinearLayout.LayoutParams(-1,-2));settings.addView(exportSection,new LinearLayout.LayoutParams(-1,-2));UiTheme.gap(settings,16);
+  Button advanced=new Button(this);advanced.setText("高级连接与诊断");UiTheme.button(advanced,false);advanced.setContentDescription("展开或收起高级连接与诊断");settings.addView(advanced,new LinearLayout.LayoutParams(-1,-2));
+  advancedSection=UiTheme.column(this);advancedSection.setVisibility(saved!=null&&saved.getBoolean("advanced_open",false)?View.VISIBLE:View.GONE);UiTheme.gap(advancedSection,16);
+  final EditText ip=new EditText(this);manualAddress=ip;ip.setSingleLine(true);ip.setHint("设备当前 USB 地址");ip.setTextSize(16);ip.setTextColor(UiTheme.INK);ip.setHintTextColor(UiTheme.MUTED);ip.setMinHeight(UiTheme.dp(this,52));ip.setPadding(UiTheme.dp(this,14),UiTheme.dp(this,12),UiTheme.dp(this,14),UiTheme.dp(this,12));ip.setBackground(UiTheme.background(this,UiTheme.SURFACE,UiTheme.LINE,12));ip.setInputType(android.text.InputType.TYPE_CLASS_PHONE);
+  if(saved!=null)ip.setText(saved.getString("manual_ip",""));advancedSection.addView(ip,new LinearLayout.LayoutParams(-1,-2));UiTheme.gap(advancedSection,10);
+  Button manual=new Button(this);manual.setText("连接并记住 USB 接口");UiTheme.button(manual,false);advancedSection.addView(manual,new LinearLayout.LayoutParams(-1,-2));manual.setOnClickListener(v->{session.nativeRequested=false;Intent i=new Intent(this,EntryService.class);i.setAction("manual_probe");i.putExtra("ip",ip.getText().toString().trim());startForegroundService(i);});UiTheme.gap(advancedSection,16);
+  status=UiTheme.text(this,"",14,UiTheme.MUTED,false);status.setTextIsSelectable(true);advancedSection.addView(status);settings.addView(advancedSection,new LinearLayout.LayoutParams(-1,-2));advanced.setOnClickListener(v->advancedSection.setVisibility(advancedSection.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE));
+ }
+ private void showConnections(boolean requested){if(requested)session.nativeRequested=true;nativePane.setVisibility(View.VISIBLE);session.web.setVisibility(View.GONE);}
+ private void openCollection(){
+  if(!Diagnostics.snapshot().ready()){session.toast(Diagnostics.snapshot().message);return;}
+  session.nativeRequested=false;nativePane.setVisibility(View.GONE);session.web.setVisibility(View.VISIBLE);
+  if(session.recovery.failed()||session.web.getUrl()==null||!sameOrigin(session.web.getUrl(),desiredHome())){session.recovery.manual();loadHome();}
+ }
+ private void applyTheme(WebView view,String url){
+  if(session.theme==null||view!=session.web||!url.equals(view.getUrl())||!allowed(Uri.parse(url))||!WebTheme.page(Uri.parse(url)))return;
+  Uri uri=Uri.parse(url);String origin=uri.getScheme()+"://"+uri.getHost()+":"+uri.getPort()+uri.getPath();session.uiNavigation=session.navigation;
+  view.evaluateJavascript(session.theme.injection(session.uiNonce,origin),null);
+ }
+ private void configureSettings(WebView web){
+  WebSettings s=web.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setMediaPlaybackRequiresUserGesture(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);s.setAllowFileAccess(false);s.setAllowContentAccess(true);s.setAllowFileAccessFromFileURLs(false);s.setAllowUniversalAccessFromFileURLs(false);
+  CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(web,false);
+ }
+ private void bindWeb(WebView web){
+  web.removeJavascriptInterface("HeadRingSave");web.addJavascriptInterface(new SaveBridge(session),"HeadRingSave");
   web.setWebViewClient(new WebViewClient(){
-   public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest req){if(local(req.getUrl()))return false;Toast.makeText(MainActivity.this,"外部链接无法在离线采集页打开",Toast.LENGTH_SHORT).show();return true;}
-   public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest req){Uri u=req.getUrl();String scheme=u.getScheme();if(("http".equalsIgnoreCase(scheme)||"https".equalsIgnoreCase(scheme))&&!local(u))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}
-   public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){pageToken=UUID.randomUUID().toString();bridge.abortActive();}
-   public void onPageFinished(WebView v,String url){if(local(Uri.parse(url))&&url.equals(v.getUrl()))v.evaluateJavascript(BLOB_HOOK.replace("__TOKEN__",pageToken),null);}
-   public void onReceivedError(WebView v,WebResourceRequest req,android.webkit.WebResourceError err){if(req.isForMainFrame()&&local(req.getUrl())&&firstLoad){firstLoad=false;handler.postDelayed(()->v.loadUrl(desiredHome()),1500);}}
+   public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest request){
+    Uri uri=request.getUrl();
+    if(WebTheme.CONNECTION_PATH.equals(uri.getPath())){
+     if(request.isForMainFrame()&&request.hasGesture()&&allowed(uri)&&v.getUrl()!=null&&allowed(Uri.parse(v.getUrl()))&&WebTheme.page(Uri.parse(v.getUrl()))&&session.uiNavigation==session.navigation&&!session.uiNonce.isEmpty()&&session.uiNonce.equals(uri.getQueryParameter("nonce"))&&uri.getQueryParameterNames().size()==1&&uri.getFragment()==null)showConnections(true);
+     return true;
+    }
+    if(allowed(uri))return false;session.toast("设备已变化或链接不属于当前头环");return true;
+   }
+   public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){Uri u=request.getUrl();String scheme=u.getScheme();if(("http".equalsIgnoreCase(scheme)||"https".equalsIgnoreCase(scheme))&&!allowed(u))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}
+   public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){session.navigation++;session.token=UUID.randomUUID().toString();session.uiNonce=UUID.randomUUID().toString();session.uiNavigation=-1;session.exports.abortActive();session.recovery.started();}
+   public void onPageCommitVisible(WebView v,String url){applyTheme(v,url);}
+   public void onPageFinished(WebView v,String url){if(allowed(Uri.parse(url))&&url.equals(v.getUrl())){session.recovery.success();v.evaluateJavascript(BLOB_HOOK.replace("__TOKEN__",session.token),null);applyTheme(v,url);}}
+   public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){if(request.isForMainFrame()&&"GET".equals(request.getMethod())&&allowed(request.getUrl()))pageFailed();}
+   public void onReceivedHttpError(WebView v,WebResourceRequest request,WebResourceResponse response){if(request.isForMainFrame()&&"GET".equals(request.getMethod())&&allowed(request.getUrl())&&response.getStatusCode()>=400)pageFailed();}
   });
   web.setWebChromeClient(new WebChromeClient(){
-   public boolean onShowFileChooser(WebView v,ValueCallback<Uri[]> cb,FileChooserParams params){if(chooser!=null)chooser.onReceiveValue(null);chooser=cb;try{startActivityForResult(params.createIntent(),PICK);return true;}catch(Exception e){chooser=null;cb.onReceiveValue(null);Toast.makeText(MainActivity.this,"无法打开系统文件选择器",Toast.LENGTH_LONG).show();return true;}}
+   public boolean onShowFileChooser(WebView view,ValueCallback<Uri[]> callback,FileChooserParams params){
+    if(session.chooser!=null)session.chooser.onReceiveValue(null);session.chooser=callback;session.chooserDevice=Diagnostics.snapshot().current();session.picking=true;
+    try{startActivityForResult(params.createIntent(),PICK);return true;}catch(Exception e){session.chooser=null;session.picking=false;callback.onReceiveValue(null);session.toast("无法打开系统文件选择器");return true;}
+   }
   });
   web.setDownloadListener((url,agent,disposition,mime,length)->{
-   if(!local(Uri.parse(url))){Toast.makeText(this,"无法下载外部链接",Toast.LENGTH_SHORT).show();return;}
-   String name=android.webkit.URLUtil.guessFileName(url,disposition,mime);
-   String js="(async function(){try{let r=await fetch("+org.json.JSONObject.quote(url)+",{credentials:'same-origin'});if(!r.ok)throw Error('http');let b=await r.blob(),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download="+org.json.JSONObject.quote(name)+";document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000);}catch(e){alert('下载失败，请重试');}})()";
-   web.evaluateJavascript(js,null);
+   if(!allowed(Uri.parse(url))){session.toast("无法下载其他来源的链接");return;}
+   if(length>ExportStore.LIMIT){session.toast("单个导出文件不能超过32 MiB");return;}
+   String name=URLUtil.guessFileName(url,disposition,mime);
+   web.evaluateJavascript("(async function(){try{let r=await fetch("+org.json.JSONObject.quote(url)+",{credentials:'same-origin'});if(!r.ok)throw Error('服务器返回 '+r.status+'，请稍后重试');if(Number(r.headers.get('Content-Length'))>33554432)throw Error('文件超过 32 MiB，无法在 App 中保存');let b=await r.blob();if(b.size>33554432)throw Error('文件超过 32 MiB，无法在 App 中保存');let u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download="+org.json.JSONObject.quote(name)+";document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),30000);}catch(e){alert(e.message||'下载失败，请检查连接后重试');}})()",null);
   });
-  root.addView(web,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);panel.setVisibility(View.GONE);
-  home.setOnClickListener(v->{panel.setVisibility(View.GONE);web.setVisibility(View.VISIBLE);if(web.getUrl()==null)web.loadUrl(desiredHome());});
-  setup.setOnClickListener(v->{panel.setVisibility(panel.getVisibility()==View.VISIBLE?View.GONE:View.VISIBLE);});
-  startForegroundService(new Intent(this,EntryService.class));handler.postDelayed(()->web.loadUrl(desiredHome()),600);refresh();
+  if(!session.token.isEmpty()&&web.getUrl()!=null&&allowed(Uri.parse(web.getUrl()))){web.evaluateJavascript(BLOB_HOOK.replace("__TOKEN__",session.token),null);applyTheme(web,web.getUrl());}
  }
- private boolean local(Uri u){if(u==null)return false;String h=u.getHost();return "http".equalsIgnoreCase(u.getScheme())&&("localhost".equalsIgnoreCase(h)||"127.0.0.1".equals(h)||(h!=null&&h.matches("cp-[0-9]{4}\\.localhost")))&&u.getPort()==8765;}
- private String desiredHome(){String id=Diagnostics.current;return DeviceIdentity.valid(id)?"http://cp-"+id.substring(3)+".localhost:8765/phone":HOME;}
- private void refresh(){status.setText(Diagnostics.report());String id=Diagnostics.current;if(!id.equals(lastDevice)){lastDevice=id;web.loadUrl(desiredHome());}handler.postDelayed(this::refresh,2000);}
- public void onBackPressed(){if(web.canGoBack())web.goBack();else super.onBackPressed();}
- protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);
-  if(request==PICK){if(chooser!=null){chooser.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data));chooser=null;}return;}
-  if(request==SAVE){File file=pendingBlob;pendingBlob=null;if(file==null)return;if(result!=RESULT_OK||data==null||data.getData()==null){file.delete();return;}Uri dest=data.getData();new Thread(()->{boolean ok=false;try(InputStream in=new FileInputStream(file);OutputStream out=getContentResolver().openOutputStream(dest)){if(out==null)throw new IOException();byte[] b=new byte[16384];int n;while((n=in.read(b))!=-1)out.write(b,0,n);ok=true;}catch(Exception ignored){}finally{file.delete();}final boolean success=ok;runOnUiThread(()->Toast.makeText(this,success?"文件已保存":"保存失败，请重试",Toast.LENGTH_LONG).show());}).start();}
+ private void search(){Intent i=new Intent(this,EntryService.class);i.setAction("scan_candidates");startForegroundService(i);scan.setEnabled(false);status.setText("正在搜索并验证 USB 头环…");}
+ private void chooseDevice(){
+  ConnectionState.Snapshot view=Diagnostics.snapshot();
+  if(!view.current().isEmpty()){openCollection();return;}
+  if(view.choosing||candidateDialog!=null&&candidateDialog.isShowing())return;
+  if(view.candidates.isEmpty()){
+   session.toast(view.scanning?"正在搜索，已验证的设备出现后即可选择":"没有可用候选，已重新开始搜索");if(!view.scanning)search();return;
+  }
+  String[] labels=new String[view.candidates.size()];for(int i=0;i<labels.length;i++){Endpoint e=view.candidates.get(i);labels[i]=e.deviceId+" ("+e.address.getHostAddress()+")"+(view.stale?" · 将重新验证":"");}
+  candidateDialog=new android.app.AlertDialog.Builder(this).setTitle("选择 USB 头环").setItems(labels,(dialog,index)->{session.nativeRequested=false;Endpoint e=view.candidates.get(index);Intent i=new Intent(this,EntryService.class);i.setAction("select_candidate");i.putExtra("key",ConnectionState.key(e));startForegroundService(i);}).setNegativeButton("取消",null).create();candidateDialog.setOnDismissListener(dialog->candidateDialog=null);candidateDialog.show();
+ }
+ private String desiredHome(){String id=Diagnostics.snapshot().current();return DeviceIdentity.valid(id)?"http://cp-"+id.substring(3)+".localhost:"+EntryAddress.PORT+"/phone":HOME;}
+ private boolean allowed(Uri uri){return uri!=null&&"http".equalsIgnoreCase(uri.getScheme())&&uri.getPort()==EntryAddress.PORT&&sameOrigin(uri.toString(),desiredHome());}
+ private static boolean sameOrigin(String a,String b){if(a==null||b==null)return false;Uri x=Uri.parse(a),y=Uri.parse(b);return x.getScheme()!=null&&x.getScheme().equalsIgnoreCase(y.getScheme())&&x.getHost()!=null&&x.getHost().equalsIgnoreCase(y.getHost())&&x.getPort()==y.getPort();}
+ private void loadHome(){if(session.picking||!Diagnostics.snapshot().ready())return;session.web.loadUrl(desiredHome());}
+ private void pageFailed(){
+  long delay=session.recovery.failure(),navigation=session.navigation,revision=Diagnostics.snapshot().connectionRevision;
+  if(delay<0){session.toast("页面仍不可用；恢复连接后点击“采集页面”重试");return;}
+  handler.postDelayed(()->{if(session.navigation==navigation&&Diagnostics.snapshot().connectionRevision==revision&&session.recovery.failed()&&!session.picking)loadHome();},delay);
+ }
+ private void refresh(){
+  if(session==null)return;ConnectionState.Snapshot view=Diagnostics.snapshot();status.setText(Diagnostics.report());scan.setEnabled(!view.scanning&&!view.choosing);scan.setText(view.choosing?"正在验证…":view.scanning?"正在搜索…":"重新搜索头环");choose.setEnabled(!view.candidates.isEmpty());choose.setText("选择已验证的头环（"+view.candidates.size()+"）");savePending.setVisibility(session.exports.pending()!=null?View.VISIBLE:View.GONE);savePending.setEnabled(!session.saving&&!session.picking);
+  exportSection.setVisibility(session.exports.pending()!=null?View.VISIBLE:View.GONE);if(session.exports.pending()!=null)setText(pendingName,session.exports.pending().name);
+  boolean connected=!view.current().isEmpty();setText(connectionTitle,connected?"USB 头环已验证":view.scanning?"正在发现头环":"等待连接头环");setText(connectionNote,view.message);setText(deviceSummary,view.target!=null?view.target.deviceId+"  ·  "+view.target.address.getHostAddress():view.candidates.isEmpty()?"尚未选择头环":"已验证 "+view.candidates.size()+" 台，可直接选择");
+  choose.setVisibility(!connected&&!view.candidates.isEmpty()?View.VISIBLE:View.GONE);choose.setEnabled(!view.choosing&&!view.candidates.isEmpty());
+  enter.setEnabled(connected);setText(enter,session.recovery.failed()?"重试打开采集页":"进入采集工作台");back.setVisibility(session.web.getUrl()!=null?View.VISIBLE:View.GONE);
+  int mode=connected?2:view.candidates.isEmpty()?0:1;if(mode!=buttonMode){buttonMode=mode;UiTheme.button(scan,mode==0);UiTheme.button(choose,mode==1);}
+  if(!view.ready()&&session.web.getUrl()==null)showConnections(false);
+  if(view.connectionRevision!=session.connectionRevision&&!session.picking){
+   session.connectionRevision=view.connectionRevision;String id=view.current();
+   if(view.ready()&&(session.web.getUrl()==null||!id.equals(session.lastDevice)||session.recovery.failed())){session.recovery.manual();loadHome();if(!id.isEmpty()&&!session.nativeRequested){nativePane.setVisibility(View.GONE);session.web.setVisibility(View.VISIBLE);}}
+   session.lastDevice=id;
+  }
+  handler.postDelayed(this::refresh,1000);
+ }
+ private static void setText(TextView view,String text){if(!android.text.TextUtils.equals(view.getText(),text))view.setText(text);}
+ public void onBackPressed(){if(nativePane.getVisibility()==View.VISIBLE){if(session.web.getUrl()!=null&&Diagnostics.snapshot().ready())openCollection();else super.onBackPressed();return;}if(session.web.canGoBack())session.web.goBack();else super.onBackPressed();}
+ protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);if(session!=null){session.web.saveState(out);out.putBoolean("settings_open",nativePane.getVisibility()==View.VISIBLE);out.putBoolean("advanced_open",advancedSection.getVisibility()==View.VISIBLE);out.putString("manual_ip",manualAddress.getText().toString());}}
+ public Object onRetainNonConfigurationInstance(){return session;}
+ protected void onActivityResult(int request,int result,Intent data){
+  super.onActivityResult(request,result,data);if(session==null)return;
+  if(request==PICK){
+   session.picking=false;ValueCallback<Uri[]> callback=session.chooser;session.chooser=null;
+   if(callback==null){session.toast("页面已被系统重建，请重新选择导入文件");return;}
+   if(!session.chooserDevice.equals(Diagnostics.snapshot().current())){callback.onReceiveValue(null);session.toast("头环已切换，请在当前设备重新选择文件");return;}
+   callback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data));return;
+  }
+  if(request==SAVE){session.picking=false;ExportStore.Pending pending=session.exports.pending();if(pending==null)return;if(result!=RESULT_OK||data==null||data.getData()==null){session.toast("导出文件已保留，可在连接设置中继续保存");return;}saveTo(pending,data.getData());}
+ }
+ private void promptSave(){
+  ExportStore.Pending pending=session.exports.pending();if(pending==null||session.picking||session.saving)return;
+  try{Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType(pending.mime);intent.putExtra(Intent.EXTRA_TITLE,pending.name);session.picking=true;startActivityForResult(intent,SAVE);}
+  catch(Exception e){session.picking=false;session.toast("无法打开保存窗口，文件已保留，可重试");}
+ }
+ private void saveTo(ExportStore.Pending pending,Uri destination){
+  if(session.saving)return;session.saving=true;UiSession retained=session;ContentResolver resolver=getContentResolver();
+  new Thread(()->{
+   try{
+    try(InputStream input=new FileInputStream(pending.file);OutputStream output=resolver.openOutputStream(destination)){if(output==null)throw new IOException();byte[] buffer=new byte[16384];int n;while((n=input.read(buffer))!=-1)output.write(buffer,0,n);}
+    retained.exports.complete(pending);retained.toast("文件已保存");
+   }catch(Exception e){retained.toast("保存失败，原导出文件已保留，可重试");}
+   finally{retained.saving=false;}
+  },"headring-export").start();
+ }
+ private static final class SaveBridge {
+  final UiSession ui;SaveBridge(UiSession s){ui=s;}
+  private boolean authorized(String token){return token!=null&&!token.isEmpty()&&token.equals(ui.token);}
+  @JavascriptInterface public synchronized String begin(String token,String name,String mime,long size){
+   if(!authorized(token))return "页面已失效，请刷新后重试";
+   if(size<0||size>ExportStore.LIMIT)return "文件超过 32 MiB，无法在 App 中保存";
+   if(ui.exports.pending()!=null)return "有文件等待保存，请在连接设置中点击“继续保存文件”";
+   if(ui.exports.active())return "另一个文件正在准备保存，请稍后重试";
+   try{if(!ui.exports.begin(name,mime,size))return "无法开始保存，请稍后重试";long serial=++ui.blobSerial;ui.handler.postDelayed(()->{if(serial==ui.blobSerial)ui.exports.abortActive();},60000);return "";}
+   catch(IOException e){ui.exports.abortActive();return "无法准备保存文件，请检查手机剩余空间";}
+  }
+  @JavascriptInterface public synchronized boolean chunk(String token,String base64){try{if(!authorized(token)||base64==null||base64.length()>100000)return false;return ui.exports.write(Base64.decode(base64,Base64.DEFAULT));}catch(Exception e){ui.exports.abortActive();return false;}}
+  @JavascriptInterface public synchronized boolean end(String token){
+   if(!authorized(token))return false;
+   try{ui.exports.finish();ui.handler.post(()->{MainActivity a=ui.activity;if(a!=null)a.promptSave();});return true;}catch(IOException e){ui.exports.abortActive();return false;}
+  }
+  @JavascriptInterface public synchronized void abort(String token){if(authorized(token))ui.exports.abortActive();}
+ }
+ private static final String BLOB_HOOK="(function(){window.__hrBlobToken='__TOKEN__';if(window.__hrBlobHook)return;window.__hrBlobHook=true;document.addEventListener('click',async function(e){var a=e.target.closest&&e.target.closest('a[download]');if(!a||!a.href.startsWith('blob:'))return;e.preventDefault();e.stopImmediatePropagation();var token=window.__hrBlobToken,started=false;try{var b=await(await fetch(a.href)).blob();var reason=HeadRingSave.begin(token,a.download||'download',b.type||'application/octet-stream',b.size);if(reason)throw Error(reason);started=true;for(var p=0;p<b.size;p+=49152){var data=await new Promise(function(ok,no){var r=new FileReader();r.onload=function(){ok(r.result.split(',')[1]);};r.onerror=no;r.readAsDataURL(b.slice(p,p+49152));});if(!HeadRingSave.chunk(token,data))throw Error('写入文件失败，请检查手机空间或重试');}if(!HeadRingSave.end(token))throw Error('完成文件准备失败，请检查手机空间或重试');started=false;}catch(err){if(started)HeadRingSave.abort(token);alert(err.message||'读取文件失败，请重试');}},true);})();";
 
+ private void updateAwake(){if(resumed&&awake!=null&&awake.isChecked())getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);}
+ protected void onPause(){resumed=false;updateAwake();if(session!=null)session.web.onPause();super.onPause();}
+ protected void onResume(){super.onResume();resumed=true;updateAwake();if(session!=null)session.web.onResume();}
+ protected void onDestroy(){
+  handler.removeCallbacksAndMessages(null);
+  if(candidateDialog!=null)candidateDialog.dismiss();
+  if(session!=null){
+   if(session.activity==this)session.activity=null;
+   if(isChangingConfigurations()){
+    ViewParent parent=session.web.getParent();if(parent instanceof ViewGroup)((ViewGroup)parent).removeView(session.web);session.context.setBaseContext(getApplicationContext());
+   }else{
+    if(session.chooser!=null)session.chooser.onReceiveValue(null);session.chooser=null;session.exports.abortActive();session.handler.removeCallbacksAndMessages(null);session.web.removeJavascriptInterface("HeadRingSave");session.web.destroy();
+   }
+  }
+  super.onDestroy();
  }
- private void promptSave(){runOnUiThread(()->{try{Intent i=new Intent(Intent.ACTION_CREATE_DOCUMENT);i.addCategory(Intent.CATEGORY_OPENABLE);i.setType(pendingMime);i.putExtra(Intent.EXTRA_TITLE,pendingName);startActivityForResult(i,SAVE);}catch(Exception e){Toast.makeText(this,"无法打开保存窗口",Toast.LENGTH_LONG).show();bridge.abortInternal();}});}
- private final class SaveBridge {
-  private boolean authorized(String token){return token!=null&&token.equals(pageToken)&&!token.isEmpty();}
-  @JavascriptInterface public synchronized boolean begin(String token,String filename,String mime,long size){try{if(!authorized(token)||size<0||size>32L*1024*1024||blobStream!=null||pendingBlob!=null)return false;pendingName=safeName(filename);pendingMime=mime==null||mime.length()>100?"application/octet-stream":mime;pendingBlob=File.createTempFile("download-",".tmp",getCacheDir());blobStream=new FileOutputStream(pendingBlob);blobExpected=size;blobWritten=0;final long serial=++blobSerial;handler.postDelayed(()->{synchronized(SaveBridge.this){if(blobStream!=null&&serial==blobSerial)abortInternal();}},60000);return true;}catch(Exception e){abortInternal();return false;}}
-  @JavascriptInterface public synchronized boolean chunk(String token,String base64){try{if(!authorized(token)||blobStream==null||base64==null||base64.length()>100000)return false;byte[] b=Base64.decode(base64,Base64.DEFAULT);blobWritten+=b.length;if(blobWritten>blobExpected)throw new IOException();blobStream.write(b);return true;}catch(Exception e){abortInternal();return false;}}
-  @JavascriptInterface public synchronized void end(String token){try{if(!authorized(token))return;if(blobStream==null||blobWritten!=blobExpected){abortInternal();return;}blobStream.close();blobStream=null;promptSave();}catch(Exception e){abortInternal();}}
-  @JavascriptInterface public synchronized void abort(String token){if(authorized(token))abortInternal();}
-  synchronized void abortActive(){if(blobStream!=null)abortInternal();}
-  synchronized void abortInternal(){try{if(blobStream!=null)blobStream.close();}catch(IOException ignored){}blobStream=null;if(pendingBlob!=null)pendingBlob.delete();pendingBlob=null;}
- }
- private static String safeName(String filename){String name=filename==null?"下载文件":filename.replaceAll("[^A-Za-z0-9._\\-\\u4e00-\\u9fff]","_");if(name.length()>100)name=name.substring(0,100);return name.isEmpty()?"下载文件":name;}
- private static final String BLOB_HOOK="(function(){if(window.__hrBlobHook)return;window.__hrBlobHook=true;var token='__TOKEN__';document.addEventListener('click',async function(e){var a=e.target.closest&&e.target.closest('a[download]');if(!a||!a.href.startsWith('blob:'))return;e.preventDefault();e.stopImmediatePropagation();try{var b=await(await fetch(a.href)).blob();if(!HeadRingSave.begin(token,a.download||'download',b.type||'application/octet-stream',b.size)){alert('文件过大或另一个保存正在进行');return;}for(var p=0;p<b.size;p+=49152){var data=await new Promise(function(ok,no){var r=new FileReader();r.onload=function(){ok(r.result.split(',')[1]);};r.onerror=no;r.readAsDataURL(b.slice(p,p+49152));});if(!HeadRingSave.chunk(token,data))throw Error('write');}HeadRingSave.end(token);}catch(err){HeadRingSave.abort(token);alert('保存失败，请重试');}},true);})();";
- protected void onPause(){if(web!=null)web.onPause();super.onPause();}
- protected void onResume(){super.onResume();if(web!=null)web.onResume();}
- protected void onDestroy(){handler.removeCallbacksAndMessages(null);if(chooser!=null)chooser.onReceiveValue(null);bridge.abortInternal();if(web!=null){web.removeJavascriptInterface("HeadRingSave");web.destroy();}super.onDestroy();}
 }

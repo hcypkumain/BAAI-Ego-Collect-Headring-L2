@@ -22,6 +22,7 @@ import wrist_camera_settings as wrist_settings
 
 class WebControls:
     def remember_pending_owner(self,error):
+        self._reference_mutation_started()
         self.scan_cleanup_pending=True
         run=getattr(error,'run',None);child=getattr(error,'child',None)
         self.pending_camera_owner=(run,child)
@@ -32,6 +33,7 @@ class WebControls:
             self.last_help=['上次设备所有权恢复尚未确认；设备状态未知，已保持采集锁定。请重试恢复或联系维护人员。']
 
     def retry_pending_owner(self,force=False):
+        self._assert_controller_thread()
         if not getattr(self,'scan_cleanup_pending',False):return True
         now=time.monotonic()
         if not force and now-getattr(self,'last_owner_retry',0)<1:return False
@@ -44,6 +46,7 @@ class WebControls:
                 self.last_help=['设备所有权仍未恢复，保持采集锁定：'+str(error)]
                 return False
             if result and result.get('preserved'):return False
+            self._reference_mutation_started()
             self.owner_reconcile_pending=False
             self.pending_camera_owner=None;self.scan_cleanup_pending=False
             self.last_help=[]
@@ -52,6 +55,7 @@ class WebControls:
             if child is not None:child.poll()
             self.camera_registry.finish(run)
         except (RegistryError,OSError):return False
+        self._reference_mutation_started()
         self.pending_camera_owner=None;self.scan_cleanup_pending=False;self.owner_reconcile_pending=False
         self.last_help=[]
         return True
@@ -262,7 +266,7 @@ class WebControls:
         dashboard.publish(dict(collection_mode=COLLECTION_MODE,collection_context=COLLECTION_CONTEXT,mode_switch_target=getattr(self,'mode_switch_target',None),state=self.state,revision=getattr(self,'ui_revision',0),audio=audio,
             countdown=getattr(self,'countdown_status',None) if self.state=='countdown' else None,
             collector_id=getattr(self,'collector_id',''),preparation_cancelled_at=getattr(self,'preparation_cancelled_at',None),
-            task_list=getattr(self,'reference_task_state',lambda:{})(),reference_image_state=getattr(self,'reference_image_state',lambda:{})(),
+            task_list=getattr(self,'reference_task_state',lambda:{})(),task_block_settings=getattr(self,'task_block_settings',lambda:{})(),reference_image_state=getattr(self,'reference_image_state',lambda:{})(),
             image=str(self.image) if self.image else None,image_name=getattr(self,'reference_image_title',lambda:self.image.stem if self.image else '')(),session=active_session(self),
             success_count=self.success_count,devices=getattr(self,'last_scan',[]),
             wrist_calibration=cfg.get('wrist_calibration_status',{}),
@@ -347,9 +351,11 @@ class WebControls:
         except BrokenPipeError:pass
 
     def release_prepared(self):
+        self._assert_controller_thread()
         if not self.worker:return
         if self.state!='ready':raise ValueError('当前不可更改设备')
         if self.worker_status().get('recording_active'):raise ValueError('正在录制，不可更改设备')
+        self._reference_mutation_started()
         self.command('STOP');self.worker.wait(timeout=50)
         # No cancellation is recorded until the entire owner group is gone.
         if not self.reap():raise ValueError('设备进程尚未全部退出，准备未解除')
@@ -358,6 +364,9 @@ class WebControls:
         self.state='idle';self.state_write()
 
     def abandon_preparation(self):
+        self._assert_controller_thread()
+        if getattr(self,'_reference_transaction',None) is not None:
+            raise ValueError('参考图事务恢复未确认，请保留本段和历史证据并联系维护人员；不能按普通准备放弃')
         from dashboard import preparation_state
         if not preparation_state(self.state):raise ValueError('正式采集开始后请先停止并处理本段结果')
         privacy=getattr(getattr(self,'dashboard',None),'privacy',None)
@@ -365,6 +374,7 @@ class WebControls:
         status=self.worker_status() if getattr(self,'worker',None) else {}
         path=getattr(self,'path',None)
         if status.get('recording_active') or (path and (path/'start_gate.json').exists()):raise ValueError('本段已正式开录，不能按准备放弃')
+        self._reference_mutation_started()
         if getattr(self,'worker',None):
             self.command('STOP');self.worker.wait(timeout=50)
             if not self.reap():raise ValueError('设备进程尚未全部退出，文件未清理')
@@ -377,6 +387,8 @@ class WebControls:
         close=getattr(self,'close_emg_pairing',None)
         if callable(close):close()
         self.wrist_wizard=self.emg_wizard=None;self._emg_pairing_spoken_phase=None
+        blocks=getattr(self,'_reference_task_blocks',None)
+        if blocks:blocks.cancel_pending()
         self.reference_release_pin();self._reference_active=None;self._reference_retry=None
         self._reference_cli_image=None;self._reference_cli_force=False;self.selected_image=None
         self._reference_manual_id=None
@@ -388,13 +400,18 @@ class WebControls:
         self.state='device_confirm';self.state_write()
 
     def delete_recording(self,value):
+        transaction=getattr(self,'_reference_transaction',None)
+        if transaction is not None:
+            path=transaction.get('path') or getattr(self,'path',None)
+            if path is None or Path(path).name==value.get('session_id'):
+                raise ValueError('参考图事务恢复未确认，请保留失败会话并联系维护人员')
         if self.state not in ('device_confirm','idle','failed_wait','exhausted') or getattr(self,'worker',None):raise ValueError('请先结束或放弃当前准备，再管理采集条目')
         if self.dashboard.privacy.snapshot().get('required'):raise ValueError('采集状态未确认停止')
         result=self.recording_store.delete(value['session_id'],value['token'])
         created=getattr(self,'retained_created_ids',set())
         if value['session_id'] in created:created.discard(value['session_id']);self.success_count=max(0,self.success_count-1)
         if (getattr(self,'last_completed',None) or {}).get('session')==value['session_id']:self.last_completed=None
-        self.reference_refresh(force=True)
+        if transaction is None:self.reference_refresh(force=True)
         if self.state=='exhausted' and self.images:self.state='idle'
         if getattr(self,'path',None) and self.path.name==value['session_id']:self.path=None;self.image=None
         self.last_review_path=recording_review.latest_recording(self.recording_store.roots()[0])
@@ -402,10 +419,16 @@ class WebControls:
         return result
 
     def retain_error_recording(self,value):
+        transaction=getattr(self,'_reference_transaction',None)
+        if transaction is not None:
+            path=transaction.get('path') or getattr(self,'path',None)
+            if path is None or Path(path).name==value.get('session_id'):
+                raise ValueError('参考图事务恢复未确认，请保留失败会话并联系维护人员')
         if self.state not in ('device_confirm','idle','failed_wait','exhausted') or getattr(self,'worker',None):raise ValueError('请先结束当前准备或采集')
         if self.dashboard.privacy.snapshot().get('required'):raise ValueError('采集状态未确认停止')
         result=self.recording_store.retain_error(value['session_id'],value['token'])
-        self.reference_refresh(force=True);self.state_write();return result
+        if transaction is None:self.reference_refresh(force=True)
+        self.state_write();return result
 
     def shutdown_device(self):
         if self.state not in SAFE or getattr(self,'worker',None):raise ValueError('请先结束当前准备或采集')
@@ -420,6 +443,7 @@ class WebControls:
         except OSError:pass
 
     def dashboard_tick(self):
+        self._assert_controller_thread()
         reference_tick=getattr(self,'reference_tick',None)
         if callable(reference_tick):reference_tick()
         dashboard=getattr(self,'dashboard',None)
@@ -429,7 +453,7 @@ class WebControls:
         self.ui_publish()
         job=dashboard.take()
         if job:
-            error=None
+            error=None;block_details=None
             try:
                 impedance = self.worker_status().get('eeg_impedance', {}) if 'eeg' in (getattr(self,'selected_devices',None) or ()) else dict(required=False)
                 allowed=list(actions_for(self.state,impedance))
@@ -441,6 +465,7 @@ class WebControls:
                 if job['action']=='stop' and not stop_bound:
                     raise ValueError('采集会话已变化，请刷新后重试')
                 if getattr(self,'reference_can_switch_list',getattr(self,'reference_can_change',lambda:False))():allowed.append('reference_list')
+                if job['action']=='task_block_size' and dashboard.execution_matches(job):allowed.append('task_block_size')
                 mode_action=job['action']=='collection_mode'
                 if mode_action:
                     from project_paths import COLLECTION_CONTEXT
@@ -462,6 +487,12 @@ class WebControls:
                     if self.stop_preview() is False:raise ValueError('预览设备尚未全部退出')
                 if action=='abandon':
                     self.abandon_preparation()
+                elif action=='task_block_size':
+                    result=self.set_task_block_size(job.get('value'),expected_context=job.get('collection_context'),
+                        expected_revision=job.get('submitted_revision'),expected_policy_revision=job.get('policy_revision'),job=job)
+                    error=result.get('error')
+                    block_details=dict(outcome=result.get('outcome'),readback=result.get('readback'))
+                    if not result.get('ok') and not error:error='任务分组修改未确认'
                 elif action=='stop':
                     privacy=dashboard.privacy
                     target=job.get('privacy_target')
@@ -552,11 +583,20 @@ class WebControls:
             finally:
                 try:
                     if self.keyboard:self.keyboard.discard()
-                    self.ui_publish()
+                    if job.get('action')=='task_block_size':self.ui_publish(force=True)
+                    else:self.ui_publish()
                 except Exception as exc:
                     if error is None:error=str(exc) or type(exc).__name__
+                    if block_details is not None and block_details.get('outcome')=='applied':
+                        block_details=dict(outcome='uncertain',readback=None)
                     raise
-                finally:dashboard.complete(error)
+                finally:
+                    if job.get('action')=='task_block_size':
+                        try:dashboard.complete(error,block_details,expected_job=job)
+                        except (ValueError,TypeError) as exc:
+                            try:dashboard.complete('任务分组结果未确认：'+str(exc),expected_job=job)
+                            except ValueError:pass
+                    else:dashboard.complete(error)
         self.ensure_preview()
 
     def close_dashboard(self):

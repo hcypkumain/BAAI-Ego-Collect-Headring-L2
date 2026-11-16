@@ -1,0 +1,336 @@
+/* HeadRing's offline presentation layer. Acquisition and privacy own visibility. */
+body.phone-app[data-hr-theme="6"] {
+ --hr-bg:#f4f6f2;--hr-surface:#fff;--hr-soft:#edf2ec;--hr-ink:#192c27;
+ --hr-muted:#53665e;--hr-line:#d7e0d8;--hr-primary:#17644b;--hr-selected:#e2efe6;
+ --hr-error:#a33232;--hr-error-bg:#fbeaea;--hr-warning:#805214;--hr-warning-bg:#fff1d8;
+ --hr-plot:#111d21;--bg:var(--hr-bg);--ink:var(--hr-ink);--muted:var(--hr-muted);
+ --line:var(--hr-line);--accent:var(--hr-primary);--mint:var(--hr-selected);
+ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+ font-size:16px;line-height:1.55;letter-spacing:0;background:var(--hr-bg);color:var(--hr-ink);
+}
+body.phone-app[data-hr-theme="6"] ::selection {background:#d2e7d8;color:#153a2b}
+body.phone-app[data-hr-theme="6"] :is(input,textarea) {caret-color:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-viewer,#phone-aux-dialog,#phone-settings-dialog,#login) :is(button,input,select) {font-family:inherit;font-size:16px;line-height:1.4}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-viewer,#phone-aux-dialog,#phone-settings-dialog,#login) button {
+ min-height:48px;min-width:48px;border-radius:12px;padding:12px 16px;border:1px solid var(--hr-line);
+ background:var(--hr-surface);color:var(--hr-ink);font-weight:550;white-space:normal;
+ transition:background-color 160ms ease-out,border-color 160ms ease-out,color 160ms ease-out;
+}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-aux-dialog,#phone-settings-dialog,#login) button:hover:enabled {background:#edf4ee;border-color:#739b85}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-aux-dialog,#phone-settings-dialog,#login) button:active:enabled {background:#e2efe6}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-viewer,#phone-aux-dialog,#phone-settings-dialog,#login) :is(button,a,input,select,summary):focus-visible {outline:3px solid #347e5e;outline-offset:3px}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-aux-dialog,#phone-settings-dialog,#login) button.primary {background:var(--hr-primary);border-color:var(--hr-primary);color:#fff}
+body.phone-app[data-hr-theme="6"] :is(main,#phone-aux-dialog,#phone-settings-dialog,#login) button.primary:hover:enabled {background:#104d39;color:#fff}
+body.phone-app[data-hr-theme="6"] :is(main,#phone-aux-dialog,#phone-settings-dialog) button.danger {background:var(--hr-error-bg);border-color:#d39791;color:var(--hr-error)}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-aux-dialog,#phone-settings-dialog,#login) button:disabled {opacity:1;background:#e6ebe6;border-color:transparent;color:#66756c}
+body.phone-app[data-hr-theme="6"] :is(main,#phone-aux-dialog,#phone-settings-dialog) button[aria-pressed="true"] {background:var(--hr-selected);border-color:#88ad92;color:#174e36;font-weight:650}
+body.phone-app[data-hr-theme="6"] :is(main,#phone-aux-dialog,#phone-settings-dialog) button[aria-pressed="true"]:disabled {background:var(--hr-selected);border-color:#a6c1ae;color:#24573e}
+body.phone-app[data-hr-theme="6"] :is(main,#phone-aux-dialog,#phone-settings-dialog,#login) :is(input:not([type="range"]):not([type="checkbox"]):not([type="radio"]),select) {min-height:48px;max-width:100%;padding:10px 12px;border:1px solid #7d8e84;border-radius:10px;background:var(--hr-surface);color:var(--hr-ink)}
+body.phone-app[data-hr-theme="6"] :is(input[type="checkbox"],input[type="radio"],input[type="range"],progress) {accent-color:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"] input::placeholder {color:#5d7065;opacity:1}
+body.phone-app[data-hr-theme="6"] :is(p,small,b,td,dd,li) {overflow-wrap:anywhere}
+body.phone-app[data-hr-theme="6"] :is(a,summary) {text-underline-offset:4px}
+body.phone-app[data-hr-theme="6"] a {color:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"] :is(.phone-page,.phone-body,#phone-workflow-body,.wave-table-scroll) {scrollbar-width:thin;scrollbar-color:#adbfb1 transparent}
+body.phone-app[data-hr-theme="6"] .hr-sr-only {position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+body.phone-app[data-hr-theme="6"]:not([data-hr-motion-ready="6"]) :is(main,header,#phone-nav,#phone-viewer,#phone-aux-dialog,#phone-settings-dialog,#login) button {transition:none}
+
+/* A single compact app bar: the Android wrapper adds no second toolbar. */
+body.phone-app[data-hr-theme="6"]>header {min-height:60px;padding:8px 16px;gap:8px;background:var(--hr-surface);border-bottom:1px solid var(--hr-line);align-items:center}
+body.phone-app[data-hr-theme="6"]>header .brand {min-width:72px;flex:1;align-items:center}
+body.phone-app[data-hr-theme="6"]>header h1 {font-size:18px;font-weight:650;line-height:1.3;letter-spacing:0}
+body.phone-app[data-hr-theme="6"]>header .brand #phone-header-state {display:block;max-width:160px;font-size:12px;color:var(--hr-muted);line-height:1.4;margin-top:3px}
+body.phone-app[data-hr-theme="6"]>header>.pill {background:var(--hr-selected);color:#21543b;font-size:12px;padding:6px 9px;border-radius:999px;max-width:104px;white-space:normal}
+body.phone-app[data-hr-theme="6"]>header>button {font-size:14px;padding:8px 10px;min-height:48px;background:transparent;border-color:transparent}
+body.phone-app[data-hr-theme="6"] #phone-transport-status {max-width:76px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
+body.phone-app[data-hr-theme="6"]>header>.hr-icon-button {width:48px;padding:12px;flex-shrink:0;display:grid;place-items:center;color:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"]>main {padding:16px 16px 12px;gap:12px;max-width:1120px}
+body.phone-app[data-hr-theme="6"] .phone-page {gap:16px;scroll-padding-bottom:16px}
+body.phone-app[data-hr-theme="6"] .card {background:var(--hr-surface);border:1px solid var(--hr-line);border-radius:16px;box-shadow:none}
+body.phone-app[data-hr-theme="6"] .card-head {padding:16px 18px 12px}
+body.phone-app[data-hr-theme="6"] .card-head h3 {font-size:18px;line-height:1.4;font-weight:650}
+body.phone-app[data-hr-theme="6"] .card-head p {font-size:14px;color:var(--hr-muted);line-height:1.55}
+body.phone-app[data-hr-theme="6"] :is(.phone-hint,.muted,.help,.hint) {font-size:14px;line-height:1.55;color:var(--hr-muted)}
+body.phone-app[data-hr-theme="6"] .pill {background:var(--hr-selected);color:#21543b;font-size:13px;padding:6px 10px}
+body.phone-app[data-hr-theme="6"] .phone-row {gap:10px}
+body.phone-app[data-hr-theme="6"] main>.notice {font-size:14px;line-height:1.55;padding:12px 14px;max-height:160px;background:var(--hr-warning-bg);color:var(--hr-warning);border-color:#cba970;border-radius:12px}
+
+/* Working hierarchy, not a wall of equally weighted boxes. */
+body.phone-app[data-hr-theme="6"] .hr-profile {padding:14px 16px}
+body.phone-app[data-hr-theme="6"] .hr-profile h3 {font-size:14px;line-height:1.5;font-weight:550;color:var(--hr-muted);margin:0 0 10px}
+body.phone-app[data-hr-theme="6"] .hr-profile .actions {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+body.phone-app[data-hr-theme="6"] .hr-profile p {font-size:14px;color:var(--hr-muted);margin:10px 0 0;line-height:1.5}
+body.phone-app[data-hr-theme="6"] .phone-home-state {background:transparent;border:0;padding:2px 0 8px;display:flex;flex-direction:column;align-items:stretch;gap:14px}
+body.phone-app[data-hr-theme="6"] .phone-home-state h2 {font-size:24px;line-height:1.3;font-weight:650;margin:0 0 8px}
+body.phone-app[data-hr-theme="6"] .phone-home-state p {font-size:16px;line-height:1.55;max-width:65ch}
+body.phone-app[data-hr-theme="6"] .phone-home-entries {gap:10px;flex-wrap:wrap}
+body.phone-app[data-hr-theme="6"] .phone-home-entries button {flex:1;background:var(--hr-soft);border-color:transparent;color:var(--hr-primary);font-size:15px}
+body.phone-app[data-hr-theme="6"] .phone-task-card {padding:18px;gap:12px}
+body.phone-app[data-hr-theme="6"] .phone-task-heading {align-items:center;gap:12px}
+body.phone-app[data-hr-theme="6"] .phone-task-heading small {font-size:14px;font-weight:600;color:var(--hr-muted)}
+body.phone-app[data-hr-theme="6"] .phone-task-heading span {font-size:13px}
+body.phone-app[data-hr-theme="6"] #phone-task-name {font-size:20px;line-height:1.5;font-weight:650}
+body.phone-app[data-hr-theme="6"] .phone-task-progress {flex-wrap:wrap;gap:8px 12px}
+body.phone-app[data-hr-theme="6"] .phone-task-progress progress {min-width:80px;height:7px;accent-color:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"] .phone-task-progress small {font-size:13px;white-space:normal}
+body.phone-app[data-hr-theme="6"] #phone-next-step {font-size:15px;line-height:1.6;margin:0}
+body.phone-app[data-hr-theme="6"] #phone-block-info {font-size:14px}
+body.phone-app[data-hr-theme="6"] #phone-daily-collection {background:transparent;border:0;padding:8px 2px;gap:6px}
+body.phone-app[data-hr-theme="6"] #phone-daily-duration {font-size:26px;font-weight:650;line-height:1.3;font-variant-numeric:tabular-nums}
+body.phone-app[data-hr-theme="6"] #phone-daily-detail {font-size:14px}
+body.phone-app[data-hr-theme="6"] #phone-daily-export {justify-self:start;background:transparent;font-size:14px;padding:8px 12px}
+body.phone-app[data-hr-theme="6"] #phone-native-metrics {grid-template-columns:repeat(2,minmax(0,1fr));gap:0;background:var(--hr-surface);border:1px solid var(--hr-line);border-radius:16px;overflow:hidden}
+body.phone-app[data-hr-theme="6"] .phone-native-metric {border:0;border-radius:0;padding:16px 18px;gap:8px;background:transparent}
+body.phone-app[data-hr-theme="6"] .phone-native-metric:nth-child(even) {border-left:1px solid var(--hr-line)}
+body.phone-app[data-hr-theme="6"] .phone-native-metric:nth-child(n+3) {border-top:1px solid var(--hr-line)}
+body.phone-app[data-hr-theme="6"] .phone-native-metric b {font-size:24px;font-weight:650;line-height:1.3;white-space:normal;overflow-wrap:anywhere}
+body.phone-app[data-hr-theme="6"] .phone-native-metric small {font-size:14px}
+body.phone-app[data-hr-theme="6"] #phone-device-list {grid-template-columns:minmax(0,1fr);gap:0;padding:0 2px}
+body.phone-app[data-hr-theme="6"] #phone-device-list>div {font-size:14px;line-height:1.6;padding:10px 0;border-bottom:1px solid var(--hr-line);white-space:normal;overflow:visible}
+body.phone-app[data-hr-theme="6"] .phone-device-offline {color:#6b5344}
+body.phone-app[data-hr-theme="6"] #phone-device-problems {padding:14px 16px;background:var(--hr-warning-bg);border:1px solid #d5bb8b;border-radius:12px}
+body.phone-app[data-hr-theme="6"] #phone-device-problems summary {color:var(--hr-warning);font-size:15px;min-height:24px}
+body.phone-app[data-hr-theme="6"] #phone-device-problems :is(li,ul) {font-size:14px;color:#684718;line-height:1.6}
+body.phone-app[data-hr-theme="6"] #phone-overview-actions {grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;padding:12px 0 4px;background:var(--hr-bg);box-shadow:none;border-top:1px solid var(--hr-line)}
+body.phone-app[data-hr-theme="6"] #phone-overview-actions button {min-height:52px;font-size:16px}
+body.phone-app[data-hr-theme="6"] #phone-overview-actions :is([data-action="retry"],[data-action="rescan"]) {background:var(--hr-surface);border-color:#8ba393;color:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"] #phone-overview-actions [data-action="stop"] {background:var(--hr-error-bg);border-color:#d39791;color:var(--hr-error)}
+body.phone-app[data-hr-theme="6"] #phone-home-hint {font-size:14px;line-height:1.55}
+body.phone-app[data-hr-theme="6"] .phone-headphone-summary {margin:0;padding:14px 16px;border:0;background:var(--hr-soft);gap:12px}
+body.phone-app[data-hr-theme="6"] .phone-headphone-summary p {font-size:14px;line-height:1.5}
+body.phone-app[data-hr-theme="6"] .phone-headphone-summary button {font-size:14px;min-width:88px}
+
+/* Compact navigation with a consistent stroke icon set. */
+body.phone-app[data-hr-theme="6"] #phone-nav {background:var(--hr-surface);padding:6px 8px max(6px,env(safe-area-inset-bottom));gap:4px;border-top:1px solid var(--hr-line)}
+body.phone-app[data-hr-theme="6"] #phone-nav button {display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:58px;min-width:0;padding:6px 2px;background:transparent;border-color:transparent;font-size:12px;font-weight:550;color:var(--hr-muted);border-radius:12px}
+body.phone-app[data-hr-theme="6"] #phone-nav button[aria-selected="true"] {background:var(--hr-selected);border-color:transparent;color:var(--hr-primary);font-weight:650}
+body.phone-app[data-hr-theme="6"] #phone-nav svg {width:22px;height:22px;flex:none}
+
+/* Scientific plots remain scientifically identical and deliberately dark. */
+body.phone-app[data-hr-theme="6"] .phone-subnav {gap:8px}
+body.phone-app[data-hr-theme="6"] .phone-subnav button {font-size:15px;padding:10px 12px}
+body.phone-app[data-hr-theme="6"] #phone-wave-host {padding:16px;flex:1 0 auto;min-height:540px}
+body.phone-app[data-hr-theme="6"] #phone-wave-host>.signal {height:auto;overflow:visible}
+body.phone-app[data-hr-theme="6"] #phone-wave-host .has-waveform canvas {height:360px;min-height:360px;flex:none;background:var(--hr-plot);border-radius:10px}
+body.phone-app[data-hr-theme="6"] .signal-head {font-size:16px;gap:10px}
+body.phone-app[data-hr-theme="6"] .signal-head .live-tag {font-size:13px;color:var(--hr-muted)}
+body.phone-app[data-hr-theme="6"] .wave-controls {font-size:14px;gap:10px;margin:12px 0}
+body.phone-app[data-hr-theme="6"] .wave-controls label {min-height:48px;align-items:center;gap:8px;flex-wrap:wrap}
+body.phone-app[data-hr-theme="6"] .wave-controls select {min-height:48px!important;padding:10px 12px!important;font-size:14px!important}
+body.phone-app[data-hr-theme="6"] .wave-note {font-size:14px;line-height:1.6;margin:12px 0}
+body.phone-app[data-hr-theme="6"] .wave-quality {padding:12px 14px;font-size:14px;border:1px solid var(--hr-line);background:var(--hr-soft);border-radius:10px}
+body.phone-app[data-hr-theme="6"] .wave-quality small {font-size:13px}
+body.phone-app[data-hr-theme="6"] .wave-quality[data-state="notice"],body.phone-app[data-hr-theme="6"] .wave-quality[data-state="stale"] {background:var(--hr-warning-bg);border-color:#c6a365;color:var(--hr-warning)}
+body.phone-app[data-hr-theme="6"] .wave-values summary {font-size:14px;padding:12px 0;min-height:48px}
+body.phone-app[data-hr-theme="6"] .wave-table-scroll :is(td,th) {font-size:13px;padding:10px 12px}
+body.phone-app[data-hr-theme="6"] #phone-wave-hint {font-size:14px}
+
+/* Image geometry is never cropped, filtered or recolored. */
+body.phone-app[data-hr-theme="6"] #phone-page-preview #phone-live {min-height:480px;flex:1 0 auto;gap:12px}
+body.phone-app[data-hr-theme="6"] #phone-camera-tabs {grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+body.phone-app[data-hr-theme="6"] #phone-camera-tabs button {font-size:14px;white-space:normal;overflow-wrap:anywhere;padding:10px 8px;min-height:48px}
+body.phone-app[data-hr-theme="6"] #phone-live-stage {min-height:200px;background:#0b1417;border:0;border-radius:12px}
+body.phone-app[data-hr-theme="6"] #phone-live-empty {font-size:16px;line-height:1.6;color:#c1d0cb;padding:24px;max-width:28ch}
+body.phone-app[data-hr-theme="6"] #phone-live-stage.phone-live-stale::after {background:#263b32;color:#fff;padding:8px 12px;border-radius:8px;font-size:14px}
+body.phone-app[data-hr-theme="6"] .phone-preview-toolbar {gap:10px;align-items:center;flex-wrap:wrap;font-size:14px}
+body.phone-app[data-hr-theme="6"] .phone-preview-toolbar :is(button,select) {min-height:48px;font-size:14px;padding:10px 12px}
+body.phone-app[data-hr-theme="6"] #phone-live-stats {font-size:14px;line-height:1.5;flex-basis:100%}
+body.phone-app[data-hr-theme="6"] .phone-preview-toolbar label {margin-left:0;gap:8px}
+body.phone-app[data-hr-theme="6"] #phone-fit-entry {white-space:normal}
+body.phone-app[data-hr-theme="6"] #phone-fit-stage {background:#0b1417;border-radius:12px;min-height:200px}
+body.phone-app[data-hr-theme="6"] #phone-fit-note {font-size:14px;line-height:1.6}
+body.phone-app[data-hr-theme="6"] .phone-fit-toolbar {gap:8px;flex-wrap:wrap}
+body.phone-app[data-hr-theme="6"] .phone-fit-toolbar :is(button,a) {font-size:14px;min-height:48px;white-space:normal}
+body.phone-app[data-hr-theme="6"] #phone-fit-start {min-height:52px;font-size:16px;background:var(--hr-primary);color:#fff}
+body.phone-app[data-hr-theme="6"] #phone-fit-start:disabled {background:#e6ebe6;color:#66756c}
+
+/* Results keep their authoritative wording: retained, saved and QC differ. */
+body.phone-app[data-hr-theme="6"] .phone-result-card {padding:20px;gap:20px;border:0;background:var(--hr-surface)}
+body.phone-app[data-hr-theme="6"] .phone-result-card h3 {font-size:22px;line-height:1.4;color:var(--hr-ink)}
+body.phone-app[data-hr-theme="6"] #phone-result-text {font-size:16px;line-height:1.7;white-space:pre-wrap}
+body.phone-app[data-hr-theme="6"] #phone-result-history {display:flex;flex-wrap:wrap;gap:10px}
+body.phone-app[data-hr-theme="6"] #phone-result-history button {flex:1}
+body.phone-app[data-hr-theme="6"] .phone-qc-error {background:var(--hr-error-bg)!important;color:var(--hr-error)!important;border-color:#ceaaa4!important}
+body.phone-app[data-hr-theme="6"] .phone-qc-warn {background:var(--hr-warning-bg)!important;color:var(--hr-warning)!important;border-color:#c6a365!important}
+body.phone-app[data-hr-theme="6"] .phone-qc-neutral {color:var(--hr-ink)}
+body.phone-app[data-hr-theme="6"] .phone-qc-heading {font-size:16px;gap:10px}
+body.phone-app[data-hr-theme="6"] .phone-qc-heading button {font-size:14px;min-height:48px}
+body.phone-app[data-hr-theme="6"] .phone-qc-finding {font-size:14px;padding:14px;border-radius:12px}
+body.phone-app[data-hr-theme="6"] .phone-qc-finding small {font-size:13px}
+
+/* Device-side settings versus phone-side USB management are explicitly named. */
+body.phone-app[data-hr-theme="6"] .phone-connections-card {padding:18px;gap:16px}
+body.phone-app[data-hr-theme="6"] .phone-connections-card h3 {font-size:20px;font-weight:650;margin:0}
+body.phone-app[data-hr-theme="6"] .hr-native-entry {display:flex;align-items:center;gap:12px;min-height:76px;padding:14px;background:var(--hr-selected);border-radius:12px;text-decoration:none;color:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"] #phone-page-connections>.hr-native-entry {flex-shrink:0}
+body.phone-app[data-hr-theme="6"] .hr-native-entry>svg {flex:none;width:24px;height:24px}
+body.phone-app[data-hr-theme="6"] .hr-native-entry>span {flex:1;min-width:0;display:grid;gap:4px}
+body.phone-app[data-hr-theme="6"] .hr-native-entry b {font-size:16px;font-weight:650}
+body.phone-app[data-hr-theme="6"] .hr-native-entry small {font-size:14px;line-height:1.5;color:#365c46}
+body.phone-app[data-hr-theme="6"] #phone-connection-detail {font-size:14px;line-height:1.7;overflow-wrap:anywhere}
+body.phone-app[data-hr-theme="6"] #phone-link-status {font-size:16px;font-weight:600}
+body.phone-app[data-hr-theme="6"] #phone-link-addresses {font-size:14px}
+body.phone-app[data-hr-theme="6"] #phone-headphone-panel {padding:18px;margin:0}
+body.phone-app[data-hr-theme="6"] #phone-headphone-panel h3 {font-size:18px}
+body.phone-app[data-hr-theme="6"] .phone-headphone-facts>div {padding:12px 0;border-color:var(--hr-line);font-size:14px}
+body.phone-app[data-hr-theme="6"] .phone-headphone-facts dt {color:var(--hr-muted)}
+body.phone-app[data-hr-theme="6"] #phone-headphone-panel [data-hp="controls"] {gap:10px}
+body.phone-app[data-hr-theme="6"] #phone-diagnostics {padding:16px 0;border-color:var(--hr-line)}
+body.phone-app[data-hr-theme="6"] #phone-diagnostics>summary {font-size:16px;min-height:48px;color:var(--hr-ink)}
+body.phone-app[data-hr-theme="6"] .phone-diagnostic-device {padding:14px;font-size:14px;border-radius:12px;background:var(--hr-soft);border:0}
+body.phone-app[data-hr-theme="6"] .phone-diagnostic-device small {font-size:13px}
+body.phone-app[data-hr-theme="6"] .phone-diagnostic-notice {background:var(--hr-warning-bg);color:var(--hr-warning);font-size:14px}
+
+/* Prepare, reference and save actions retain the original state-machine gates. */
+body.phone-app[data-hr-theme="6"] #phone-setup-progress {gap:8px;margin:0 0 4px}
+body.phone-app[data-hr-theme="6"] #phone-setup-progress li {font-size:14px;white-space:normal;padding:12px 4px;color:var(--hr-muted)}
+body.phone-app[data-hr-theme="6"] #phone-setup-progress [aria-current="step"] {color:var(--hr-primary);border-color:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"] #phone-setup-progress .is-complete {color:#25643b;border-color:#8ab395}
+body.phone-app[data-hr-theme="6"] .phone-workflow-bar {gap:8px}
+body.phone-app[data-hr-theme="6"] .phone-workflow-bar button {min-height:48px;font-size:14px;padding:10px 12px}
+body.phone-app[data-hr-theme="6"] :is(#phone-abandon,#phone-fit-abandon) {color:var(--hr-error);border-color:#c7958d;background:transparent}
+body.phone-app[data-hr-theme="6"] #phone-workflow-body {gap:16px}
+body.phone-app[data-hr-theme="6"] .step-body {padding:0 18px 18px}
+body.phone-app[data-hr-theme="6"] .step-body p {font-size:16px;line-height:1.65}
+body.phone-app[data-hr-theme="6"] :is(#voice,#phone-setup-details>summary) {font-size:14px;line-height:1.6;max-height:none}
+body.phone-app[data-hr-theme="6"] #phone-setup-details>summary {padding:12px 0;min-height:48px}
+body.phone-app[data-hr-theme="6"] #phone-preflight {padding:16px;gap:10px;background:var(--hr-surface);border-radius:16px;border:1px solid var(--hr-line)}
+body.phone-app[data-hr-theme="6"] #phone-preflight p {font-size:16px;line-height:1.55}
+body.phone-app[data-hr-theme="6"] #phone-preflight small {font-size:14px;line-height:1.55}
+body.phone-app[data-hr-theme="6"] #phone-formal-start {min-height:56px}
+body.phone-app[data-hr-theme="6"] #phone-start-summary {padding:20px;gap:12px}
+body.phone-app[data-hr-theme="6"] #phone-start-checks {color:#25643b;font-size:16px}
+body.phone-app[data-hr-theme="6"] #phone-workflow-body>.reference-card .reference {padding:0 18px 18px;gap:12px}
+body.phone-app[data-hr-theme="6"] #phone-workflow-body>.reference-card img {background:#172427;border-radius:10px}
+body.phone-app[data-hr-theme="6"] #phone-workflow-body>.reference-card small {font-size:14px}
+body.phone-app[data-hr-theme="6"] #phone-reference-status {gap:12px;margin-top:16px;padding-top:16px;font-size:14px}
+body.phone-app[data-hr-theme="6"] #phone-reference-state-text {font-size:15px!important;color:var(--hr-ink)}
+body.phone-app[data-hr-theme="6"] #phone-reference-status .phone-row button {font-size:14px;padding:10px 12px;min-height:48px}
+body.phone-app[data-hr-theme="6"] .impedance-panel {padding:16px 18px}
+body.phone-app[data-hr-theme="6"] .impedance-panel p {font-size:15px;line-height:1.55}
+body.phone-app[data-hr-theme="6"] .impedance-good {color:#25643b}
+body.phone-app[data-hr-theme="6"] .impedance-high {color:var(--hr-error)}
+body.phone-app[data-hr-theme="6"] :is(table,.impedance-panel table) {font-size:14px}
+body.phone-app[data-hr-theme="6"] :is(td,th) {border-color:var(--hr-line);padding:10px 8px}
+
+/* All existing secondary tools share the same visual vocabulary. */
+body.phone-app[data-hr-theme="6"] :is(#phone-aux-dialog,#phone-settings-dialog) {background:var(--hr-bg);padding:16px;gap:16px}
+body.phone-app[data-hr-theme="6"] .phone-dialog-back {min-height:48px;padding:10px 16px;font-size:15px}
+body.phone-app[data-hr-theme="6"] .phone-body {padding:0 18px 18px;gap:14px}
+body.phone-app[data-hr-theme="6"] .phone-reference-item,body.phone-app[data-hr-theme="6"] .phone-take {padding:16px;gap:12px;border-radius:14px;background:var(--hr-surface)}
+body.phone-app[data-hr-theme="6"] .phone-reference-item button {font-size:15px}
+body.phone-app[data-hr-theme="6"] .phone-take p {font-size:14px;line-height:1.6}
+body.phone-app[data-hr-theme="6"] :is(.phone-reference-selection,.phone-reference-transfer) {padding:16px;border-color:#93b09c;background:var(--hr-selected);color:var(--hr-ink);gap:12px}
+body.phone-app[data-hr-theme="6"] :is(.phone-reference-selection,.phone-reference-transfer) p {font-size:15px}
+body.phone-app[data-hr-theme="6"] .phone-reference-preview {background:var(--hr-bg)}
+body.phone-app[data-hr-theme="6"] .phone-reference-upload {min-height:48px;display:inline-flex;align-items:center;justify-content:center;font-size:15px;background:var(--hr-primary);border-color:var(--hr-primary);color:#fff;border-radius:12px}
+body.phone-app[data-hr-theme="6"] .phone-pool-row {padding:16px;gap:12px;border-radius:12px;background:var(--hr-surface)}
+body.phone-app[data-hr-theme="6"] #phone-reference-history {color:var(--hr-muted);font-size:14px}
+body.phone-app[data-hr-theme="6"] #phone-viewer {background:#111d21;color:#f1f7f3}
+body.phone-app[data-hr-theme="6"] #phone-viewer button {color:#edf5ef;background:#253b34;border-color:#7c9a8b;font-size:14px;min-height:48px}
+body.phone-app[data-hr-theme="6"] #phone-zoom-label {font-size:14px;color:#c1d3c8}
+body.phone-app[data-hr-theme="6"] #phone-viewer #phone-reference-history {color:#c1d3c8}
+body.phone-app[data-hr-theme="6"] #phone-settings-dialog .settings {gap:16px}
+body.phone-app[data-hr-theme="6"] #phone-settings-dialog .settings small {font-size:14px;line-height:1.6}
+body.phone-app[data-hr-theme="6"] #phone-settings-dialog :is(.row,.actions) {gap:10px;flex-wrap:wrap}
+body.phone-app[data-hr-theme="6"] #phone-settings-dialog .settings :is(select,input) {max-width:100%}
+body.phone-app[data-hr-theme="6"] #login .login-card {background:var(--hr-surface);color:var(--hr-ink);border:1px solid var(--hr-line);border-radius:20px;padding:24px;max-width:420px}
+body.phone-app[data-hr-theme="6"] #login h2 {font-size:24px}
+body.phone-app[data-hr-theme="6"] #login .mark {background:var(--hr-primary)}
+body.phone-app[data-hr-theme="6"] #toast {background:#213d30;color:#fff;border-color:#71917d;font-size:15px;line-height:1.55;border-radius:12px}
+body.phone-app[data-hr-theme="6"] .pcu-root .pcu-card {background:var(--hr-surface);border-color:var(--hr-line);border-radius:14px;padding:16px}
+body.phone-app[data-hr-theme="6"] .pcu-root .pcu-actions {gap:10px}
+body.phone-app[data-hr-theme="6"] .pcu-root .pcu-error {color:var(--hr-error)}
+body.phone-app[data-hr-theme="6"] .pcu-root .pcu-warning {color:var(--hr-warning)}
+body.phone-app[data-hr-theme="6"] .pcu-root .pcu-danger {color:var(--hr-error);border-color:#c7958d!important}
+
+@media(min-width:768px) {
+ body.phone-app[data-hr-theme="6"] {grid-template-columns:88px minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+ body.phone-app[data-hr-theme="6"]>header {grid-column:1/-1;grid-row:1}
+ body.phone-app[data-hr-theme="6"]>main {grid-column:2;grid-row:2;padding:24px;width:100%}
+ body.phone-app[data-hr-theme="6"] #phone-nav {grid-column:1;grid-row:2;display:flex;flex-direction:column;justify-content:flex-start;padding:16px 8px;gap:10px;border-top:0;border-right:1px solid var(--hr-line);background:var(--hr-soft)}
+ body.phone-app[data-hr-theme="6"] #phone-nav button {min-height:66px}
+ body.phone-app[data-hr-theme="6"] #phone-device-list {grid-template-columns:repeat(2,minmax(0,1fr));gap:0 24px}
+ body.phone-app[data-hr-theme="6"] #phone-native-metrics {grid-template-columns:repeat(4,minmax(0,1fr))}
+ body.phone-app[data-hr-theme="6"] .phone-native-metric:nth-child(n+2) {border-left:1px solid var(--hr-line)}
+ body.phone-app[data-hr-theme="6"] .phone-native-metric:nth-child(n+3) {border-top:0}
+ body.phone-app[data-hr-theme="6"] #phone-camera-tabs {grid-template-columns:repeat(6,minmax(0,1fr))}
+ body.phone-app[data-hr-theme="6"] .phone-home-state {flex-direction:row;align-items:center}
+}
+@media(max-height:700px) {
+ body.phone-app[data-hr-theme="6"] #phone-overview-actions {position:static}
+ body.phone-app[data-hr-theme="6"] .phone-page {overflow:auto}
+}
+@media(min-width:768px) and (max-height:500px) {
+ body.phone-app[data-hr-theme="6"] #phone-nav {padding:8px;gap:2px;overflow-y:auto;overscroll-behavior:contain}
+ body.phone-app[data-hr-theme="6"] #phone-nav button {min-height:52px;flex-shrink:0;padding:4px 2px;gap:2px}
+}
+@media(orientation:landscape) {
+ body.phone-app[data-hr-theme="6"] #phone-workflow-body {grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ body.phone-app[data-hr-theme="6"] #phone-page-workflow[data-setup-stage="reference"] #phone-preflight {display:flex;flex-direction:column;align-items:stretch;gap:10px}
+ body.phone-app[data-hr-theme="6"] #phone-page-workflow[data-setup-stage="reference"] #phone-preflight .actions {min-width:0}
+ body.phone-app[data-hr-theme="6"] .phone-fit-toolbar button {min-height:48px;font-size:14px}
+ body.phone-app[data-hr-theme="6"] #phone-fit-start {min-height:52px;font-size:16px}
+}
+body.phone-app.phone-fit-open[data-hr-theme="6"] {grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+body.phone-app.phone-fit-open[data-hr-theme="6"]>main {grid-column:1;grid-row:1;padding:12px}
+@media(prefers-reduced-motion:reduce) {
+ body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-viewer,#phone-aux-dialog,#phone-settings-dialog,#login) :is(button,a,input,select) {transition:none}
+}
+
+/* Compact phone layout: retain 48px touch targets and allow text to wrap. */
+body.phone-app[data-hr-theme="6"] {font-size:15px;line-height:1.4}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-viewer,#phone-aux-dialog,#phone-settings-dialog,#login) :is(button,input,select) {font-size:15px}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-viewer,#phone-aux-dialog,#phone-settings-dialog,#login) button {padding:8px 12px}
+body.phone-app[data-hr-theme="6"]>header {min-height:56px;padding:6px 12px}
+body.phone-app[data-hr-theme="6"]>main {padding:12px 12px 10px;gap:8px}
+body.phone-app[data-hr-theme="6"] .phone-page {gap:10px}
+body.phone-app[data-hr-theme="6"] .card-head {padding:12px 14px 9px}
+body.phone-app[data-hr-theme="6"] .card-head h3 {font-size:16px}
+body.phone-app[data-hr-theme="6"] :is(.phone-hint,.muted,.help,.hint,.card-head p) {font-size:13px;line-height:1.4}
+body.phone-app[data-hr-theme="6"] .hr-profile {padding:10px 12px}
+body.phone-app[data-hr-theme="6"] .hr-profile :is(h3,p) {margin:0 0 6px}
+body.phone-app[data-hr-theme="6"] .phone-home-state {gap:8px;padding:2px 0 4px}
+body.phone-app[data-hr-theme="6"] .phone-home-state h2 {font-size:20px;margin:0 0 5px}
+body.phone-app[data-hr-theme="6"] .phone-home-state p {font-size:15px;line-height:1.4}
+body.phone-app[data-hr-theme="6"] .phone-task-card {padding:12px;gap:8px}
+body.phone-app[data-hr-theme="6"] #phone-task-name {font-size:18px;line-height:1.4}
+body.phone-app[data-hr-theme="6"] #phone-next-step {font-size:14px;line-height:1.4}
+body.phone-app[data-hr-theme="6"] #phone-daily-duration {font-size:22px}
+body.phone-app[data-hr-theme="6"] .phone-native-metric {padding:10px 12px;gap:4px}
+body.phone-app[data-hr-theme="6"] .phone-native-metric b {font-size:20px}
+body.phone-app[data-hr-theme="6"] #phone-device-list>div {padding:7px 0;line-height:1.4}
+body.phone-app[data-hr-theme="6"] #phone-nav button {min-height:52px;gap:2px}
+body.phone-app[data-hr-theme="6"] .phone-result-card {padding:14px;gap:12px}
+body.phone-app[data-hr-theme="6"] .phone-result-card h3 {font-size:19px}
+body.phone-app[data-hr-theme="6"] #phone-result-text {font-size:15px;line-height:1.5}
+
+/* Denser layout requested for phone use; controls remain at least 48px high. */
+body.phone-app[data-hr-theme="6"] {font-size:14px;line-height:1.35}
+body.phone-app[data-hr-theme="6"] :is(main,header,#phone-nav,#phone-viewer,#phone-aux-dialog,#phone-settings-dialog,#login) :is(button,input,select) {font-size:14px}
+body.phone-app[data-hr-theme="6"]>main {padding:8px 10px;gap:6px}
+body.phone-app[data-hr-theme="6"] .phone-page {gap:7px}
+body.phone-app[data-hr-theme="6"] .card-head {padding:9px 10px 6px}
+body.phone-app[data-hr-theme="6"] .card-head h3 {font-size:15px;line-height:1.3}
+body.phone-app[data-hr-theme="6"] :is(.phone-hint,.muted,.help,.hint,.card-head p) {font-size:12px;line-height:1.35}
+body.phone-app[data-hr-theme="6"] .hr-profile {padding:8px 10px}
+body.phone-app[data-hr-theme="6"] .hr-profile :is(h3,p) {font-size:12px;line-height:1.35;margin:0 0 4px}
+body.phone-app[data-hr-theme="6"] .phone-home-state {gap:6px;padding:0 0 2px}
+body.phone-app[data-hr-theme="6"] .phone-home-state h2 {font-size:18px;margin:0 0 3px}
+body.phone-app[data-hr-theme="6"] .phone-home-state p {font-size:14px;line-height:1.35}
+body.phone-app[data-hr-theme="6"] .phone-home-entries {gap:6px}
+body.phone-app[data-hr-theme="6"] .phone-task-card {padding:9px 10px;gap:6px}
+body.phone-app[data-hr-theme="6"] .phone-task-heading {gap:8px}
+body.phone-app[data-hr-theme="6"] .phone-task-heading small {font-size:12px}
+body.phone-app[data-hr-theme="6"] #phone-task-name {font-size:16px;line-height:1.35}
+body.phone-app[data-hr-theme="6"] #phone-next-step {font-size:13px;line-height:1.35}
+body.phone-app[data-hr-theme="6"] #phone-daily-collection {padding:4px 2px;gap:3px}
+body.phone-app[data-hr-theme="6"] #phone-daily-duration {font-size:20px}
+body.phone-app[data-hr-theme="6"] #phone-daily-detail {font-size:12px;line-height:1.35}
+body.phone-app[data-hr-theme="6"] .phone-native-metric {padding:8px 10px;gap:3px}
+body.phone-app[data-hr-theme="6"] .phone-native-metric b {font-size:18px}
+body.phone-app[data-hr-theme="6"] .phone-native-metric small {font-size:12px}
+body.phone-app[data-hr-theme="6"] #phone-device-list>div {font-size:13px;padding:5px 0;line-height:1.35}
+body.phone-app[data-hr-theme="6"] .phone-result-card {padding:10px;gap:8px}
+body.phone-app[data-hr-theme="6"] .phone-result-card h3 {font-size:17px}
+body.phone-app[data-hr-theme="6"] #phone-result-text {font-size:14px;line-height:1.4}
