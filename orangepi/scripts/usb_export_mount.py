@@ -123,15 +123,28 @@ def mount_locked():
         raise RuntimeError('U盘在其他位置挂载，不能自动切换')
     original_mount_id = None
     if mounts:
-        raw = subprocess.check_output(['/usr/bin/findmnt', '-J', '-M', str(target), '-o', 'TARGET,SOURCE,UUID,OPTIONS'], timeout=5)
-        mounted = json.loads(raw).get('filesystems', [])
-        if (len(mounted) != 1 or mounted[0].get('target') != str(target) or
+        raw = subprocess.check_output(['/usr/bin/findmnt', '-J', '-M', str(target), '-o', 'TARGET,SOURCE,UUID,OPTIONS,FSTYPE'], timeout=5)
+        layers = json.loads(raw).get('filesystems', [])
+        scaffolds = [item for item in layers if item.get('fstype') == 'autofs']
+        mounted = [item for item in layers if item.get('fstype') != 'autofs']
+        if (len(scaffolds)>1 or any(item.get('source')!='systemd-1' or item.get('target')!=str(target) for item in scaffolds) or len(mounted) != 1 or mounted[0].get('target') != str(target) or
                 mounted[0].get('source') != device or
                 str(mounted[0].get('uuid','')).upper() != str(row['uuid']).upper() or
                 'ro' not in mounted[0].get('options','').split(',') or
                 mount_device(target) != info.st_rdev):
             raise RuntimeError('现有只读U盘身份无法核验')
         original_mount_id = mount_id(target)
+        if scaffolds:
+            # Import's systemd automount has an autofs layer underneath the
+            # read-only filesystem. Stop that exact transient mount first;
+            # otherwise a later safe eject would leave a live automount.
+            stopped=subprocess.run(['/usr/bin/systemd-umount','--no-ask-password',str(target)],capture_output=True,timeout=30)
+            if stopped.returncode or mount_device_count(info.st_rdev)!=0:
+                raise RuntimeError('无法安全退出只读自动挂载')
+            probe=subprocess.run(['/usr/bin/findmnt','-n','-M',str(target)],capture_output=True,timeout=5)
+            if probe.returncode==0:
+                raise RuntimeError('只读自动挂载仍然存在，拒绝导出')
+            mounts=[];original_mount_id=None
     invoking_user = os.environ.get('SUDO_USER','')
     if not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*\$?', invoking_user):
         raise RuntimeError('无法确认采集服务用户')

@@ -90,6 +90,29 @@ class MountTests(unittest.TestCase):
         self.run_helper(safe=False)
         self.assertIn('remount,rw,nodev,nosuid,noexec,uid=1000,gid=1000,umask=022',self.calls[0])
 
+    def test_autofs_import_mount_is_stopped_before_writable_export(self):
+        self.row['mountpoint']=str(self.root/'8-1');target=self.row['mountpoint']
+        layer={'target':target,'source':'systemd-1','uuid':None,'options':'rw','fstype':'autofs'}
+        ro={'target':target,'source':self.device,'uuid':'TEST-UUID','options':'ro,nodev,nosuid','fstype':'exfat'}
+        rw=dict(ro,options='rw,nodev,nosuid')
+        responses=[b'{"blockdevices":[]}',json.dumps({'filesystems':[layer,ro]}).encode(),json.dumps({'filesystems':[rw]}).encode()]
+        def command(args,**kwargs):
+            self.calls.append(args)
+            return SimpleNamespace(returncode=1 if args[0].endswith('findmnt') else 0)
+        with patch.object(mount,'ROOT',self.root),patch.object(mount,'candidates',return_value=[(self.row,self.info)]),patch.object(mount,'mount_device',return_value=self.info.st_rdev),patch.object(mount,'mount_device_count',side_effect=[0,1]),patch.object(mount,'mount_id',side_effect=[42,43]),patch.object(mount.subprocess,'check_output',side_effect=responses),patch.object(mount.subprocess,'run',side_effect=command),patch.object(mount.pwd,'getpwnam',return_value=SimpleNamespace(pw_uid=1000,pw_gid=1000)),patch.dict(mount.os.environ,{'SUDO_USER':'collector'}):
+            result=mount.mount_locked()
+        self.assertEqual(result['mount_id'],43)
+        self.assertEqual(self.calls[0],['/usr/bin/systemd-umount','--no-ask-password',target])
+        self.assertEqual(self.calls[1],['/usr/bin/findmnt','-n','-M',target])
+        self.assertIn('-t',self.calls[2])
+
+    def test_untrusted_autofs_layer_is_rejected_before_unmount(self):
+        self.row['mountpoint']=str(self.root/'8-1');target=self.row['mountpoint']
+        rows=[{'target':target,'source':'other','fstype':'autofs'}, {'target':target,'source':self.device,'uuid':'TEST-UUID','options':'ro','fstype':'exfat'}]
+        with patch.object(mount,'ROOT',self.root),patch.object(mount,'candidates',return_value=[(self.row,self.info)]),patch.object(mount.subprocess,'check_output',side_effect=[b'{"blockdevices":[]}',json.dumps({'filesystems':rows}).encode()]),patch.object(mount.subprocess,'run') as run:
+            with self.assertRaises(RuntimeError):mount.mount_locked()
+            run.assert_not_called()
+
     def test_existing_mount_wrong_device_is_rejected(self):
         self.row['mountpoint']=str(self.root/'8-1')
         with self.assertRaises(RuntimeError):self.run_helper(mount_device=os.makedev(8,2))
