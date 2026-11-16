@@ -459,6 +459,7 @@ class ReferenceControlsMixin:
             _save_preferences(self._reference_base,preferences);self._reference_preferences=preferences
             self._reference_retry=None;self._reference_manual_id=None
             snapshot=self.reference_catalog.freeze_list('pool',self.reference_catalog.revision,include_completed=True)
+            self._reference_task_blocks=self._text_blocks_for(snapshot['list_id'])
         self._apply_reference_snapshot(snapshot);self.reference_error=self._reference_preferences_error
         return True
 

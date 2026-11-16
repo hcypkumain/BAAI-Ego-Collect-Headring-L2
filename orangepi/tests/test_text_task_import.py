@@ -52,6 +52,15 @@ class TextImportTests(unittest.TestCase):
  def test_cloned_text_list_cannot_bypass_round_pool(self):
   res=append(self.catalog,self.raw,self.catalog.revision);clone=self.catalog.clone_list(res['pool_id'],'复制文字任务',self.catalog.revision)
   with self.assertRaises(ValueError):self.catalog.freeze_list(clone['id'],self.catalog.revision,include_completed=True)
+ def test_retired_text_pool_falls_back_without_erasing_round_state(self):
+  import reference_controls
+  from reference_catalog import CatalogError
+  from unittest.mock import Mock
+  class Owner(reference_controls.ReferenceControlsMixin):
+   pass
+  o=Owner();o._reference_base=self.base;o._reference_project=self.project;o._reference_ledger=ledger;o._reference_snapshot={'catalog_revision':0};o._reference_retry=None;o._reference_cli_image=None;o._reference_preferences={'version':1,'collector_id':'L2-017-EEG','selected_list_id':'textpool'};o.reference_catalog=Mock();o.reference_catalog.revision=2;o.reference_catalog.freeze_list.side_effect=[CatalogError('hidden','hidden_list',409),{'list_id':'pool','catalog_revision':2,'items':[],'total':0}];o.reference_catalog.single_list_mode=False;o.reference_catalog._load.return_value={'lists':{}};o._base_reference_task_blocks=None;o._reference_task_blocks=Mock(round_robin=True);o.refresh_reference_histories=Mock();o._apply_reference_snapshot=Mock(side_effect=lambda snapshot:self.assertIsNone(o._reference_task_blocks));o._reference_preferences_error=None
+  with patch.object(reference_controls,'_save_preferences'),patch.object(reference_controls,'_completed_paths',return_value=()),patch.object(reference_controls,'_reserved_paths',return_value=()):o.reference_refresh(force=True)
+  self.assertEqual(o._reference_preferences['selected_list_id'],'pool')
  def test_eeg_pool_selection_is_scoped_and_can_exit(self):
   import reference_controls,project_paths
   res=append(self.catalog,self.raw,self.catalog.revision)
