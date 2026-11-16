@@ -835,7 +835,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         scanned_fingerprint=fingerprint(devices().get('auto_discovery',{}))
         fingerprint_wire=json.loads(json.dumps(scanned_fingerprint));request_id=uuid.uuid4().hex
         scan_env=dict(os.environ,ORANGEPI_SCAN_REQUEST=json.dumps(dict(id=request_id,fingerprint=fingerprint_wire)))
-        scan_run=None;scan_nonce=None
+        scan_run=None;scan_nonce=None;verified_scan=None
         self.state='scanning';self.state_write()
         try:
             output,scan_run,scan_nonce=run_scan([str(BASE/'.venvs/hardware/bin/python'),str(SRC/'acquisition/scan_devices.py')],self.camera_registry,timeout=15,allow_partial=True,env=scan_env,return_identity=True)
@@ -851,7 +851,10 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             self.web_config=devices()
             if fingerprint(self.web_config.get('auto_discovery',{}))!=scanned_fingerprint:
                 raise ValueError('扫描结果发布前设备发生变化')
-            self.required_device_contract=build_contract(self.web_config,mode=self.web_config.get('collection_mode'))
+            try:self.required_device_contract=build_contract(self.web_config,mode=self.web_config.get('collection_mode'))
+            except ValueError:
+                verified_scan=scan
+                raise
         except (OSError,ValueError,subprocess.TimeoutExpired,ScanProcessError) as exc:
             if isinstance(exc,ScanProcessError) and exc.cleanup_pending:
                 self.remember_pending_owner(exc)
@@ -874,7 +877,13 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 try:
                     partial=decode_scan_result(exc.partial_output,exc.run,getattr(exc,'nonce',None),request_id,fingerprint_wire)
                 except (ValueError,TypeError):pass
-            if partial is not None:
+            if verified_scan is not None:
+                from required_device_contract import required_names
+                self.required_device_contract={}
+                self.required_devices_missing=list(required_names(self.web_config,mode=self.web_config.get('collection_mode')))
+                self.last_scan=[dict(item,last_probe_connected=item['connected'],connected=False,status='scan_failed',
+                    error='本轮探测结果已取得，但必需设备配置不完整，暂不可用于采集') for item in verified_scan]
+            elif partial is not None:
                 self.last_scan=[dict(item,last_probe_connected=item['connected'],connected=False,status='cleanup_pending',
                     error='本轮探测'+('已取到数据' if item['connected'] else '未确认')+'；设备仍在清理，暂不可使用') for item in partial]
             else:

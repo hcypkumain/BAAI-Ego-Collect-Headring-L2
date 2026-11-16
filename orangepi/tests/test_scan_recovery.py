@@ -3,7 +3,7 @@ sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'src/orangepi_
 from scan_result import encode,decode
 from required_device_contract import build_contract
 from required_capture_fixture import config as device_config
-from unittest.mock import Mock
+from unittest.mock import Mock,patch
 ROOT=pathlib.Path(os.environ.get('HOTPLUG_SOURCE_ROOT',str(pathlib.Path(__file__).resolve().parents[1]/'src/orangepi_collect/control')))
 
 def controller_class():
@@ -58,6 +58,15 @@ class RecoveryTests(unittest.TestCase):
   self.assertTrue(c.scan_devices(announce=False));self.assertFalse(c.scan_ok)
   self.assertEqual(set(c.required_devices_missing),set(required))
   c.scan_devices=Mock();clock.value=116;c.poll_hotplug();c.scan_devices.assert_not_called()
+ def test_missing_required_configuration_preserves_verified_rows_but_blocks_capture(self):
+  c,clock,runner,required=controller_class();rows=self.ready_rows(required)
+  runner.run.return_value=types.SimpleNamespace(returncode=0,stdout=json.dumps(rows))
+  with patch('required_device_contract.build_contract',side_effect=ValueError('必需设备配置缺失：cam_left_wrist,cam_right_wrist')):
+   self.assertFalse(c.scan_devices(announce=False))
+  self.assertFalse(c.scan_ok);self.assertEqual(c.scan_available,[]);self.assertIsNone(c.selected_devices)
+  self.assertEqual(len(c.last_scan),len(rows));self.assertTrue(all(x['last_probe_connected'] for x in c.last_scan))
+  self.assertTrue(all(not x['connected'] and x['status']=='scan_failed' for x in c.last_scan));self.assertEqual(set(c.required_devices_missing),set(required))
+  self.assertIn('cam_left_wrist',c.last_help[0])
  def test_failed_scan_never_overrides_recording_ownership(self):
   c,clock,runner,_=controller_class();c.scan_retry_pending=True;c.scan_devices=Mock();c.worker=Mock();clock.value=116
   for state in ['preparing','recording','countdown','finalizing','confirm_stop']:
