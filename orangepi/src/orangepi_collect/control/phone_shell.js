@@ -75,7 +75,13 @@
   pages.overview.innerHTML='<section class="card phone-home-state"><div><h2 id="phone-home-title">等待 Pi 状态</h2><p id="phone-home-detail">连接后显示真实采集流程</p></div><div class="phone-home-entries"></div></section><div id="phone-native-metrics"></div><div id="phone-device-list"></div><div id="phone-overview-actions" class="actions"></div><p id="phone-home-hint" class="phone-hint"></p>';
   const taskCard=document.createElement('section');taskCard.className='card phone-task-card';taskCard.innerHTML='<div class="phone-task-heading"><small>当前采集任务</small><span>每段随机抽图</span></div><b id="phone-task-name">等待任务列表</b><div class="phone-task-progress"><progress id="phone-task-progress" aria-label="参考图完成进度"></progress><small id="phone-task-counts"></small></div><p id="phone-next-step" class="phone-hint"></p>';
   const profileCard=document.createElement('section');profileCard.className='card';profileCard.innerHTML='<h3>采集版本</h3><div class="actions"><button id="phone-mode-emg" data-action="collection_mode">肌电</button><button id="phone-mode-eeg" data-action="collection_mode">脑电</button></div><p id="phone-mode-note" class="phone-hint"></p>';pages.overview.prepend(profileCard);
-  for(const mode of ['emg','eeg'])$('phone-mode-'+mode).onclick=()=>options.action('collection_mode',mode);
+  function requestCollectionMode(mode){
+   if(!['emg','eeg'].includes(mode))return false;
+   const label=mode==='eeg'?'脑电版（含肌电）':'肌电版';
+   if(global.confirm('是否确认切换到“'+label+'”？\n切换会重新加载采集界面，取消将保持当前模式。')!==true)return false;
+   return options.action('collection_mode',mode);
+  }
+  for(const mode of ['emg','eeg'])$('phone-mode-'+mode).onclick=()=>requestCollectionMode(mode);
   pages.overview.insertBefore(taskCard,$('phone-native-metrics'));
   const dailyCard=document.createElement('section');dailyCard.className='card phone-task-card';dailyCard.id='phone-daily-collection';dailyCard.innerHTML='<small>今日合格采集时长（北京时间）</small><b id="phone-daily-duration">正在读取…</b><p id="phone-daily-detail" class="phone-hint">确认保存且通过/WARN 后累计</p>';
   const dailyExport=button('导出今日汇总（TXT）',()=>downloadDaily().catch(error=>{text($('phone-daily-detail'),error.message);}));dailyExport.id='phone-daily-export';dailyCard.append(dailyExport);pages.overview.insertBefore(dailyCard,$('phone-native-metrics'));
