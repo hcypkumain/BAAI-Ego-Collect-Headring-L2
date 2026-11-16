@@ -127,6 +127,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.pending_camera_owner=None
         if not smoke:ledger.migrate_legacy()
         self.init_references(selected_image,explicit_image=explicit_image)
+        from usb_export_service import ExportService
+        self.usb_export_service=ExportService(CODE_BASE)
         self.exit_code=0
         self.success_count=0
         self.retained_created_ids=set()
@@ -1488,7 +1490,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
 
     def key(self,key):
         self._assert_controller_thread()
-        if self.state in ('usb_importing','usb_import_recovery') and key!='q':return False
+        if self.state in ('usb_importing','usb_import_recovery','usb_exporting','usb_export_recovery') and key!='q':return False
         if key in ('a','b','c','d','enter','escape'):
             interrupt=getattr(self.voice,'interrupt',None)
             if callable(interrupt):interrupt()
@@ -1617,7 +1619,17 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
                 else:self.keyboard=Keyboard()
             self.start_dashboard()
             self.state_write()
-            self.scan_devices()
+            from usb_export_gate import pending_exports
+            self.usb_export_pending = pending_exports(CODE_BASE)
+            if self.usb_export_pending:
+                self.state='usb_export_recovery'
+                self.last_help=['发现未完成的U盘导出事务，恢复完成前暂停采集。']
+                self.state_write()
+                if self.smoke:raise RuntimeError('U盘导出恢复未完成，禁止采集测试')
+                try:self.usb_export_service.start(recover=True)
+                except Exception as error:self.usb_export_service.error=str(error)
+            else:
+                self.scan_devices()
             if self.smoke:self.key('a')
             if self.smoke:
                 self.key('a')

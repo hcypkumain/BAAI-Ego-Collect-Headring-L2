@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'src/orangepi_collect/common'))
 import project_paths
-import copy,io,json,tempfile,unittest
+import copy,io,json,tempfile,unittest,threading
 from pathlib import Path
 from unittest.mock import Mock,patch
 from PIL import Image
@@ -24,7 +24,7 @@ class ManualReferenceTests(unittest.TestCase):
         settings=dict(version=1,list_ids=ids,block_size=5)
         (base/'configs/task_block_policy.json').write_text(json.dumps(settings))
         self.cat=cat=ReferenceCatalog(base,project=self.project);self.ids=ids
-        c=self.c=Controller();c.reference_catalog=cat;c._reference_base=base;c._reference_project=self.project
+        c=self.c=Controller();c._controller_thread=threading.current_thread();c._controller_thread_id=threading.get_ident();c.ui_revision=0;c.reference_catalog=cat;c._reference_base=base;c._reference_project=self.project
         c._reference_preferences={'selected_list_id':'pool'};c._reference_preferences_error=None;c.reference_error=None
         c._reference_retry=None;c._reference_active=None;c._reference_snapshot=None;c._reference_completed=()
         c._reference_cli_image=None;c._reference_cli_force=False;c._reference_manual_id=None;c._reference_histories={}

@@ -23,13 +23,15 @@ def main():
   old={p:subprocess.check_output(['git','-C',str(ROOT),'show',BASELINE+':'+p]) for p in paths if p.endswith(('.py','.js','.html','.css'))}
  current={p.relative_to(ROOT).as_posix():p.read_bytes() for p in (ROOT/prefix).rglob('*')
           if p.is_file() and p.suffix in ('.py','.js','.html','.css')}
- if len(old)!=123 or set(old)!=set(current):raise SystemExit('Collector membership differs from pinned 123-file baseline')
+ if len(old)!=123 or not set(old)<=set(current):raise SystemExit('Collector baseline files are missing')
+ additions=set(current)-set(old)
+ if len(additions)>32 or any(not path.startswith(prefix+'/') for path in additions):raise SystemExit('Unexpected collector additions')
  directory=ROOT/'deployment/phone-usb-entry';overrides={}
- for path in sorted(old):
-  if old[path]==current[path]:continue
+ for path in sorted(current):
+  if path in old and old[path]==current[path]:continue
   target=directory/'collector-overrides'/path;target.parent.mkdir(parents=True,exist_ok=True)
   target.write_bytes(current[path])
-  overrides[path]=dict(pre_sha256=sha(old[path]),post_sha256=sha(current[path]),size=len(current[path]))
+  overrides[path]=dict(pre_sha256=sha(old[path]) if path in old else None,post_sha256=sha(current[path]),size=len(current[path]))
  profile=dict(schema=1,baseline_commit=BASELINE,
               rotation=dict(block_size=5,count_basis='saved',progress_version=4,preserve_existing_n=True),
               overrides=overrides)

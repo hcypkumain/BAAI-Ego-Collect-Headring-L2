@@ -16,6 +16,7 @@ class EegProcess:
 
     def __init__(self, config, output=None, owner=None):
         self.owner = owner
+        self.impedance_timeout = 90 if (BASE/'runtime/official-sdk-0.2.0').is_dir() else 12
         self.ready = False
         self.seen = 0
         self.last = time.monotonic()
@@ -86,7 +87,7 @@ class EegProcess:
         deadline = state.get('deadline_monotonic')
         now = time.monotonic() if now is None else now
         return (state.get('pending') is True and isinstance(deadline,(int,float))
-            and not isinstance(deadline,bool) and math.isfinite(deadline) and 0 < deadline-now <= 12)
+            and not isinstance(deadline,bool) and math.isfinite(deadline) and 0 < deadline-now <= getattr(self,'impedance_timeout',12))
 
     def send_impedance(self, command):
         if (not isinstance(command,dict) or set(command)-{'command','request_id'}
@@ -99,7 +100,7 @@ class EegProcess:
         if command['command'] != 'IMPEDANCE_REVIEW':
             with self.state_lock:
                 self.impedance=dict(self.impedance,can_record=False,pending=True,
-                    request_id=command['request_id'], deadline_monotonic=time.monotonic()+12)
+                    request_id=command['request_id'], deadline_monotonic=time.monotonic()+getattr(self,'impedance_timeout',12))
                 self.ready=False
         with self.write_lock:
             self.process.stdin.write(json.dumps(command)+'\n');self.process.stdin.flush()

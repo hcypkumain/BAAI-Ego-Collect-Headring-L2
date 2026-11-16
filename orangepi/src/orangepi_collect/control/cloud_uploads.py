@@ -72,6 +72,11 @@ class UploadManager:
             self.state['paused']=True;self._save()
         return dict(configured=False)
     def collection_busy(self):
+        try:
+            from project_paths import CODE_BASE
+            from usb_export_gate import pending_exports
+            if pending_exports(CODE_BASE):return True
+        except Exception:return True
         value=self.display_state();privacy=value.get('privacy') or {};worker=value.get('worker') or {}
         return value.get('state') not in ('device_confirm','idle','failed_wait','exhausted') or privacy.get('required') is not False or worker.get('recording_active') is True
 
@@ -183,7 +188,8 @@ class UploadManager:
                         if self.state['paused']:continue
                         job=next((j for j in self.state['jobs'] if j['state'] in ('queued','cleanup_queued')),None)
                     with self.lock:
-                        if job and not self.stop.is_set() and not self.collection_busy():
+                        if (job and job.get('state') in ('queued','cleanup_queued') and not self.state['paused']
+                                and not self.stop.is_set() and not self.collection_busy()):
                             try:self._launch(job)
                             except Exception as error:
                                 job.update(state='failed',phase='需要重试',error=str(error) if isinstance(error,CloudError) else '上传进程未能启动，请重试');self._save()

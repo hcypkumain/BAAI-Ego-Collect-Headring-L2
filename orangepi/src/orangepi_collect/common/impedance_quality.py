@@ -45,6 +45,10 @@ def _number(value):
 
 
 def _complete_window(state):
+    if state.get('algorithm') == 'omnibci-official-measure-0.2.0':
+        return (state.get('sdk_measurement_completed') is True and state.get('window_ready') is True
+                and state.get('window_status') == 'ready' and state.get('sample_rate_hz') == 250
+                and state.get('window_seconds') == 4)
     start, end = state.get('window_start_position'), state.get('window_end_position')
     span, received = state.get('window_observed_span'), state.get('window_received_samples')
     return (state.get('window_ready') is True and state.get('window_status') == 'ready'
@@ -100,8 +104,10 @@ def assess_impedance(state, expected_mask=None):
         value = float(value) if _number(value) else None
         reason = row.get('reason')
         accepted = row.get('accepted_samples')
-        sample_valid = (type(accepted) is int and accepted >= 250
-                        and type(received) is int and accepted <= received)
+        sample_valid = ((state.get('algorithm') == 'omnibci-official-measure-0.2.0'
+                         and state.get('sdk_measurement_completed') is True and accepted is None)
+                        or (type(accepted) is int and accepted >= 250
+                            and type(received) is int and accepted <= received))
         numeric_valid = (row.get('enabled') is True and reason == 'ok'
                          and value is not None and sample_valid)
         if not enabled:
@@ -134,9 +140,12 @@ def assess_impedance(state, expected_mask=None):
         and mapping[channel].get('enabled') is True
         and mapping[channel].get('reason') == 'ok'
         and _number(mapping[channel].get('value_kohm'))
-        and type(mapping[channel].get('accepted_samples')) is int
-        and mapping[channel]['accepted_samples'] >= 250
-        and type(received) is int and mapping[channel]['accepted_samples'] <= received
+        and ((state.get('algorithm') == 'omnibci-official-measure-0.2.0'
+              and state.get('sdk_measurement_completed') is True
+              and mapping[channel].get('accepted_samples') is None)
+             or (type(mapping[channel].get('accepted_samples')) is int
+                 and mapping[channel]['accepted_samples'] >= 250
+                 and type(received) is int and mapping[channel]['accepted_samples'] <= received))
         and not stale and mapping[channel].get('stale') is not True)
     passed_count = sum(row['passed'] for row in enabled_results)
     if state.get('required') is not True or state.get('supported') is not True:

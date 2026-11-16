@@ -14,7 +14,7 @@ if ! "$unsigned"; then
  : "${ANDROID_KEYSTORE_PASS:?Set ANDROID_KEYSTORE_PASS in the environment}"
  : "${ANDROID_KEY_ALIAS:?Set ANDROID_KEY_ALIAS to the existing release alias}"
 fi
-version_code="${HEADRING_VERSION_CODE:-8}"
+version_code="${HEADRING_VERSION_CODE:-9}"
 if [[ ! "$version_code" =~ ^[1-9][0-9]{0,8}$ ]]; then printf 'Invalid HEADRING_VERSION_CODE\n' >&2; exit 2; fi
 if [[ $# != 1 ]]; then printf 'Usage: %s [--unsigned] [--parallel] OUTPUT_APK\n' "$0" >&2; exit 2; fi
 output="$1"

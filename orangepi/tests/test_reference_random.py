@@ -1,5 +1,6 @@
 """Random draws preserve immutable reference proofs, retries and catalog writes."""
 import io
+import threading
 import json
 from email.message import Message
 from pathlib import Path
@@ -47,6 +48,7 @@ class ReferenceTests(unittest.TestCase):
             data=io.BytesIO(); Image.new('RGB',(16,12),color).save(data,'PNG')
             self.ids.append(self.catalog.upload(data.getvalue(),color+'.png',self.list_id,self.catalog.revision)['id'])
         self.controller=Controller(); c=self.controller
+        c._controller_thread=threading.current_thread();c._controller_thread_id=threading.get_ident();c.ui_revision=0
         c.refresh_reference_histories=Mock()
         c._reference_project=self.project; c._reference_base=self.base; c._reference_ledger=Mock()
         # This catalog-only test has no pending ledger reservations. Keep the
@@ -58,6 +60,7 @@ class ReferenceTests(unittest.TestCase):
         c._reference_cli_image=None; c._reference_cli_force=False; c._reference_completed=()
         c._deferred_catalog_revision=None; c._reference_reap_outcome=None
         c.state='idle'; c.worker=None; c.quit=False; c.state_write=Mock(); c.voice=Mock()
+        c._reference_task_blocks=None;c._base_reference_task_blocks=None;c._configure_text_blocks(self.list_id)
         c._apply_reference_snapshot(self.snapshot())
         self.done=[]
         self.completed=patch('reference_controls._completed_paths',side_effect=lambda *args:tuple(self.done))
@@ -67,7 +70,7 @@ class ReferenceTests(unittest.TestCase):
         return self.catalog.freeze_list(self.list_id,self.catalog.revision,include_completed=True)
 
     def draw(self,index):
-        with patch('reference_controls.secrets.choice',side_effect=lambda entries:entries[index]) as choice:
+        with patch('reference_controls.secrets.choice',side_effect=lambda entries: entries[0] if isinstance(entries[0],str) else entries[index]) as choice:
             result=self.controller.reference_begin_preparation()
         return result,choice
 
@@ -84,7 +87,7 @@ class ReferenceTests(unittest.TestCase):
         self.assertEqual(result['position'],3)
         self.assertEqual(result['queue_sha256'],self.snapshot()['queue_sha256'])
         self.assertEqual(len(result['asset']['sha256']),64)
-        self.assertEqual(self.controller.reference_task_state()['selection_mode'],'random_without_replacement')
+        self.assertEqual(self.controller.reference_task_state()['selection_mode'],'task_blocks_random_without_replacement')
 
     def test_repeated_draw_during_active_segment_is_refused(self):
         self.draw(1)
@@ -142,12 +145,13 @@ class ReferenceTests(unittest.TestCase):
         self.done.extend(item['relative_path'] for item in self.snapshot()['items'])
         self.controller.reference_refresh(force=True)
         with self.assertRaises(ValueError):self.controller.reference_begin_preparation()
-    def test_manual_choice_can_explicitly_retake_completed_image_without_losing_pending_pool(self):
+    def test_manual_choice_rejects_completed_image_without_losing_pending_pool(self):
         from types import SimpleNamespace
         c=self.controller;self.done.append(self.snapshot()['items'][2]['relative_path']);c.reference_refresh(force=True)
         c.dashboard=SimpleNamespace(privacy=SimpleNamespace(snapshot=lambda:{'required':False}));c.selected_devices=('cam_ros_left',);c.prepare=Mock()
-        c.select_reference_image({'image_id':self.ids[2],'catalog_revision':self.catalog.revision})
-        self.assertEqual(c.image,self.project/self.snapshot()['items'][2]['relative_path']);c.prepare.assert_called_once()
+        with self.assertRaisesRegex(ValueError,'已完成'):
+            c.select_reference_image({'image_id':self.ids[2],'catalog_revision':self.catalog.revision})
+        c.prepare.assert_not_called()
         self.assertEqual(c.reference_task_state()['remaining'],3)
 
     def owner(self,state='idle',privacy=None):

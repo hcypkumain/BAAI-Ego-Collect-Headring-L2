@@ -32,7 +32,15 @@ def safe_to_step():
   token=(BASE/'runtime/dashboard_token').read_text().strip()
   request=urllib.request.Request('http://127.0.0.1:8765/api/display-state',headers={'X-Access-Token':token})
   with urllib.request.urlopen(request,timeout=.7) as response:v=json.load(response)
-  started=bool(v.get('session') and (Path(v['session'])/'start_gate.json').exists())
+  session=v.get('session')
+  started=bool(session and (Path(session)/'start_gate.json').exists())
+  if v.get('state')=='ready' and session:
+   try:
+    worker=json.loads((Path(session)/'status.json').read_text())
+    impedance=worker.get('eeg_impedance') or {}
+    if not isinstance(impedance,dict):return False,'eeg_impedance_state_invalid'
+    if impedance.get('active') is True or impedance.get('pending') is True:return False,'eeg_impedance_measurement_active'
+   except (OSError,ValueError,TypeError):return False,'eeg_impedance_state_unavailable'
   return verdict(v,started)
  except Exception:
   # During boot the UI is intentionally ordered after this service. A failed

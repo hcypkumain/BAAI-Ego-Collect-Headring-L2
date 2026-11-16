@@ -164,7 +164,7 @@ class RegistryTests(unittest.TestCase):
   p,run=r.spawn_owned(self.reg,'capture',[sys.executable,'-c',leader,str(held),str(pidfile),grand],stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
   try:
    p.wait(timeout=3);pid=int(pidfile.read_text())
-   c=scope['Controller']();c.worker=p;c.capture_owner_run=run;c.capture_owner_released=False;c.camera_registry=self.reg;c.path=self.root;c.recording_store=Mock();c.state_write=Mock();c.last_help=[];c.discard_deadline=time.monotonic()+1
+   c=scope['Controller']();c._assert_controller_thread=lambda:None;c.worker=p;c.capture_owner_run=run;c.capture_owner_released=False;c.camera_registry=self.reg;c.path=self.root;c.recording_store=Mock();c.state_write=Mock();c.last_help=[];c.discard_deadline=time.monotonic()+1
    c.poll_discard();c.recording_store.discard_current.assert_not_called();self.assertEqual(c.capture_owner_run,run);self.assertIs(c.worker,p);self.assertTrue(held.exists());self.assertIn('未确认',c.last_help[0])
   finally:
    if pidfile.exists():

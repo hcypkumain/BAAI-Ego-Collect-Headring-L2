@@ -217,7 +217,11 @@ def main():
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     # Every recorded EEG episode requires its own durable preflight. Preview stays opt-in.
     required=bool(args.output) or os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT')=='1'
-    if required:
+    official_sdk = (base/'runtime/official-sdk-0.2.0').is_dir()
+    if official_sdk:
+        sys.path.insert(0, str(base/'runtime/official-sdk-0.2.0'))
+        from omnibci import Board
+    elif required:
         from serial_v1_impedance import SerialV1Board as Board
     else:
         from omnibci import Board
@@ -246,8 +250,12 @@ def main():
             preset = {k:v for k,v in PRESETS[config['filter_preset']].items() if k != 'label'}
             preview_filter = StreamingFilter(FilterSettings(**preset), 250, [True]*8)
         gate = HostGate(args.output) if args.output else None
-        from eeg_impedance import Preflight
-        preflight=Preflight(board,config,args.output,emit,required)
+        if official_sdk:
+            from official_impedance import OfficialPreflight
+            preflight=OfficialPreflight(board,config,args.output,emit,required)
+        else:
+            from eeg_impedance import Preflight
+            preflight=Preflight(board,config,args.output,emit,required)
         pump = Pump(board,preflight); parent = os.getppid()
         signal.signal(signal.SIGTERM, lambda *a:pump.stop.set())
         signal.signal(signal.SIGINT, lambda *a:pump.stop.set())

@@ -149,10 +149,13 @@ def plan_zip(archive):
 
 
 class UsbTaskImporter:
-    def __init__(self, base, project, catalog, volumes=None):
+    def __init__(self, base, project, catalog, volumes=None, operation_path=None):
         self.base, self.project, self.catalog = Path(base), Path(project), catalog
         self.root = self.base/'runtime/usb_task_import';self.root.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock();self.volumes = volumes or mounted_usb_volumes
+        from usb_operation_lock import LOCK
+        self.operation_path = Path(operation_path) if operation_path is not None else LOCK
+        self._bootstrap_operation = volumes is None
         self.cancel = threading.Event();self.scan_id = None;self.files = {};self.thread = None
         self.value = dict(state='idle', done=0, total=0, message='请选择U盘中的 ZIP')
         self.ready = None
@@ -177,6 +180,12 @@ class UsbTaskImporter:
             if 'state' in values:_json(self.root/'status.json', self.value)
 
     def scan(self):
+        from usb_operation_lock import operation_lock
+        # The privileged helper creates the shared lock before the user opens it.
+        if self._bootstrap_operation and not self.operation_path.exists(): self.volumes()
+        with operation_lock(self.operation_path): return self._scan_locked()
+
+    def _scan_locked(self):
         if self.active:raise CatalogError('正在导入，请等待完成', 'usb_import_busy', 409)
         rows, choices = [], {}
         for volume in self.volumes()[:8]:
@@ -223,10 +232,19 @@ class UsbTaskImporter:
             if not ids and not remove_ids:raise ValueError('请选择要导入的任务包或要移入回收站的旧列表')
             selected = [copy.deepcopy(self.files[i]) for i in ids]
             if sum(v['identity'][2] for v in selected)>MAX_BATCH_BYTES:raise ValueError('选中 ZIP 总大小最多4 GiB')
+            from usb_operation_lock import operation_lock
+            lease = operation_lock(self.operation_path);lease.__enter__()
             self.ready = None;self.cancel.clear()
-            self.update(state='building', done=0, total=0, selected=len(ids), message='正在校验选中的 ZIP，旧列表暂不改变', error=None)
-            self.thread = threading.Thread(target=self._build, args=(selected,current['revision'],remove_ids), daemon=True)
-            self.thread.start()
+            try:self.update(state='building', done=0, total=0, selected=len(ids), message='正在校验选中的 ZIP，旧列表暂不改变', error=None)
+            except BaseException:
+                lease.__exit__(None,None,None);raise
+            def build_with_lease():
+                try:self._build(selected,current['revision'],remove_ids)
+                finally:lease.__exit__(None,None,None)
+            self.thread = threading.Thread(target=build_with_lease, daemon=True)
+            try:self.thread.start()
+            except BaseException:
+                lease.__exit__(None,None,None);raise
 
     def _build(self, selected, revision, remove_ids):
         job = uuid.uuid4().hex;stage = self.root/'staging'/job

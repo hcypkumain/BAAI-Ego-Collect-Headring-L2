@@ -42,6 +42,7 @@ def source_manifest(source,hashes=True,progress=None):
     for current,dirs,names in os.walk(str(source),followlinks=False):
         parent=Path(current)
         if any((parent/name).is_symlink() for name in dirs):raise CloudError('采集目录中含链接，已停止上传')
+        if any(name.endswith(('.tmp','.partial','.active')) for name in dirs):raise CloudError('批次包含尚未完成的目录')
         for name in sorted(names):
             path=parent/name
             if name.endswith(('.tmp','.partial','.active')):raise CloudError('批次包含尚未完成的文件')

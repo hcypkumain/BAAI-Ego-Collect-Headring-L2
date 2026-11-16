@@ -110,6 +110,14 @@ def main():
     ROOT.mkdir(mode=0o755,exist_ok=True)
     if ROOT.stat().st_uid!=0 or ROOT.stat().st_mode & 0o022:
         raise SystemExit('Unsafe mount directory')
+    operation_fd = os.open(str(ROOT / '.operation.lock'), os.O_RDWR | os.O_CREAT | getattr(os, 'O_NOFOLLOW', 0), 0o666)
+    try:
+        operation_info = os.fstat(operation_fd)
+        if operation_info.st_uid != 0 or not stat.S_ISREG(operation_info.st_mode):
+            raise RuntimeError('U盘操作锁不安全')
+        os.fchmod(operation_fd, 0o666)
+    finally:
+        os.close(operation_fd)
     fd=os.open(str(ROOT/'.mount.lock'),os.O_RDWR|os.O_CREAT|getattr(os,'O_NOFOLLOW',0),0o600)
     with os.fdopen(fd,'r+') as lock:
         if os.fstat(lock.fileno()).st_uid!=0:raise SystemExit('Unsafe mount lock')

@@ -38,8 +38,13 @@ class EegQcIntegration(unittest.TestCase):
              emg_data=np.zeros((len(et),8)),imu_gyro=np.zeros((len(it),3)),imu_accel=np.zeros((len(it),3)))
     (root/'device_selection.json').write_text(json.dumps({'selected':['emg_left'],'device_config':{}}))
     qc.standardize_marker(root,{'start_unix_ns':0,'stop_unix_ns':int(min(et[-1],it[-1])*1e9)})
-    report=qc.check_emg(root)
-    self.assertEqual(report['level'],expected)
-    self.assertEqual(json.loads((root/'emg_qc_policy.json').read_text())['accepted'],expected!='ERROR')
+    # Synthetic signal-only fixture has no real capture receipt; test the
+    # quality policy separately from the dedicated receipt-integrity tests.
+    with patch('local_qc_receipt.write'):
+     report=qc.check_emg(root)
+    self.assertEqual(report['streams']['emg_left']['level'],expected)
+    # Missing frozen device and capture evidence must remain a session error.
+    self.assertEqual(report['level'],'ERROR')
+    self.assertFalse(json.loads((root/'emg_qc_policy.json').read_text())['accepted'])
 
 if __name__=='__main__':unittest.main()

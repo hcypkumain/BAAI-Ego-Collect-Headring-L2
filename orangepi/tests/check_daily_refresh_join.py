@@ -4,6 +4,7 @@ p=Path(__file__).resolve().parents[1]/'src/orangepi_collect/control';sys.path.in
 r=types.ModuleType('recording_store');r.CST=datetime.timezone(datetime.timedelta(hours=8));r.bounded=lambda p,n:Path(p).read_text();r.atomic_json=lambda p,v: None;sys.modules['recording_store']=r
 q=types.ModuleType('qc_details');q.summarize_qc=lambda _:dict(error_count=0,warn_count=0,findings=[]);sys.modules['qc_details']=q
 c=types.ModuleType('cloud_common');c.sync_dir=lambda p:None;sys.modules['cloud_common']=c
+u=types.ModuleType('usb_export_ledger');u.completed_credential=lambda *args:{};u._read=lambda *args:{};sys.modules['usb_export_ledger']=u
 from daily_collection import DailyCollection
 with tempfile.TemporaryDirectory() as tmp:
  root=Path(tmp); (root/'ops').mkdir(); (root/'data').mkdir(); entered=threading.Event();release=threading.Event(); state={'state':'idle'}

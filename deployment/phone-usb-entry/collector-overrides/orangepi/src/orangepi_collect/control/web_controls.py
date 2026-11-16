@@ -180,7 +180,8 @@ class WebControls:
             reference_access=getattr(self,'reference_access',None),
             recording_store=getattr(self,'recording_store',None),
             reference_states=getattr(self,'reference_history_states',None),
-            usb_task_importer=getattr(self,'usb_task_importer',None))
+            usb_task_importer=getattr(self,'usb_task_importer',None),
+            usb_export_service=getattr(self,'usb_export_service',None))
         from storage_paths import session_root
         self.last_review_path=recording_review.latest_recording(getattr(self,'session_dir',None) or session_root())
         self.voice.on_prompt=self.voice_prompt_changed
@@ -517,6 +518,8 @@ class WebControls:
                     self.select_reference_list(job['value'])
                 elif action=='usb_task_import':
                     self.start_usb_task_import(job['value'])
+                elif action in ('usb_export_start','usb_export_retry'):
+                    self.start_usb_export(recover=action=='usb_export_retry')
                 elif action=='qc_mode':
                     if getattr(self,'worker',None):raise ValueError('请在新一段准备前切换质检模式')
                     __import__('qc_deferred').save(BASE,job['value']);self.state_write()

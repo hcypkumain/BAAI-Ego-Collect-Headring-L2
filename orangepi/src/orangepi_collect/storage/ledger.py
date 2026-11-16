@@ -247,6 +247,18 @@ def reserved_used(entry,image=None):
         return image is None or _session_matches_image(session,image)
     except (OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError,yaml.YAMLError):return False
 
+def _usb_completion(entry,image):
+    try:
+        from usb_export_ledger import completed_credential
+        value=completed_credential(BASE,entry['session'])
+        if value.get('status')!='success' or value.get('qualified') is not True:
+            return False
+        if image is None:return False
+        image=Path(image).resolve();relative=image.relative_to(Path(PROJECT).resolve()).as_posix()
+        return (relative==value.get('reference_path') and image.is_file() and
+                hashlib.sha256(image.read_bytes()).hexdigest()==value.get('reference_sha256'))
+    except (OSError,ValueError,TypeError,KeyError,RecursionError,ImportError):return False
+
 def valid_used(entry,image=None):
     """Only a currently verified full-QC receipt or bound upload tombstone completes a task."""
     if not isinstance(entry,dict) or entry.get('status')!='success':return False
@@ -258,7 +270,7 @@ def valid_used(entry,image=None):
     if _qualified_session(session,image):return True
     try:
         if not session.exists() and not session.is_symlink():
-            return _uploaded_completion(entry,image) or _server_handoff_completion(entry,image)
+            return _uploaded_completion(entry,image) or _server_handoff_completion(entry,image) or _usb_completion(entry,image)
     except (OSError,ValueError,TypeError):return False
     return False
 

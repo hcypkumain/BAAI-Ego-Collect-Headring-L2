@@ -692,6 +692,7 @@ function renderImpedance(s){
  let note=value.message||value.error||({unavailable:'阻抗检查暂不可用。',not_selected:'本段未选择脑电设备。',awaiting_prepare:'请先准备本段，设备就绪后开始阻抗检查。',initializing:'正在准备本段并连接脑电设备。',interrupted:'上次准备已中断，请重新准备。',not_checked:'开始检查后调整电极接触，全部启用通道低于 60 kΩ 才能通过。',starting:'正在确认检测配置。',measuring:'调整电极接触并观察逐通道结果，等待完整检测窗口。',restoring:'正在关闭检测并恢复原配置。',resuming:'正在等待恢复后的普通脑电数据。',completed:verdict.accepted?(value.can_record?'阻抗已通过并确认，可开始正式录制。':'阻抗已通过，请确认结果后继续。'):'阻抗尚未通过，请调整不通过通道并重新检测。',fault:'检测或设备恢复未确认，请处理错误。'})[phase]||'等待设备状态';
  if(verdict.advisory&&phase==='not_checked')note='开始检查并记录阻抗；当前版本不按 60 kΩ 拦截采集。';
   if(verdict.advisory&&phase==='completed'&&!value.error)note=!verdict.canContinue?'缺少完整有效读数，请重新检测。':value.can_record?'阻抗结果已记录，普通脑电采样已恢复，可以继续。':'阻抗结果仅作参考，确认结果后继续查看参考图。';
+ if(value.algorithm==='omnibci-official-measure-0.2.0'&&phase==='measuring')note='正在检测，请稍候；完成后可调整电极并重新检查。';
  if(verdict.stale)note='检测数据已过期，请等待新的完整有效检测窗口。';
  $('#impedance-note').textContent=note;$('#impedance-note').classList.toggle('error',!!value.error||verdict.stale||!verdict.advisory&&value.quality?.state==='fail');
  if(s.state==='ready'&&value.required===true&&!value.can_record){$('#step-title').textContent='采集前阻抗检查';$('#instruction').textContent=note}

@@ -213,6 +213,23 @@ class DailyCollection:
                         records[identifier]['qualified'] = bool(records[identifier].get('accepted_at_capture'))
                         records[identifier].pop('source_missing', None)
                         live.add(identifier)
+            from usb_export_ledger import completed_credential
+            for credential in (self.base/'runtime/usb_exports/credentials').glob('*.json'):
+                try:
+                    from usb_export_ledger import _read
+                    raw = _read(credential)
+                    proof = completed_credential(self.base, raw['source'])
+                    row = proof.get('daily_snapshot')
+                    if not isinstance(row,dict) or row.get('id') != Path(proof['source']).name:continue
+                    identifier = row['id']
+                    if identifier in live:continue
+                    row = copy.deepcopy(row)
+                    row['local_cleaned'] = True
+                    row['usb_exported'] = True
+                    row.pop('source_missing',None)
+                    records[identifier] = row
+                    live.add(identifier)
+                except (OSError,ValueError,TypeError,KeyError,RecursionError):continue
             for identifier, row in records.items():
                 if identifier not in live and not row.get('local_cleaned'):
                     row['qualified'] = False

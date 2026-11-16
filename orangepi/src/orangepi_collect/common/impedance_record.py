@@ -15,6 +15,7 @@ MAX_RECORD_BYTES = 65536
 RELATIVE_PATH = 'eeg/impedance_preflight.json'
 USED_PATH = 'eeg/impedance_used.json'
 METHOD = 'estimated_from_confirmed_excitation'
+OFFICIAL_ALGORITHM = 'omnibci-official-measure-0.2.0'
 LEGACY_ALGORITHM = 'gui062-sin-cos-dc-31.25hz-v1'
 
 
@@ -205,7 +206,7 @@ def _validate_preflight(root, expected_state=None, expected_eeg_config=None,
     if (value.get('schema_version') != SCHEMA_VERSION or value.get('session_id') != root.name
             or value.get('units') != 'kOhm' or value.get('method') != METHOD):
         raise ImpedanceRecordError('impedance evidence schema/session/units mismatch')
-    if value.get('algorithm') not in (ALGORITHM, LEGACY_ALGORITHM):
+    if value.get('algorithm') not in (ALGORITHM, LEGACY_ALGORITHM, OFFICIAL_ALGORITHM):
         raise ImpedanceRecordError('unsupported impedance algorithm identity')
     if (value.get('phase') != 'completed' or any(value.get(k) is not True for k in
             ('required', 'supported', 'reviewed', 'can_record', 'loff_off_confirmed', 'frontend_restored'))
@@ -214,6 +215,9 @@ def _validate_preflight(root, expected_state=None, expected_eeg_config=None,
     if (isinstance(expected_state, dict) and expected_state.get('algorithm') == ALGORITHM
             and value.get('algorithm') != ALGORITHM):
         raise ImpedanceRecordError('new SDK impedance evidence cannot downgrade to a legacy record')
+    if (isinstance(expected_state, dict) and expected_state.get('algorithm') == OFFICIAL_ALGORITHM
+            and value.get('algorithm') != OFFICIAL_ALGORITHM):
+        raise ImpedanceRecordError('official SDK evidence cannot downgrade to another record')
     epoch = value.get('measurement_epoch')
     if not isinstance(epoch, str) or not 0 < len(epoch) <= 64:
         raise ImpedanceRecordError('missing measurement epoch')
@@ -243,8 +247,9 @@ def _validate_preflight(root, expected_state=None, expected_eeg_config=None,
             raise ImpedanceRecordError('impedance channel/mask mismatch')
         number = channel.get('value_kohm')
         accepted = channel.get('accepted_samples')
-        if type(accepted) is not int or accepted < 0:
-            raise ImpedanceRecordError('invalid accepted impedance sample count')
+        if not (value.get('algorithm') == OFFICIAL_ALGORITHM and accepted is None):
+            if type(accepted) is not int or accepted < 0:
+                raise ImpedanceRecordError('invalid accepted impedance sample count')
         if number is not None:
             if (isinstance(number, bool) or not isinstance(number, (int, float))
                     or not math.isfinite(number) or number < 0 or not channel['enabled']
@@ -257,6 +262,22 @@ def _validate_preflight(root, expected_state=None, expected_eeg_config=None,
         raise ImpedanceRecordError('no valid impedance channel; repeat measurement')
     if value.get('algorithm') == ALGORITHM:
         _validate_sdk_details(value, frontend, channels)
+    elif value.get('algorithm') == OFFICIAL_ALGORITHM:
+        if (value.get('sdk_measurement_completed') is not True
+                or value.get('sdk_revision') != '843013ba62f1f05098c8639a657585720ce66a72'
+                or value.get('sdk_result_mask') != frontend.get('enabled_mask')
+                or type(value.get('clipped_mask')) is not int
+                or value.get('clipped_mask') & ~frontend.get('enabled_mask')
+                or any((bool(value['clipped_mask'] & (1 << i)) != (row.get('reason') == 'adc_saturated'))
+                       for i, row in enumerate(channels))
+                or value.get('window_seconds') != 4 or value.get('sample_rate_hz') != 250
+                or value.get('window_ready') is not True or value.get('window_status') != 'ready'
+                or value.get('normal_frame_confirmed') is not True
+                or value.get('input_side') != frontend.get('reference')
+                or value.get('series_kohm') != (4.40 if frontend.get('reference') == 'srb2' else 9.98)
+                or not _positive_number(value.get('normal_frame_monotonic_ns'))
+                or not value['measurement_started_monotonic_ns'] <= value['normal_frame_monotonic_ns'] <= value['completed_monotonic_ns']):
+            raise ImpedanceRecordError('official SDK result or recovery evidence is incomplete')
     enabled_count = sum(c['enabled'] for c in channels)
     if (value.get('enabled_channel_count') != enabled_count
             or value.get('valid_channel_count') != valid

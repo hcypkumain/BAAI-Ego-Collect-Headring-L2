@@ -16,6 +16,9 @@ for key,value in [('ROOT',str(b)),('PROJECT',str(b.parent)),('USER',os.environ['
 PY
 sudo install -m 644 "$BASE/runtime/embodied-pi-collect.service" /etc/systemd/system/embodied-pi-collect.service
 
+# Install export helper and preserve previous helpers for rollback.
+"$BASE/scripts/service/install_usb_export.sh"
+
 # Narrow root helpers and sudoers rules. Without these the collector starts but
 # USB task-import mounting and the console shutdown action silently fail.
 sudo install -o root -g root -m 755 "$BASE/scripts/usb_tasks_mount_readonly.py" /usr/local/lib/collector-usb-task-import/mount-readonly

@@ -1,0 +1,71 @@
+#!/usr/bin/python3 -I
+"""Set time from bounded stdin only, guarded by LAN and capture leases."""
+import fcntl,hashlib,hmac,json,math,os,re,sys,time,subprocess,urllib.request
+from pathlib import Path
+sys.path.insert(0,'/usr/local/lib/headring-time')
+from headring_capture_guard import CaptureGuard,safe_snapshot
+
+def main():
+ raw=sys.stdin.buffer.read(2049)
+ if len(raw)>2048:raise ValueError('request_too_large')
+ request=json.loads(raw)
+ if not isinstance(request,dict) or set(request)!={'epoch_ms','device_id','collection_context'} or not isinstance(request['device_id'],str) or not re.fullmatch(r'cp_[0-9]{4}',request['device_id']):raise ValueError('invalid_request')
+ context=request['collection_context']
+ if not isinstance(context,str) or not 1<=len(context)<=128:raise ValueError('invalid_context')
+ ms=request['epoch_ms']
+ if type(ms)!=int or not 1577836800000<=ms<4102444800000:raise ValueError('invalid_time')
+ if Path('/opt/egorecord/DEVICE_ID').read_text().strip()!=request['device_id']:raise ValueError('wrong_device')
+ started=time.monotonic()
+ fd=os.open('/run/headring-lan-time.lock',os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600)
+ with os.fdopen(fd,'w') as lock:
+  fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  guard=CaptureGuard()
+  if not (guard.base/'runtime').is_dir():raise ValueError('capture_runtime_missing')
+  with guard.lease():
+   allowed,reason=guard.allowed()
+   if not allowed or reason!='camera_idle':raise ValueError(reason)
+   profile=json.loads((guard.base/'runtime/collection_profile.json').read_text())
+   if profile.get('active_mode') not in ('eeg','emg') or profile.get('legacy_mode') not in ('eeg','emg'):raise ValueError('invalid_profile')
+   active=guard.base if profile['legacy_mode']==profile['active_mode'] else guard.base.parent/'profiles'/profile['active_mode']/'orangepi'
+   token=(active/'runtime/dashboard_token').read_text().strip()
+   req=urllib.request.Request('http://127.0.0.1:8765/api/display-state',headers={'X-Access-Token':token})
+   with urllib.request.urlopen(req,timeout=1) as reply:status=json.load(reply)
+   if status.get('collection_context')!=context:raise ValueError('context_changed')
+   if not safe_snapshot(status)[0]:raise ValueError('workflow_busy')
+   # Suspend chrony only while stepping; always restore if it was active.
+   state=subprocess.run(['/usr/bin/systemctl','is-active','--quiet','chrony.service'],timeout=2).returncode
+   if state not in (0,3):raise ValueError('chrony_status_unknown')
+   active=state==0
+   restored=True
+   try:
+    if active:
+     subprocess.run(['/usr/bin/systemctl','stop','chrony.service'],check=True,timeout=3)
+    # Re-check authoritative workflow after stopping the service.
+    with urllib.request.urlopen(req,timeout=1) as reply:status=json.load(reply)
+    if status.get('collection_context')!=context or not safe_snapshot(status)[0]:raise ValueError('workflow_changed')
+    target=ms/1000+(time.monotonic()-started)
+    boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    marker=Path('/run/headring-phone-time.json');temp=marker.with_suffix('.new')
+    previous=marker.read_bytes() if marker.is_file() else None
+    temp.write_text(json.dumps({'boot_id':boot,'monotonic':time.monotonic()}));os.chmod(temp,0o600);os.replace(temp,marker)
+    try:time.clock_settime(time.CLOCK_REALTIME,target)
+    except Exception:
+     if previous is None:marker.unlink()
+     else:
+      temp.write_bytes(previous);os.chmod(temp,0o600);os.replace(temp,marker)
+     raise
+    persistence={}
+    for name,args in [('rtc',['/usr/sbin/hwclock','--systohc','--utc']),('saved_clock',['/sbin/fake-hwclock','save'])]:
+     try:p=subprocess.run(args,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=2);persistence[name]=p.returncode==0
+     except (OSError,subprocess.TimeoutExpired):persistence[name]=False
+   finally:
+    if active:
+     try:
+      subprocess.run(['/usr/bin/systemctl','start','chrony.service'],check=True,timeout=3)
+      restored=subprocess.run(['/usr/bin/systemctl','is-active','--quiet','chrony.service'],timeout=2).returncode==0
+     except (OSError,subprocess.SubprocessError):restored=False
+     if not restored and sys.exc_info()[0] is not None:raise RuntimeError('chrony_restore_failed')
+   print(json.dumps({'ok':True,'epoch_ms':round(time.time()*1000),'persistence':persistence,'chrony_restored':restored}))
+if __name__=='__main__':
+ try:main()
+ except Exception as e:print(json.dumps({'ok':False,'error':str(e)[:100]}));sys.exit(1)

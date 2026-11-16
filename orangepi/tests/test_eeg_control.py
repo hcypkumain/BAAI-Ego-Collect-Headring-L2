@@ -69,7 +69,7 @@ class EegControlTests(unittest.TestCase):
     def test_dashboard_filter_action_persists_selected_preset(self):
         with tempfile.TemporaryDirectory() as temp:
             base=Path(temp);(base/'runtime').mkdir()
-            owner=web_controls.WebControls();owner.state='ready';owner.ui_revision=4
+            owner=web_controls.WebControls();owner._assert_controller_thread=Mock();owner.state='ready';owner.ui_revision=4
             owner.worker=None;owner.keyboard=None;owner.voice=Mock();owner.selected_devices=None
             owner.dashboard=Mock();owner.dashboard.take.return_value={'action':'eeg_filter','revision':4,'value':'raw'}
             owner.ui_publish=Mock();owner.state_write=Mock();owner.release_prepared=Mock();owner.stop_preview=Mock();owner.ensure_preview=Mock()

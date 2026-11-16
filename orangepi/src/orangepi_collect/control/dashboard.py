@@ -91,7 +91,8 @@ def task_block_privacy_safe(value):
 def actions_for(state, impedance=None):
     actions=_base_actions_for(state,impedance)
     if preparation_state(state):actions=actions+['abandon']
-    if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['collection_mode']+['delete_recording','retain_error_recording']+['qc_mode','usb_task_import']
+    if state in ('device_confirm','idle','failed_wait','exhausted'):actions=actions+['collection_mode']+['delete_recording','retain_error_recording']+['qc_mode','usb_task_import','usb_export_start']
+    if state == 'usb_export_recovery':actions=actions+['usb_export_retry']
     if state in ('device_confirm','idle','failed_wait','exhausted','ready'):actions=actions+['select_reference','switch_reference']
     if state in SAFE:actions=actions+['shutdown']
     return actions
@@ -149,7 +150,7 @@ def snapshot_actions(snapshot):
     if snapshot.get('task_list',{}).get('manual_task_switch') and not snapshot.get('task_list',{}).get('can_switch'):
         actions=[x for x in actions if x not in ('select_reference','switch_reference','reference_list')]
     if (snapshot.get('privacy',{}).get('required') or (snapshot.get('worker') or {}).get('recording_active')):
-        actions=[action for action in actions if action not in ('abandon','delete_recording','retain_error_recording','select_reference','switch_reference','usb_task_import','collection_mode','shutdown')]
+        actions=[action for action in actions if action not in ('abandon','delete_recording','retain_error_recording','select_reference','switch_reference','usb_task_import','usb_export_start','collection_mode','shutdown')]
     if snapshot.get('wrist_camera_settings',{}).get('can_change') is False:
         actions=[action for action in actions if action!='wrist_camera_settings']
     if (snapshot.get('state') in ('device_confirm','idle','failed_wait','exhausted')
@@ -167,10 +168,11 @@ def snapshot_actions(snapshot):
 
 class Dashboard:
     def __init__(self, base, preview, settings, reference_catalog=None, reference_credentials=None,
-                 reference_completed_paths=None, reference_access=None,recording_store=None,reference_states=None,usb_task_importer=None):
+                 reference_completed_paths=None, reference_access=None,recording_store=None,reference_states=None,usb_task_importer=None,usb_export_service=None):
         self.base=Path(base);self.preview=Path(preview)
         self.reference_catalog=reference_catalog;self.reference_credentials=reference_credentials
         self.usb_task_importer=usb_task_importer
+        self.usb_export_service=usb_export_service
         self.reference_completed_paths=reference_completed_paths or (lambda: ())
         self.reference_access=reference_access
         self.recording_store=recording_store
@@ -203,6 +205,8 @@ class Dashboard:
         if len(self.token)<24:raise ValueError('Invalid dashboard token')
         from phone_links import PhoneLinks
         self.phone_links=PhoneLinks(self)
+        from phone_http import PhoneTime
+        self.phone_time=PhoneTime(self)
         from device_diagnostics import DeviceDiagnostics
         self.device_diagnostics=DeviceDiagnostics(self)
         from camera_check import CameraChecks

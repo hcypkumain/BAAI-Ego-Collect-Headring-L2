@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
+from unittest.mock import patch
 import unittest
 import zipfile
 
@@ -27,7 +29,8 @@ class UsbTaskImportMergeTests(unittest.TestCase):
         self.usb=self.project/'usb';self.usb.mkdir()
         self.zip_path=self.usb/'new.zip'
         self.write_zip(self.zip_path, [('新名称.png',self.png('blue'))])
-        self.importer=UsbTaskImporter(self.base,self.project,self.catalog,volumes=lambda:[dict(mountpoint=str(self.usb),label='USB')])
+        operation=self.base/'runtime/operation.lock';operation.parent.mkdir(parents=True,exist_ok=True);operation.touch()
+        self.importer=UsbTaskImporter(self.base,self.project,self.catalog,volumes=lambda:[dict(mountpoint=str(self.usb),label='USB')],operation_path=operation)
 
     @staticmethod
     def png(color):
@@ -43,6 +46,34 @@ class UsbTaskImportMergeTests(unittest.TestCase):
         entry=self.importer.files[token]
         self.importer._build([entry],scanned['catalog_revision'],list(remove_ids))
         self.assertEqual(self.importer.status()['state'],'ready')
+
+    def test_scan_holds_usb_operation_lock(self):
+        from usb_operation_lock import operation_lock
+        entered=threading.Event();release=threading.Event()
+        def volumes():
+            entered.set();release.wait(3)
+            return [dict(mountpoint=str(self.usb),label='USB')]
+        self.importer.volumes=volumes
+        worker=threading.Thread(target=self.importer.scan);worker.start()
+        self.assertTrue(entered.wait(3))
+        try:
+            with self.assertRaises(ValueError):
+                with operation_lock(self.importer.operation_path):pass
+        finally:release.set();worker.join(3)
+        with operation_lock(self.importer.operation_path):pass
+
+    def test_build_holds_usb_operation_lock_until_worker_finishes(self):
+        from usb_operation_lock import operation_lock
+        scan=self.importer.scan();entered=threading.Event();release=threading.Event()
+        def build(*args):entered.set();release.wait(3)
+        with patch.object(self.importer,'_build',side_effect=build):
+            self.importer.start(dict(scan_id=scan['scan_id'],zip_ids=[scan['files'][0]['id']],remove_list_ids=[],catalog_revision=scan['catalog_revision']))
+            self.assertTrue(entered.wait(3))
+            try:
+                with self.assertRaises(ValueError):
+                    with operation_lock(self.importer.operation_path):pass
+            finally:release.set();self.importer.thread.join(3)
+        with operation_lock(self.importer.operation_path):pass
 
     def test_import_merges_and_preserves_existing_selection(self):
         self.prepare();self.importer.commit()

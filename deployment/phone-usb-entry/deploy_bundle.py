@@ -51,14 +51,19 @@ def load_bundle(path,expected):
  require(set(files)==set(m['files']),'manifest membership mismatch')
  for name,entry in m['files'].items():
   require(name.startswith(('release/','collector/','support/')) and sha(files[name])==entry['sha256'] and len(files[name])==entry['size'] and entry['mode'] in (0o644,0o755),'manifest mismatch: '+name)
- require(len([x for x in files if x.startswith('collector/orangepi/src/orangepi_collect/')])==123,'wrong collector source count')
+ names={x[len('collector/'):]:files[x] for x in files if x.startswith('collector/orangepi/src/orangepi_collect/')}
+ additions=m.get('collector_additions',[])
+ require(isinstance(additions,list) and len(additions)==len(set(additions)) and len(additions)<=32 and all(isinstance(x,str) and x in names for x in additions),'invalid collector additions')
+ require(len(names)==123+len(additions),'wrong collector source count')
  require(m.get('task_rotation')=={'block_size':5,'count_basis':'saved','progress_version':4,'preserve_existing_n':True},'saved-count deployment policy missing')
  source_index={name[len('collector/'):]:{'sha256':sha(data),'size':len(data)} for name,data in files.items() if name.startswith('collector/orangepi/')}
  require(m.get('collector_source_sha256')==sha(json.dumps(source_index,sort_keys=True,separators=(',',':')).encode()),'collector source index mismatch')
  if 'source_preimages' in m:
   pre=m['source_preimages'];require(m.get('source_preimage_commit') in PREIMAGES and m.get('source_preimage_sha256')==PREIMAGES[m['source_preimage_commit']] and isinstance(pre,dict),'unknown migration source')
   require(set(pre)=={x[len('collector/'):] for x in files if x.startswith('collector/orangepi/')},'migration source membership mismatch')
-  require(sha(json.dumps(pre,sort_keys=True,separators=(',',':')).encode())==PREIMAGES[m['source_preimage_commit']],'migration source lock mismatch')
+  require(all(pre[x] is None for x in additions),'addition preimage must be absent')
+  original={k:v for k,v in pre.items() if k not in additions}
+  require(sha(json.dumps(original,sort_keys=True,separators=(',',':')).encode())==PREIMAGES[m['source_preimage_commit']],'migration source lock mismatch')
  return m,files
 
 def unit_state(name):
@@ -111,12 +116,78 @@ def prior_owned_release(device_id):
  require(len(matches)==1,'existing units not owned by one intact transaction')
  return matches[0]
 
+# These helpers grant narrowly scoped privileged operations. Only replace a
+# pre-existing helper when its bytes match a reviewed release.
+FEATURE_HELPERS={
+ '/usr/local/lib/collector-usb-task-import/mount-readonly':('support/usb_tasks_mount_readonly.py',0o755,{'0e672274737b4cd09539e68f2ca376c8806769945aa63ad202f64d316c3f034d','6030c6685a7fe1d9e9fbc5d68190e8c4bcbabaa5f9c5e4d3c4354a59618d8fcc'}),
+ '/usr/local/lib/collector-usb-task-import/mount-export':('support/usb_export_mount.py',0o755,set()),
+ '/usr/local/sbin/headring-phone-time':('support/headring-phone-time',0o755,{'3e56928dcabe3f05afff8d61533ee9b81847c5cd5a3d9996b7a6d4826d3fe2d3','27fdee0c80e5afc3d8c88f4cf7a0ff533cc4bac2b7ffb76fb6c1fafe84d96f24'}),
+ '/usr/local/sbin/headring-lan-time':('support/headring-lan-time',0o755,{'65cafeb798741873d8164b9ae677b53a2b21ce6144066a800bc0e126b65a628d','c7cf968b85bd2d788369d04b636e5359811bb03a92a3885427841f44eb93733c'}),
+ '/usr/local/lib/headring-time/headring_capture_guard.py':('support/headring_capture_guard.py',0o644,set()),
+}
+def feature_files(files,user):
+ require(re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}',user or '') is not None,'unsafe collector service user')
+ result={}
+ for target,(source,mode,known) in FEATURE_HELPERS.items():
+  require(source in files,'required feature helper missing: '+source)
+  result[target]={'data':files[source],'mode':mode,'known':known}
+ result['/etc/sudoers.d/collector-usb-export']={'data':(user+' ALL=(root) NOPASSWD: /usr/local/lib/collector-usb-task-import/mount-readonly "", /usr/local/lib/collector-usb-task-import/mount-export ""\n').encode(),'mode':0o440,'known':set()}
+ result['/etc/sudoers.d/headring-phone-time']={'data':(user+' ALL=(root) NOPASSWD: /usr/local/sbin/headring-phone-time ""\n').encode(),'mode':0o440,'known':set()}
+ return result
+
+def plan_feature_helpers(m,files):
+ if m.get('integrated_helpers_version') is None:return {}
+ require(m.get('integrated_helpers_version')==1,'unknown helper version')
+ user=cmd(['/usr/bin/systemctl','show','embodied-pi-collect.service','--property=User','--value']).stdout.strip()
+ features=feature_files(files,user);result={}
+ for name,entry in features.items():
+  target=Path(name);check_ancestors(target);require(not target.is_symlink(),'feature helper symlink: '+name)
+  for parent in target.parents:
+   if parent.exists():
+    st=parent.stat();mode=stat.S_IMODE(st.st_mode)
+    require(st.st_uid==0 and not mode&0o002 and (not mode&0o020 or st.st_gid==0),'unsafe feature directory: '+str(parent))
+  before=None
+  if target.exists():
+   st=target.stat();require(stat.S_ISREG(st.st_mode) and st.st_uid==0 and stat.S_IMODE(st.st_mode)==entry['mode'],'unsafe feature helper: '+name)
+   before=sha(safe_read(target));require(before==sha(entry['data']) or before in entry['known'],'unrecognized feature helper: '+name)
+  result[name]={'before':before,'after':sha(entry['data']),'mode':entry['mode']}
+ return result
+
+@contextlib.contextmanager
+def acquire_feature_operation_locks(m):
+ if m.get('integrated_helpers_version') is None:
+  yield;return
+ user=cmd(['/usr/bin/systemctl','show','embodied-pi-collect.service','--property=User','--value']).stdout.strip()
+ require(re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}',user or '') is not None,'unsafe collector service user')
+ home=Path(pwd.getpwnam(user).pw_dir)
+ paths=[Path('/run/collector-usb-task-import/.operation.lock'),home/'maintenance/usb-data-export/export.lock']
+ descriptors=[]
+ try:
+  for path in paths:
+   if not path.exists() and not path.is_symlink():continue
+   check_ancestors(path);fd=os.open(str(path),os.O_RDWR|os.O_NOFOLLOW);descriptors.append(fd)
+   require(stat.S_ISREG(os.fstat(fd).st_mode),'invalid USB operation lock')
+   fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+  yield
+ finally:
+  for fd in reversed(descriptors):os.close(fd)
+
 def verify_environment(m,files,root):
  require(os.geteuid()==0,'run as root')
  require(platform.system()=='Linux' and platform.machine() in ('aarch64','arm64'),'requires Linux arm64')
  require(Path('/opt/egorecord/DEVICE_ID').read_text().strip()==m['device_id'],'device identity mismatch')
  require(root.is_absolute() and not root.is_symlink() and (root/'.venvs/hardware/bin/python').is_file() and (root/'scripts/run.sh').is_file(),'initialized collector runtime missing')
  require(unit_state('embodied-pi-collect.service')['active'],'collector service is not active')
+ feature_plan=plan_feature_helpers(m,files)
+ if m.get('integrated_helpers_version')==1:
+  for executable in ('/usr/bin/lsblk','/usr/bin/findmnt','/bin/mount','/bin/umount','/usr/sbin/visudo'):
+   require(os.path.isfile(executable) and os.access(executable,os.X_OK),'feature dependency unavailable: '+executable)
+  user=cmd(['/usr/bin/systemctl','show','embodied-pi-collect.service','--property=User','--value']).stdout.strip()
+  require(re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}',user or '') is not None,'unsafe collector service user')
+  r=subprocess.run(['/usr/sbin/runuser','-u',user,'--',str(root/'.venvs/hardware/bin/python'),'-c','import yaml; from PIL import Image'],stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=10)
+  require(r.returncode==0,'reference import dependencies unavailable')
+  chrony=cmd(['/usr/bin/systemctl','show','chrony.service','--property=LoadState','--value'],False)
+  require(chrony.returncode==0 and chrony.stdout.strip()=='loaded','chrony service unavailable')
  running=cmd(['/usr/bin/systemctl','show','embodied-pi-collect.service','--property=ExecStart','--value']).stdout
  require(str(root/'scripts/run.sh') in running,'collector root differs from active service')
  require(Path('/run/camd.sock').exists(),'camera status unavailable')
@@ -173,13 +244,16 @@ def verify_environment(m,files,root):
   relative=name[len('collector/orangepi/'):];target=root/relative;check_ancestors(target)
   require(not target.is_symlink(),'collector source symlink: '+relative)
   exists=target.exists();before=sha(safe_read(target)) if exists else None
-  if migration is None:require(exists,'collector source missing: '+relative)
+  if migration is None:
+   is_addition=('orangepi/'+relative) in m.get('collector_additions',[])
+   if is_addition:require(not exists or before==sha(data),'unmanaged added collector file differs: '+relative)
+   else:require(exists,'collector source missing: '+relative)
   else:require(before==migration['orangepi/'+relative],'legacy source changed: '+relative)
   prehash[relative]=before
   if before!=sha(data):diffs.append(relative)
- require(len([n for n in files if n.startswith('collector/orangepi/')])==123,'collector file count')
+ require(len([n for n in files if n.startswith('collector/orangepi/')])==123+len(m.get('collector_additions',[])),'collector file count')
  require(not Path(m['release_prefix']).exists(),'release directory already exists')
- return {'collector_changes':diffs,'collector_prehash':prehash,'legacy_units':legacy,'previous_release':previous,'usb':usb,'release_prefix':m['release_prefix']}
+ return {'collector_changes':diffs,'collector_prehash':prehash,'legacy_units':legacy,'previous_release':previous,'usb':usb,'release_prefix':m['release_prefix'],'feature_plan':feature_plan}
 
 def acquire_capture_guard(files,root):
  data=files['support/services/usb-phone-link/usb_data_host.py'];fd,path=tempfile.mkstemp(prefix='headring-capture-guard-',suffix='.py')
@@ -276,13 +350,13 @@ def apply(m,files,root,plan):
  try:
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   current=verify_environment(m,files,root);require(not current.get('already') and current==plan,'preflight state changed; retry plan')
-  need_capture=bool(plan['collector_changes']) or any(x['active'] for x in plan['legacy_units'].values()) or any(x['active'] for x in plan.get('previous_release',{}).get('units',{}).values())
+  need_capture=bool(plan['collector_changes']) or any(x['before']!=x['after'] for x in plan.get('feature_plan',{}).values()) or any(x['active'] for x in plan['legacy_units'].values()) or any(x['active'] for x in plan.get('previous_release',{}).get('units',{}).values())
   capture=acquire_capture_guard(files,root) if need_capture else contextlib.nullcontext()
-  with capture:
+  with capture, acquire_feature_operation_locks(m):
    # Check identity, units and every collector preimage again while the lease is held.
    require(verify_environment(m,files,root)==plan,'state changed after capture lease')
    tx=STATE/('transaction-'+m['release_id']);require(not tx.exists(),'transaction already exists; inspect or roll back');tx.mkdir(mode=0o700)
-   j={'schema':1,'status':'preparing','release_id':m['release_id'],'files':[],'legacy_units':plan['legacy_units'],'previous_units':plan.get('previous_release',{}).get('units',{}),'collector_stop_intent':False,'collector_changed':bool(plan['collector_changes']),'collector_root':str(root)};save_journal(tx/'journal.json',j)
+   j={'schema':1,'status':'preparing','release_id':m['release_id'],'files':[],'legacy_units':plan['legacy_units'],'previous_units':plan.get('previous_release',{}).get('units',{}),'collector_stop_intent':False,'collector_changed':bool(plan['collector_changes']) or any(x['before']!=x['after'] for x in plan.get('feature_plan',{}).values()),'collector_root':str(root)};save_journal(tx/'journal.json',j)
    write_atomic(tx/'capture_guard.py',files['support/services/usb-phone-link/usb_data_host.py'],0o600)
    j['capture_guard_sha']=sha(files['support/services/usb-phone-link/usb_data_host.py']);save_journal(tx/'journal.json',j)
    try:
@@ -300,6 +374,20 @@ def apply(m,files,root,plan):
        backup_and_write(root/relative,data,0o644,j,tx)
      elif name.startswith('release/'):
       backup_and_write(Path(m['release_prefix'])/name[len('release/'):],data,m['files'][name]['mode'],j,tx)
+    if plan.get('feature_plan'):
+     require(plan_feature_helpers(m,files)==plan['feature_plan'],'feature helpers changed after preflight')
+     user=cmd(['/usr/bin/systemctl','show','embodied-pi-collect.service','--property=User','--value']).stdout.strip()
+     for target,entry in feature_files(files,user).items():
+      if plan['feature_plan'][target]['before']==plan['feature_plan'][target]['after']:continue
+      if target.startswith('/etc/sudoers.d/'):
+       fd,temp=tempfile.mkstemp(prefix='headring-sudoers-',dir=str(tx))
+       try:
+        os.fchmod(fd,0o440)
+        with os.fdopen(fd,'wb') as handle:handle.write(entry['data']);handle.flush();os.fsync(handle.fileno())
+        cmd(['/usr/sbin/visudo','-cf',temp])
+       finally:
+        if os.path.exists(temp):os.unlink(temp)
+      backup_and_write(Path(target),entry['data'],entry['mode'],j,tx)
     try:account=pwd.getpwnam('avahi')
     except KeyError:account=None
     try:group=grp.getgrnam('avahi')

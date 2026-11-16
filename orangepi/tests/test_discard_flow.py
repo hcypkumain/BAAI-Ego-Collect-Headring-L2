@@ -161,7 +161,7 @@ class DiscardStoreTests(unittest.TestCase):
 class ControllerDiscardTests(unittest.TestCase):
     def test_retry_reaps_and_deletes_before_preparing_same_reference(self):
         with tempfile.TemporaryDirectory() as temp:
-            c=launcher.Controller.__new__(launcher.Controller);c.path=Path(temp);old=c.path
+            c=launcher.Controller.__new__(launcher.Controller);c._controller_thread=threading.current_thread();c._controller_thread_id=threading.get_ident();c.path=Path(temp);old=c.path
             c.state='confirm_stop';c.dashboard=SimpleNamespace(privacy=SimpleNamespace(
                 snapshot=lambda:{'required':False},committed=False))
             c.worker=Mock();c.worker.poll.return_value=0;c.command=Mock();c.state_write=Mock();c.voice=Mock();c.quit=False
@@ -176,13 +176,13 @@ class ControllerDiscardTests(unittest.TestCase):
             c.recording_store.discard_current.side_effect=lambda path:events.append('delete')
             c.prepare.side_effect=lambda:events.append('prepare')
             c.discard_and_retry()
-            self.assertEqual(events,['reap','delete','prepare']);c.recording_store.discard_current.assert_called_once_with(old)
+            self.assertEqual(events,['reap','delete']);c.prepare.assert_not_called();c.recording_store.discard_current.assert_called_once_with(old)
             self.assertIsNone(c.path);self.assertEqual(c._reference_reap_outcome,'discarded')
             self.assertEqual(json.loads((old/'discard_request.json').read_text())['session_id'],old.name)
 
     def test_retry_does_not_delete_or_prepare_while_owner_is_alive(self):
         with tempfile.TemporaryDirectory() as temp:
-            c=launcher.Controller.__new__(launcher.Controller);c.path=Path(temp);c.state='confirm_stop'
+            c=launcher.Controller.__new__(launcher.Controller);c._controller_thread=threading.current_thread();c._controller_thread_id=threading.get_ident();c.path=Path(temp);c.state='confirm_stop'
             c.worker=Mock();c.worker.poll.return_value=None;c.command=Mock();c.state_write=Mock();c.voice=Mock()
             c.recording_store=Mock();c.prepare=Mock()
             c.discard_and_retry()

@@ -219,6 +219,59 @@ class ReferenceControlsMixin:
             from usb_task_import import UsbTaskImporter
             self.usb_task_importer=UsbTaskImporter(BASE,PROJECT,self.reference_catalog)
 
+    def start_usb_export(self,recover=False):
+        from usb_export_gate import pending_exports
+        from project_paths import CODE_BASE
+        service=self.usb_export_service
+        previous=self.state
+        cloud=getattr(self.dashboard,'cloud_uploads',None)
+        if recover:
+            if self.state!='usb_export_recovery':raise ValueError('当前没有待恢复的U盘导出')
+            if cloud is not None:
+                with cloud.lock:
+                    if cloud.active or cloud.process:raise ValueError('请等待云端上传停止后再恢复导出')
+                    self.state='usb_exporting';self.state_write()
+            else:self.state='usb_exporting';self.state_write()
+        else:
+            privacy=self.dashboard.privacy.snapshot()
+            importer=getattr(self,'usb_task_importer',None)
+            if (not self.reference_can_change() or privacy.get('required') is not False or
+                    privacy.get('stop_confirmed') is not True or privacy.get('phase')!='idle' or
+                    (importer is not None and importer.active) or pending_exports(CODE_BASE)):
+                raise ValueError('请先结束采集、任务导入和未完成的导出')
+            self._usb_export_previous_state=self.state
+            if cloud is not None:
+                with cloud.lock:
+                    if cloud.active or cloud.process:raise ValueError('请等待云端上传停止后再导出')
+                    self._usb_export_cloud_paused=cloud.state['paused']
+                    cloud.state['paused']=True;cloud._save()
+                    self.state='usb_exporting';self.state_write()
+            else:self.state='usb_exporting';self.state_write()
+        try:service.start(recover=recover)
+        except Exception:
+            if cloud is not None and hasattr(self,'_usb_export_cloud_paused'):
+                with cloud.lock:
+                    cloud.state['paused']=self._usb_export_cloud_paused;cloud._save()
+                del self._usb_export_cloud_paused
+            self.state=previous;self.state_write();raise
+
+    def poll_usb_export(self):
+        from usb_export_gate import pending_exports
+        from project_paths import CODE_BASE
+        service=getattr(self,'usb_export_service',None)
+        if service is None or self.state not in ('usb_exporting','usb_export_recovery') or service.active():return
+        if pending_exports(CODE_BASE):
+            if self.state!='usb_export_recovery':self.state='usb_export_recovery';self.state_write()
+            return
+        if self.state in ('usb_exporting','usb_export_recovery'):
+            self.state=getattr(self,'_usb_export_previous_state','device_confirm')
+            cloud=getattr(getattr(self,'dashboard',None),'cloud_uploads',None)
+            if cloud is not None and hasattr(self,'_usb_export_cloud_paused'):
+                with cloud.lock:
+                    cloud.state['paused']=self._usb_export_cloud_paused;cloud._save()
+                del self._usb_export_cloud_paused
+            self.state_write()
+
     def start_usb_task_import(self,value):
         privacy=self.dashboard.privacy.snapshot()
         if (not self.reference_can_change() or privacy.get('required')
@@ -655,6 +708,7 @@ class ReferenceControlsMixin:
         return True
 
     def reference_tick(self):
+        self.poll_usb_export()
         self.poll_usb_task_import()
         if not self.reference_can_change():return
         try:

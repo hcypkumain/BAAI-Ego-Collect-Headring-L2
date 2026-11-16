@@ -196,6 +196,37 @@ def optional_read_allowed(snapshot, replay=False):
     return snapshot.get('state') in (SAFE_REPLAY if replay else SAFE_REPLAY | {'ready'})
 
 
+"""Phone clock request: short-lived, one-use nonce and fixed local helper."""
+import hmac,json,secrets,subprocess,threading,time
+from pathlib import Path
+class PhoneTime:
+ def __init__(self,owner):self.owner=owner;self.lock=threading.Lock();self.pending=None
+ def authorized(self,handler):
+  origin=handler.headers.get('Origin','')
+  return bool(handler.authorized() and origin=='http://'+handler.headers.get('Host',''))
+ def issue(self,handler):
+  if not self.authorized(handler):return 403,{'error':'校时需要设备访问码及同源页面'}
+  context=self.owner.snapshot.get('collection_context');device=Path('/opt/egorecord/DEVICE_ID').read_text().strip()
+  if not re.fullmatch(r'cp_[0-9]{4}',device) or not isinstance(context,str) or not context:return 409,{'error':'无法确认当前设备或采集状态'}
+  nonce=secrets.token_urlsafe(24)
+  with self.lock:self.pending=(nonce,context,device,time.monotonic()+10)
+  return 200,{'nonce':nonce,'device_id':device,'collection_context':context}
+ def execute(self,handler,data):
+  if not self.authorized(handler):return 403,{'error':'校时需要设备访问码及同源页面'}
+  if not isinstance(data,dict) or set(data)!={'nonce','epoch_ms','device_id','collection_context'}:return 400,{'error':'无效校时请求'}
+  with self.lock:pending=self.pending;self.pending=None
+  if not pending or time.monotonic()>pending[3] or not isinstance(data['nonce'],str) or not hmac.compare_digest(data['nonce'],pending[0]) or data['collection_context']!=pending[1] or self.owner.snapshot.get('collection_context')!=pending[1] or data['device_id']!=pending[2]:return 409,{'error':'请求已失效，请重新同步'}
+  ms=data['epoch_ms']
+  if type(ms)!=int or not 1577836800000<=ms<4102444800000:return 400,{'error':'手机时间无效'}
+  try:
+   p=subprocess.run(['/usr/bin/sudo','-n','/usr/local/sbin/headring-phone-time'],input=json.dumps({'device_id':pending[2],'epoch_ms':ms,'collection_context':pending[1]}),capture_output=True,text=True,timeout=26)
+   result=json.loads(p.stdout)
+   if p.returncode or result.get('ok') is not True:return 409,{'error':'设备忙或校时未完成，请结束采集后重试'}
+   return 200,result
+  except (OSError,ValueError,subprocess.TimeoutExpired):return 503,{'error':'校时服务不可用'}
+
+
+
 def handle_phone_request(handler, owner, method):
     url = urlsplit(handler.path)
     path = url.path
@@ -254,12 +285,30 @@ def handle_phone_request(handler, owner, method):
         except CameraCheckError as error:handler.send(error.status,{'error':str(error)})
         except (ValueError,TypeError):handler.send(400,{'error':'检查确认无效'})
         return True
+    if path in ('/api/phone/time/challenge','/api/phone/time/sync') and method=='POST':
+        try:
+            length=int(handler.headers.get('Content-Length','0'))
+            if not 0<=length<=2048:raise ValueError()
+            value=json.loads(handler.rfile.read(length)) if length else {}
+            if path.endswith('/challenge'):
+                if value!={}:raise ValueError()
+                status,result=owner.phone_time.issue(handler)
+            else: status,result=owner.phone_time.execute(handler,value)
+            handler.send(status,result)
+        except (ValueError,TypeError,UnicodeError):handler.send(400,{'error':'校时请求无效'})
+        return True
     if path=='/api/phone/links' and method=='GET':
         handler.send(200,owner.phone_links.snapshot('http://'+handler.headers.get('Host','')));return True
     if path.startswith('/api/phone/preview/'):
         handle_preview(handler,owner,url,method); return True
     if path.startswith('/api/phone/stream/'):
         handle_preview_stream(handler,owner,url,method); return True
+    if path == '/api/phone/usb-export/status':
+        if method!='GET' or url.query or handler.headers.get('Content-Length','0')!='0':
+            handler.send(400,{'error':'导出状态请求无效'});return True
+        manager=getattr(owner,'usb_export_service',None)
+        if manager is None:handler.send(503,{'error':'U盘导出暂不可用'});return True
+        handler.send(200,manager.status());return True
     snapshot = owner.display_state()
     if path in ('/api/phone/usb-task-import/scan','/api/phone/usb-task-import/status'):
         scanning=path.endswith('/scan')
