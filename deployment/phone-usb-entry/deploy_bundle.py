@@ -5,8 +5,7 @@ from pathlib import Path
 
 STATE=Path('/var/lib/headring-offline'); UNITS=Path('/etc/systemd/system')
 SERVICES=('headring-offline-entry.service','headring-offline-discovery.service','headring-offline-dhcp-guard.service')
-LEGACY_SOURCE='460c04cb719aca5d73bfe518748bd636c632e2cf'
-LEGACY_LOCK='f424e5f95f5e3d13115b41c9bc66afee46f8ca411ecf4c5707ca7431ee4da483'
+PREIMAGES={'460c04cb719aca5d73bfe518748bd636c632e2cf':'be3f2734c80c6f1df24de7b4b4c001ff749c0baa2b064f49aa57387b736de3ea','8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3':'bd626687ef27c70d6a6cf6ab83d5567da147af540e6a8e33877a5da06c939aa3'}
 LEGACY={'headring-usb-entry.service':'0dceecb1ba9dd5492f9e1889a76c1a4331a578d5ea991c8423b3bede9401fa23','headring-usb-discovery.service':'f02dfce84ed78136e394272f836d903a0a40ef3132e13a3059cd32870ecffdb8','headring-usb-dhcp-guard.service':'e5f44747cbbb144a4e2b94544ac2ea357695fe40fb6c1f78fb7b557a5e46b232'}
 def sha(b):return hashlib.sha256(b).hexdigest()
 def require(v,msg):
@@ -46,17 +45,17 @@ def load_bundle(path,expected):
    require(m.isfile() and m.name not in files and not m.name.startswith('/') and all(x not in ('','.','..') for x in m.name.split('/')),'unsafe bundle member')
    total+=m.size;require(m.size<=8_000_000 and total<=30_000_000,'bundle budget exceeded');files[m.name]=t.extractfile(m).read()
  require('manifest.json' in files,'manifest missing');m=json.loads(files.pop('manifest.json'))
- require(m.get('schema')==1 and m.get('baseline_commit')=='8c72ed375c33b39d15e00dc9ee9d37c82b54e6b3' and m.get('base_collector_commit')=='f5d03b7b5fb197eb76e78610a0bce672e5cc4853' and m.get('collector_overlay_manifest_sha256')=='36d8059918ce370f7928cc7cd3207e2ac1d26471b3e8dcdef74b98b7888cd62a','wrong manifest baseline')
+ require(m.get('schema')==1 and m.get('baseline_commit')=='7004315fbc567afc5f0d5e9fcd0552f0db46a9c8' and m.get('base_collector_commit')=='f5d03b7b5fb197eb76e78610a0bce672e5cc4853' and m.get('collector_overlay_manifest_sha256')=='36d8059918ce370f7928cc7cd3207e2ac1d26471b3e8dcdef74b98b7888cd62a','wrong manifest baseline')
  require(re.fullmatch(r'cp_[0-9]{4}',m.get('device_id','')) and re.fullmatch(r'offline-[0-9a-f]{16}',m.get('release_id','')),'invalid release identity')
  require(m.get('release_prefix')=='/opt/headring-offline/releases/'+m['release_id'],'invalid release path')
  require(set(files)==set(m['files']),'manifest membership mismatch')
  for name,entry in m['files'].items():
   require(name.startswith(('release/','collector/','support/')) and sha(files[name])==entry['sha256'] and len(files[name])==entry['size'] and entry['mode'] in (0o644,0o755),'manifest mismatch: '+name)
- require(len([x for x in files if x.startswith('collector/orangepi/src/orangepi_collect/')])==121,'wrong collector source count')
+ require(len([x for x in files if x.startswith('collector/orangepi/src/orangepi_collect/')])==123,'wrong collector source count')
  if 'source_preimages' in m:
-  pre=m['source_preimages'];require(m.get('source_preimage_commit')==LEGACY_SOURCE and m.get('source_preimage_sha256')==LEGACY_LOCK and isinstance(pre,dict),'unknown migration source')
+  pre=m['source_preimages'];require(m.get('source_preimage_commit') in PREIMAGES and m.get('source_preimage_sha256')==PREIMAGES[m['source_preimage_commit']] and isinstance(pre,dict),'unknown migration source')
   require(set(pre)=={x[len('collector/'):] for x in files if x.startswith('collector/orangepi/')},'migration source membership mismatch')
-  require(sha(json.dumps(pre,sort_keys=True,separators=(',',':')).encode())==LEGACY_LOCK,'migration source lock mismatch')
+  require(sha(json.dumps(pre,sort_keys=True,separators=(',',':')).encode())==PREIMAGES[m['source_preimage_commit']],'migration source lock mismatch')
  return m,files
 
 def unit_state(name):
@@ -175,7 +174,7 @@ def verify_environment(m,files,root):
   else:require(before==migration['orangepi/'+relative],'legacy source changed: '+relative)
   prehash[relative]=before
   if before!=sha(data):diffs.append(relative)
- require(len([n for n in files if n.startswith('collector/orangepi/')])==121,'collector file count')
+ require(len([n for n in files if n.startswith('collector/orangepi/')])==123,'collector file count')
  require(not Path(m['release_prefix']).exists(),'release directory already exists')
  return {'collector_changes':diffs,'collector_prehash':prehash,'legacy_units':legacy,'previous_release':previous,'usb':usb,'release_prefix':m['release_prefix']}
 
