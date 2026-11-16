@@ -121,7 +121,7 @@ def prior_owned_release(device_id):
 FEATURE_HELPERS={
  '/usr/local/lib/collector-usb-task-import/mount-readonly':('support/usb_tasks_mount_readonly.py',0o755,{'0e672274737b4cd09539e68f2ca376c8806769945aa63ad202f64d316c3f034d','6030c6685a7fe1d9e9fbc5d68190e8c4bcbabaa5f9c5e4d3c4354a59618d8fcc','5c870f73fed95a0c1256d7b445c1b41c30a149838db87260118f9e798aed45b6'}),
  '/usr/local/lib/collector-usb-task-import/mount-export':('support/usb_export_mount.py',0o755,{'84bda5118fc881ad2e324042fe193fc9585faf95a7b616436d598a0e1d8b42f7'}),
- '/usr/local/sbin/headring-phone-time':('support/headring-phone-time',0o755,{'3e56928dcabe3f05afff8d61533ee9b81847c5cd5a3d9996b7a6d4826d3fe2d3','27fdee0c80e5afc3d8c88f4cf7a0ff533cc4bac2b7ffb76fb6c1fafe84d96f24'}),
+ '/usr/local/sbin/headring-phone-time':('support/headring-phone-time',0o755,{'3e56928dcabe3f05afff8d61533ee9b81847c5cd5a3d9996b7a6d4826d3fe2d3','27fdee0c80e5afc3d8c88f4cf7a0ff533cc4bac2b7ffb76fb6c1fafe84d96f24','16d3eeb666bb00eacbde0d903bc5b94f3d952d910b0b26d03c0a29ee5fd070e4'}),
  '/usr/local/sbin/headring-lan-time':('support/headring-lan-time',0o755,{'65cafeb798741873d8164b9ae677b53a2b21ce6144066a800bc0e126b65a628d','c7cf968b85bd2d788369d04b636e5359811bb03a92a3885427841f44eb93733c'}),
  '/usr/local/lib/headring-time/headring_capture_guard.py':('support/headring_capture_guard.py',0o644,set()),
 }

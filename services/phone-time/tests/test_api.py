@@ -10,7 +10,7 @@ class Test(unittest.TestCase):
  def test_authorization_and_nonce(self):
   a=m.PhoneTime(O());h=H();response=types.SimpleNamespace(returncode=0,stdout='{"ok":true}')
   with patch.object(m.Path,'read_text',return_value='cp_0023'),patch.object(m.subprocess,'run',return_value=response) as call:
-   status,ch=a.issue(h);self.assertEqual(status,200);payload=dict(ch,epoch_ms=1794900000000);self.assertEqual(a.execute(h,payload)[0],200);self.assertEqual(a.execute(h,payload)[0],409);self.assertEqual(call.call_count,1);self.assertEqual(call.call_args.kwargs['timeout'],26)
+   status,ch=a.issue(h);self.assertEqual(status,200);payload=dict(ch,epoch_ms=1794900000000);self.assertEqual(a.execute(h,payload)[0],200);self.assertEqual(a.execute(h,payload)[0],409);self.assertEqual(call.call_count,1);self.assertEqual(call.call_args.kwargs['timeout'],26);self.assertIsInstance(json.loads(call.call_args.kwargs['input'])['received_monotonic_ns'],int)
    status,ch=a.issue(h);self.assertEqual(a.execute(h,dict(ch,epoch_ms=True))[0],400)
    status,ch=a.issue(h);a.owner.snapshot={'collection_context':'emg:2'};self.assertEqual(a.execute(h,dict(ch,epoch_ms=1794900000000))[0],409)
    h.headers=dict(h.headers,Origin='http://elsewhere');self.assertEqual(a.issue(h)[0],403)

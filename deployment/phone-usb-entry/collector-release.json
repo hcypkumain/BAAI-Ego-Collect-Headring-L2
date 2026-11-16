@@ -77,9 +77,9 @@
       "size": 5393
     },
     "orangepi/src/orangepi_collect/control/phone_http.py": {
-      "post_sha256": "8e5c46ca4e8cf8e6f19aae6f6bd8d141bfc4a9bdac65507e4aff2112164fbe47",
+      "post_sha256": "78593b048ea557ec0c1742f4994a084d35d8a500f03cb7dec58a7f65a0c31bc3",
       "pre_sha256": "de0e2697da8202beeb7616703a9d390e88907fbeacec84cf8f68c910a95dc574",
-      "size": 29563
+      "size": 29737
     },
     "orangepi/src/orangepi_collect/control/phone_links.py": {
       "post_sha256": "ed3a22074157a0683646260eb6c7f42d09d5230bcbf7ee18fdb5c6733a23d6fc",

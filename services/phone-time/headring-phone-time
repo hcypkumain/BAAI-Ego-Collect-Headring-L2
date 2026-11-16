@@ -5,17 +5,23 @@ from pathlib import Path
 sys.path.insert(0,'/usr/local/lib/headring-time')
 from headring_capture_guard import CaptureGuard,safe_snapshot
 
+def compensated_epoch(ms,received_ns,now_ns):
+ if type(received_ns)!=int or type(now_ns)!=int or not 0<=now_ns-received_ns<=26_000_000_000:
+  raise ValueError('stale_request')
+ return ms/1000+(now_ns-received_ns)/1_000_000_000
+
 def main():
  raw=sys.stdin.buffer.read(2049)
  if len(raw)>2048:raise ValueError('request_too_large')
  request=json.loads(raw)
- if not isinstance(request,dict) or set(request)!={'epoch_ms','device_id','collection_context'} or not isinstance(request['device_id'],str) or not re.fullmatch(r'cp_[0-9]{4}',request['device_id']):raise ValueError('invalid_request')
+ if not isinstance(request,dict) or set(request)!={'epoch_ms','device_id','collection_context','received_monotonic_ns'} or not isinstance(request['device_id'],str) or not re.fullmatch(r'cp_[0-9]{4}',request['device_id']):raise ValueError('invalid_request')
  context=request['collection_context']
  if not isinstance(context,str) or not 1<=len(context)<=128:raise ValueError('invalid_context')
  ms=request['epoch_ms']
  if type(ms)!=int or not 1577836800000<=ms<4102444800000:raise ValueError('invalid_time')
  if Path('/opt/egorecord/DEVICE_ID').read_text().strip()!=request['device_id']:raise ValueError('wrong_device')
- started=time.monotonic()
+ received_ns=request['received_monotonic_ns']
+ compensated_epoch(ms,received_ns,time.monotonic_ns())
  fd=os.open('/run/headring-lan-time.lock',os.O_WRONLY|os.O_CREAT|os.O_NOFOLLOW,0o600)
  with os.fdopen(fd,'w') as lock:
   fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -43,7 +49,7 @@ def main():
     # Re-check authoritative workflow after stopping the service.
     with urllib.request.urlopen(req,timeout=1) as reply:status=json.load(reply)
     if status.get('collection_context')!=context or not safe_snapshot(status)[0]:raise ValueError('workflow_changed')
-    target=ms/1000+(time.monotonic()-started)
+    target=compensated_epoch(ms,received_ns,time.monotonic_ns())
     boot=Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     marker=Path('/run/headring-phone-time.json');temp=marker.with_suffix('.new')
     previous=marker.read_bytes() if marker.is_file() else None

@@ -211,7 +211,8 @@ class PhoneTime:
   nonce=secrets.token_urlsafe(24)
   with self.lock:self.pending=(nonce,context,device,time.monotonic()+10)
   return 200,{'nonce':nonce,'device_id':device,'collection_context':context}
- def execute(self,handler,data):
+ def execute(self,handler,data,received_ns=None):
+  if received_ns is None:received_ns=time.monotonic_ns()
   if not self.authorized(handler):return 403,{'error':'校时需要设备访问码及同源页面'}
   if not isinstance(data,dict) or set(data)!={'nonce','epoch_ms','device_id','collection_context'}:return 400,{'error':'无效校时请求'}
   with self.lock:pending=self.pending;self.pending=None
@@ -219,7 +220,7 @@ class PhoneTime:
   ms=data['epoch_ms']
   if type(ms)!=int or not 1577836800000<=ms<4102444800000:return 400,{'error':'手机时间无效'}
   try:
-   p=subprocess.run(['/usr/bin/sudo','-n','/usr/local/sbin/headring-phone-time'],input=json.dumps({'device_id':pending[2],'epoch_ms':ms,'collection_context':pending[1]}),capture_output=True,text=True,timeout=26)
+   p=subprocess.run(['/usr/bin/sudo','-n','/usr/local/sbin/headring-phone-time'],input=json.dumps({'device_id':pending[2],'epoch_ms':ms,'collection_context':pending[1],'received_monotonic_ns':received_ns}),capture_output=True,text=True,timeout=26)
    result=json.loads(p.stdout)
    if p.returncode or result.get('ok') is not True:return 409,{'error':'设备忙或校时未完成，请结束采集后重试'}
    return 200,result
@@ -286,6 +287,7 @@ def handle_phone_request(handler, owner, method):
         except (ValueError,TypeError):handler.send(400,{'error':'检查确认无效'})
         return True
     if path in ('/api/phone/time/challenge','/api/phone/time/sync') and method=='POST':
+        received_ns=time.monotonic_ns()
         try:
             length=int(handler.headers.get('Content-Length','0'))
             if not 0<=length<=2048:raise ValueError()
@@ -293,7 +295,7 @@ def handle_phone_request(handler, owner, method):
             if path.endswith('/challenge'):
                 if value!={}:raise ValueError()
                 status,result=owner.phone_time.issue(handler)
-            else: status,result=owner.phone_time.execute(handler,value)
+            else: status,result=owner.phone_time.execute(handler,value,received_ns=received_ns)
             handler.send(status,result)
         except (ValueError,TypeError,UnicodeError):handler.send(400,{'error':'校时请求无效'})
         return True

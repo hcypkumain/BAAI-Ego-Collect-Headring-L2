@@ -1,4 +1,4 @@
-import hashlib,importlib.machinery,importlib.util,sys,types,unittest,io,json,contextlib,tempfile,fcntl,os
+import hashlib,importlib.machinery,importlib.util,sys,types,unittest,io,json,contextlib,tempfile,fcntl,os,time
 from pathlib import Path
 from unittest.mock import patch
 p=Path(__file__).resolve().parent.parent
@@ -17,6 +17,11 @@ class T(unittest.TestCase):
   self.tmp=tempfile.TemporaryDirectory();self.lock=Path(self.tmp.name)/'lock';self.identity=Path(self.tmp.name)/'DEVICE_ID';self.identity.write_text('cp_0023'); Guard.base=Path(self.tmp.name); (Guard.base/'runtime').mkdir(); (Guard.base/'runtime/dashboard_token').write_text('secret'); (Guard.base/'pair-hash').write_text(hashlib.sha256(('a'*32).encode()).hexdigest()); (Guard.base/'runtime/collection_profile.json').write_text(json.dumps({'legacy_mode':'eeg','active_mode':'eeg'}))
  def tearDown(self):self.tmp.cleanup()
  def run_request(self,data,allow=True):
+  try:
+   value=json.loads(data)
+   if isinstance(value,dict) and 'received_monotonic_ns' not in value:
+    value['received_monotonic_ns']=time.monotonic_ns();data=json.dumps(value).encode()
+  except (ValueError,TypeError):pass
   Guard.allow=allow;os_open=m.os.open
   def opening(path,flags,mode=0o777):return os_open(str(self.lock) if path=='/run/headring-lan-time.lock' else path,flags,mode)
   original=m.Path
@@ -33,6 +38,10 @@ class T(unittest.TestCase):
    self.identity.write_text(ident)
    self.assertEqual(self.run_request(json.dumps({'device_id':ident,'epoch_ms':1794900000000,'collection_context':'eeg:1'}).encode()),(True,1))
    self.assertEqual(self.run_request(json.dumps({'device_id':'cp_9999','epoch_ms':1794900000000,'collection_context':'eeg:1'}).encode()),(False,0))
+ def test_processing_delay_is_compensated_and_stale_rejected(self):
+  received=100_000_000_000;self.assertEqual(m.compensated_epoch(1_800_000_000_000,received,received+9_000_000_000),1_800_000_009.0)
+  for invalid in (received-1,received+26_000_000_001):
+   with self.assertRaises(ValueError):m.compensated_epoch(1_800_000_000_000,received,invalid)
  def test_preboot_and_lan_lock_refused(self):
   good={'device_id':'cp_0023','epoch_ms':1794900000000,'collection_context':'eeg:1'}
   with patch.object(Guard,'allowed',return_value=(True,'before_application_start')):self.assertEqual(self.run_request(json.dumps(good).encode()),(False,0))
@@ -40,7 +49,7 @@ class T(unittest.TestCase):
    fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
    with self.assertRaises(BlockingIOError):self.run_request(json.dumps(good).encode())
  def test_failed_set_restores_old_marker(self):
-  good={'device_id':'cp_0023','epoch_ms':1794900000000,'collection_context':'eeg:1'};marker=Path(self.tmp.name)/'marker.json';marker.write_text('old-marker');os_open=m.os.open;original=m.Path
+  good={'device_id':'cp_0023','epoch_ms':1794900000000,'collection_context':'eeg:1','received_monotonic_ns':time.monotonic_ns()};marker=Path(self.tmp.name)/'marker.json';marker.write_text('old-marker');os_open=m.os.open;original=m.Path
   def opening(path,flags,mode=0o777):return os_open(str(self.lock) if path=='/run/headring-lan-time.lock' else path,flags,mode)
   def mapped(path):return self.identity if path=='/opt/egorecord/DEVICE_ID' else original(self.tmp.name)/'pair-hash' if path=='/etc/headring-phone-time.sha256' else marker if path=='/run/headring-phone-time.json' else original(path)
   safe=b'{"collection_context":"eeg:1","state":"device_confirm","privacy":{"required":false,"phase":"idle","stop_confirmed":true}}'
@@ -49,7 +58,7 @@ class T(unittest.TestCase):
    with self.assertRaises(ValueError):m.main()
    self.assertEqual(marker.read_text(),'old-marker')
  def test_restore_failure_reported(self):
-  good={'device_id':'cp_0023','epoch_ms':1794900000000,'collection_context':'eeg:1'};os_open=m.os.open;original=m.Path;out=io.StringIO()
+  good={'device_id':'cp_0023','epoch_ms':1794900000000,'collection_context':'eeg:1','received_monotonic_ns':time.monotonic_ns()};os_open=m.os.open;original=m.Path;out=io.StringIO()
   def opening(path,flags,mode=0o777):return os_open(str(self.lock) if path=='/run/headring-lan-time.lock' else path,flags,mode)
   def mapped(path):return self.identity if path=='/opt/egorecord/DEVICE_ID' else original(self.tmp.name)/'pair-hash' if path=='/etc/headring-phone-time.sha256' else original(self.tmp.name)/'marker.json' if path=='/run/headring-phone-time.json' else original(path)
   def run(args,**kwargs):
@@ -60,7 +69,7 @@ class T(unittest.TestCase):
    Guard.allow=True;m.main()
   self.assertTrue(json.loads(out.getvalue())['ok']);self.assertFalse(json.loads(out.getvalue())['chrony_restored'])
  def test_chrony_restored_on_busy_race(self):
-  good={'device_id':'cp_0023','epoch_ms':1794900000000,'collection_context':'eeg:1'};calls=[];os_open=m.os.open;original=m.Path
+  good={'device_id':'cp_0023','epoch_ms':1794900000000,'collection_context':'eeg:1','received_monotonic_ns':time.monotonic_ns()};calls=[];os_open=m.os.open;original=m.Path
   def opening(path,flags,mode=0o777):return os_open(str(self.lock) if path=='/run/headring-lan-time.lock' else path,flags,mode)
   def mapped(path):return self.identity if path=='/opt/egorecord/DEVICE_ID' else original(self.tmp.name)/'pair-hash' if path=='/etc/headring-phone-time.sha256' else original(self.tmp.name)/'marker.json' if path=='/run/headring-phone-time.json' else original(path)
   safe=b'{"collection_context":"eeg:1","state":"device_confirm","privacy":{"required":false,"phase":"idle","stop_confirmed":true}}';busy=b'{"collection_context":"eeg:1","state":"recording","privacy":{"required":true,"phase":"idle","stop_confirmed":true}}';responses=iter([safe,busy])
