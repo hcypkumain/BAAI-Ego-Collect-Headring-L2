@@ -7,9 +7,9 @@
       "size": 7021
     },
     "orangepi/src/orangepi_collect/acquisition/eeg_worker.py": {
-      "post_sha256": "169566e306cba2fae59eaa7026702ab8f1622f34ae2fc4cd461eb0cd1d2e2ce2",
       "pre_sha256": "7bcbf2b7bc92b8c3ac1ca25227ccf5dadc8576b49cca514281610e9783ebba73",
-      "size": 18197
+      "post_sha256": "4945910a092c9f82ea41f499bcf1e8af416dcb2b7124ad8088ac80a326fd2071",
+      "size": 18590
     },
     "orangepi/src/orangepi_collect/common/collection_profiles.py": {
       "post_sha256": "ea33a64208b6465426f6bba5f4e1c488ae4cc717c3654a43b6c92b2a80797dc4",
@@ -57,9 +57,9 @@
       "size": 43388
     },
     "orangepi/src/orangepi_collect/control/launcher.py": {
-      "post_sha256": "0c098067552307e4e62658a162dff6747b71168c6ea2e8af668278cb8a942fe4",
       "pre_sha256": "f77a7d7f254dccd0de630ade65fd0ed19ea46ebbf1bcd520b79f733d977c78e2",
-      "size": 103780
+      "post_sha256": "d36d5dfcb58c3254d89bbeb36cf56d20ee46487d493595c607c7e2188f0a56fe",
+      "size": 103966
     },
     "orangepi/src/orangepi_collect/control/manual_reference.py": {
       "post_sha256": "b9c09c263a500c99a4f21db00c9d895f571f8af8b7b8674f93bd982270c8f0bd",
@@ -205,6 +205,16 @@
       "post_sha256": "6b1db746febd9e5cb3cfbcc241337666fa0dbc2fafa011f38cf4bfbddab1a981",
       "pre_sha256": "79a22cffae8e5562eae0b2fd8fac4e240e160e554ec6de2359d91826a06e89c2",
       "size": 23793
+    },
+    "orangepi/src/orangepi_collect/acquisition/capture.py": {
+      "pre_sha256": "901c64c1cc77d1f1759673664ba8a0892a4ec0098ff83094c0119e148c10a1c6",
+      "post_sha256": "00f93d79c291efe595067fdae115e2eb5ededa2f7767a97e46c1806cfe4d5a73",
+      "size": 34882
+    },
+    "orangepi/src/orangepi_collect/framework/eeg_qc.py": {
+      "pre_sha256": "b362e196b9f2d568e9e64037667a0cfbf31e2b7c12751344cbf7fdb730a9b78d",
+      "post_sha256": "0408942d0c7974980ee96832210eb5b38aebf6a01ab25bb07a863cd271906595",
+      "size": 19859
     }
   },
   "rotation": {

@@ -249,6 +249,22 @@ class OmniEegImpedance(BaseCheck):
         try:
             metadata = json.loads((Path(ctx.dir)/'metadata.json').read_text(encoding='utf-8'))
             gate = json.loads((root/'start_gate.json').read_text(encoding='utf-8'))
+            marker = gate.get('eeg_impedance')
+            skip_device = marker.get('device_id') if isinstance(marker,dict) else None
+            skip_marker = dict(version=1,device_id=skip_device,status='not_measured',reason='operator_requested_skip')
+            expected_prefix = {'cp_0013':'L2-001-', 'cp_0017':'L2-017-', 'cp_0018':'L2-018-', 'cp_0023':'L2-023-'}
+            if skip_device in expected_prefix and marker == skip_marker:
+                if not root.name.startswith(expected_prefix[skip_device]):raise ValueError('跳过阻抗记录与设备身份不匹配')
+                readiness = gate.get('required_device_readiness', {}).get('eeg', {})
+                if ('eeg' not in gate.get('required_devices', []) or readiness.get('ready') is not True
+                        or readiness.get('fresh') is not True or not isinstance(readiness.get('seen'),int)
+                        or isinstance(readiness.get('seen'),bool) or readiness['seen'] <= 0):
+                    raise ValueError('跳过阻抗的记录缺少脑电在线与新鲜数据证明')
+                out.stats.update(impedance_required=False, impedance_measured=False,
+                                 impedance_skip_reason='operator_requested_skip')
+                out.findings.append(self.finding('WARN','按要求跳过采前阻抗测量；已检查脑电设备在线及数据新鲜度',
+                    field='start_gate.json',detail={'device_id':skip_device,'impedance_measured':False}))
+                return out
             proof = validate_start_binding(root, gate, expected_eeg_config=metadata['config'])
             preflight = json.loads((Path(ctx.dir)/'impedance_preflight.json').read_text(encoding='utf-8'))
             if metadata['frontend_config'] != preflight['restored_frontend']:

@@ -551,8 +551,15 @@ class Capture:
                             screen_privacy=screen_proof,required_device_contract_version=self.required_contract['version'],
                             required_devices=self.required_contract['required_devices'],required_device_readiness=readiness['devices'])
                         if self.eeg:
-                            start_gate['eeg_impedance']=bind_start(self.path,start_gate,
-                                self.eeg.impedance_snapshot(),CONFIG['eeg'])
+                            impedance_state=self.eeg.impedance_snapshot()
+                            device_id=Path('/opt/egorecord/DEVICE_ID').read_text().strip()
+                            if (device_id in ('cp_0013','cp_0017','cp_0018','cp_0023')
+                                    and impedance_state.get('required') is False
+                                    and impedance_state.get('phase')=='skipped'
+                                    and impedance_state.get('reason')=='operator_requested_skip'):
+                                start_gate['eeg_impedance']=dict(version=1,device_id=device_id,status='not_measured',reason='operator_requested_skip')
+                            else:
+                                start_gate['eeg_impedance']=bind_start(self.path,start_gate,impedance_state,CONFIG['eeg'])
                         atomic_json(self.path/'start_gate.json',start_gate)
                         self.screen_privacy_start=screen_proof
                         self.active = self.started = True
@@ -668,4 +675,3 @@ if __name__ == '__main__':
     if absent:raise ValueError('Recorder flags omit required devices: '+','.join(absent))
     capture=Capture(Path(args.output).resolve());capture.required_contract=contract
     sys.exit(capture.execute(cameras,with_emg,with_board,emg_names,[n for n in WRIST_CAMERAS if n in selected],with_eeg,contract))
-

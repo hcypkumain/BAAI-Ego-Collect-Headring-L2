@@ -1353,6 +1353,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         if self.state!='recording' and status.get('warning_count',0)>0 and not self.warned_data_gap:
             self.warned_data_gap=True
             self.voice.say('检测到数据不连续，异常已记录，请查看检验报告。')
+        if state == 'error':
+            self.scan_ok=False;self.scan_retry_pending=True
         if state in ('error','qc_error') and not self.notified_error:
             self.notified_error=True
             self.state='error'
@@ -1409,6 +1411,8 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
             # postpone ledger commit behind a long queue of spoken warnings.
             retry=getattr(self,'retry_requested',False)
             outcome='error' if owner_exit_recovered or summary_parse_error else 'qc_error' if qualification_errors else 'error' if not ok and summary.get('status')!='cancelled' else 'failed' if retry else 'success' if ok else 'interrupted'
+            if outcome=='error':
+                self.scan_ok=False;self.scan_retry_pending=True
             if pending and ok and not retry:outcome='pending_qc'
             if owner_error:outcome='error'
             if self.quit and not getattr(self,'keep_requested',False):outcome='interrupted'
