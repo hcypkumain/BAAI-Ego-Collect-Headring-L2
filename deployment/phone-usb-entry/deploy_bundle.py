@@ -84,6 +84,7 @@ def inspect_selector(m,files):
   with os.fdopen(fd,'wb') as f:f.write(files['release/guard.py'])
   spec=importlib.util.spec_from_file_location('offline_usb_selector',path);guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
   meta=guard.metadata(files['release/metadata.json']);require(meta['device_id']==m['device_id'] and meta['selector']==m['selector'],'USB metadata mismatch')
+  guard.validate_publisher_identity(meta,files['release/etc-avahi/avahi-daemon.conf'],files['release/etc-avahi/services/headring.service'])
   sysfs=guard.Sysfs();names=list(sysfs.root.iterdir());require(len(names)<=256,'too many network interfaces');matches=[]
   for item in names:
    try:

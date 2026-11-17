@@ -157,6 +157,20 @@ class Sysfs:
             return "MISSING" if not (self.root / expected).exists() else "WRONG"
 
 
+def validate_publisher_identity(value, config, service):
+    """Refuse stale publisher files even when their stored hashes are valid."""
+    expected_host = derive(value["device_id"])[:-6].encode("ascii")
+    hosts = re.findall(rb"(?m)^\s*host-name\s*=\s*([^\s#;]+)\s*$", config)
+    if hosts != [expected_host]:
+        raise Refused("CONFIG_DEVICE_MISMATCH")
+    ids = re.findall(rb"<txt-record>\s*device_id=([^<\s]+)\s*</txt-record>", service)
+    names = re.findall(rb"<name>\s*([^<]+?)\s*</name>", service)
+    expected_name = ("HeadRing CP" + str(int(value["device_id"][3:]))).encode("ascii")
+    if ids != [value["device_id"].encode("ascii")] or names != [expected_name]:
+        raise Refused("SERVICE_DEVICE_MISMATCH")
+
+
+
 class Host:
     def privileges(self):
         if os.geteuid() == 0:
@@ -173,8 +187,13 @@ class Host:
     def load(self, path):
         value = metadata(secure_read(path, 16384))
         for prefix, budget in (("binary", 8 * 1024 * 1024), ("config", 65536)):
-            if hashlib.sha256(secure_read(value[prefix + "_path"], budget)).hexdigest() != value[prefix + "_sha256"]:
+            raw = secure_read(value[prefix + "_path"], budget)
+            if hashlib.sha256(raw).hexdigest() != value[prefix + "_sha256"]:
                 raise Refused("HASH_MISMATCH")
+            if prefix == "config":
+                config = raw
+        service = secure_read(str(Path(value["config_path"]).parent / "services/headring.service"), 65536)
+        validate_publisher_identity(value, config, service)
         return value
 
     def identity(self):
