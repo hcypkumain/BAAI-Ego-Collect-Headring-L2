@@ -119,11 +119,11 @@ def prior_owned_release(device_id):
 # These helpers grant narrowly scoped privileged operations. Only replace a
 # pre-existing helper when its bytes match a reviewed release.
 FEATURE_HELPERS={
- '/usr/local/lib/collector-usb-task-import/mount-readonly':('support/usb_tasks_mount_readonly.py',0o755,{'0e672274737b4cd09539e68f2ca376c8806769945aa63ad202f64d316c3f034d','6030c6685a7fe1d9e9fbc5d68190e8c4bcbabaa5f9c5e4d3c4354a59618d8fcc','5c870f73fed95a0c1256d7b445c1b41c30a149838db87260118f9e798aed45b6'}),
+ '/usr/local/lib/collector-usb-task-import/mount-readonly':('support/usb_tasks_mount_readonly.py',0o755,{'0e672274737b4cd09539e68f2ca376c8806769945aa63ad202f64d316c3f034d','6030c6685a7fe1d9e9fbc5d68190e8c4bcbabaa5f9c5e4d3c4354a59618d8fcc','5c870f73fed95a0c1256d7b445c1b41c30a149838db87260118f9e798aed45b6','b13fc5a0c63269060d4f0fdf3ad556d9417e8522676d4cbdec5b698944b111d0'}),
  '/usr/local/lib/collector-usb-task-import/mount-export':('support/usb_export_mount.py',0o755,{'84bda5118fc881ad2e324042fe193fc9585faf95a7b616436d598a0e1d8b42f7'}),
  '/usr/local/sbin/headring-phone-time':('support/headring-phone-time',0o755,{'3e56928dcabe3f05afff8d61533ee9b81847c5cd5a3d9996b7a6d4826d3fe2d3','27fdee0c80e5afc3d8c88f4cf7a0ff533cc4bac2b7ffb76fb6c1fafe84d96f24','16d3eeb666bb00eacbde0d903bc5b94f3d952d910b0b26d03c0a29ee5fd070e4'}),
- '/usr/local/sbin/headring-lan-time':('support/headring-lan-time',0o755,{'65cafeb798741873d8164b9ae677b53a2b21ce6144066a800bc0e126b65a628d','c7cf968b85bd2d788369d04b636e5359811bb03a92a3885427841f44eb93733c'}),
- '/usr/local/lib/headring-time/headring_capture_guard.py':('support/headring_capture_guard.py',0o644,set()),
+ '/usr/local/sbin/headring-lan-time':('support/headring-lan-time',0o755,{'65cafeb798741873d8164b9ae677b53a2b21ce6144066a800bc0e126b65a628d','c7cf968b85bd2d788369d04b636e5359811bb03a92a3885427841f44eb93733c','24f0d727f6eda4f5030aa5a64fad34fcac33a94aa2e670535eb7cef0ed83fc94'}),
+ '/usr/local/lib/headring-time/headring_capture_guard.py':('support/headring_capture_guard.py',0o644,{'56f4ba45d2309351eb5cc3f96632433e26c03615f1c0aa966e08abba6a259ecb'}),
 }
 def feature_files(files,user):
  require(re.fullmatch(r'[a-z_][a-z0-9_-]{0,31}',user or '') is not None,'unsafe collector service user')
@@ -172,6 +172,21 @@ def acquire_feature_operation_locks(m):
  finally:
   for fd in reversed(descriptors):os.close(fd)
 
+def service_root_matches(root,running,aliases=None):
+    script=root/'scripts/run.sh'
+    candidates=[script]
+    if aliases is None:
+        aliases=[Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main/orangepi'),Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi')]
+    try:
+        canonical=script.resolve(strict=True)
+        for base in aliases:
+            alternate=Path(base)/'scripts/run.sh'
+            try:
+                if alternate.resolve(strict=True)==canonical:candidates.append(alternate)
+            except OSError:pass
+    except OSError:return False
+    return any(re.search(r'(?<![A-Za-z0-9_./-])'+re.escape(str(path))+r'(?=\s|;|}|$)',running) for path in candidates)
+
 def verify_environment(m,files,root):
  require(os.geteuid()==0,'run as root')
  require(platform.system()=='Linux' and platform.machine() in ('aarch64','arm64'),'requires Linux arm64')
@@ -189,7 +204,7 @@ def verify_environment(m,files,root):
   chrony=cmd(['/usr/bin/systemctl','show','chrony.service','--property=LoadState','--value'],False)
   require(chrony.returncode==0 and chrony.stdout.strip()=='loaded','chrony service unavailable')
  running=cmd(['/usr/bin/systemctl','show','embodied-pi-collect.service','--property=ExecStart','--value']).stdout
- require(str(root/'scripts/run.sh') in running,'collector root differs from active service')
+ require(service_root_matches(root,running),'collector root differs from active service')
  require(Path('/run/camd.sock').exists(),'camera status unavailable')
  require(sys.version_info >= (3,8),'requires Python 3.8 or newer')
  binary=files['release/avahi-daemon'];core=files['release/lib/libavahi-core.so.7']

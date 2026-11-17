@@ -17,6 +17,7 @@ import time
 import urllib.request
 
 BASE = Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi')
+ALLOWED_PROJECTS = frozenset((Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main'),Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main.2')))
 STATE = Path('/run/headring-usb-data-host.json')
 SAFE = {'device_confirm', 'idle', 'failed_wait', 'exhausted'}
 OWNER_SUFFIXES = ('/control/launcher.py', '/control/service_entry.py',
@@ -54,9 +55,23 @@ def safe_snapshot(value):
     return True, 'safe_idle'
 
 
+def discover_base():
+    # The service manager, not client input or a user-writable configuration,
+    # selects which of the two supported collector roots is actually running.
+    command=['/usr/bin/systemctl','show','embodied-pi-collect.service']
+    working=subprocess.run(command+['--property=WorkingDirectory','--value'],capture_output=True,text=True,check=True,timeout=3).stdout.strip()
+    execution=subprocess.run(command+['--property=ExecStart','--value'],capture_output=True,text=True,check=True,timeout=3).stdout
+    project=Path(working)
+    if not project.is_absolute() or project not in ALLOWED_PROJECTS or project.is_symlink() or not project.is_dir():raise ValueError('collector_root_untrusted')
+    declared=project/'orangepi';script=declared/'scripts/run.sh'
+    try:base=declared.resolve(strict=True)
+    except OSError:raise ValueError('collector_service_root_missing')
+    if base not in {p/'orangepi' for p in ALLOWED_PROJECTS} or not base.is_dir() or script.is_symlink() or not script.is_file() or str(script) not in execution:raise ValueError('collector_service_root_mismatch')
+    return base
+
 class CaptureGuard:
-    def __init__(self, base=BASE):
-        self.base = Path(base)
+    def __init__(self, base=None):
+        self.base = Path(base) if base is not None else discover_base()
 
     def owner_active(self, include_controller):
         suffixes = OWNER_SUFFIXES if include_controller else OWNER_SUFFIXES[2:]

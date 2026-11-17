@@ -13,9 +13,9 @@ import time
 import urllib.request
 import sys
 sys.path.insert(0, "/usr/local/lib/headring-time")
-from headring_capture_guard import CaptureGuard
+from headring_capture_guard import CaptureGuard,discover_base
 
-BASE=Path('/home/orangepi/Desktop/Embodied-Brain-Collect-main.2/orangepi')
+BASE=None
 CONFIG=Path('/etc/headring-lan-time.json')
 STATE=Path('/run/headring-lan-time.json')
 SAFE={'ready','device_confirm','idle','failed_wait','exhausted'}
@@ -32,7 +32,10 @@ def verdict(display,started=False):
 
 def safe_to_step():
  try:
-  token=(BASE/'runtime/dashboard_token').read_text().strip()
+  base=Path(BASE) if BASE is not None else discover_base()
+  profile=json.loads((base/'runtime/collection_profile.json').read_text())
+  active=base if profile['legacy_mode']==profile['active_mode'] else base.parent/'profiles'/profile['active_mode']/'orangepi'
+  token=(active/'runtime/dashboard_token').read_text().strip()
   request=urllib.request.Request('http://127.0.0.1:8765/api/display-state',headers={'X-Access-Token':token})
   with urllib.request.urlopen(request,timeout=.7) as response:v=json.load(response)
   session=v.get('session')
@@ -48,7 +51,9 @@ def safe_to_step():
  except Exception:
   # During boot the UI is intentionally ordered after this service. A failed
   # UI read must never permit stepping a live capture or a starting controller.
-  targets=[str(BASE/'src/orangepi_collect'/name).encode() for name in ['control/launcher.py','framework/framework_recorder.py','acquisition/capture.py']]
+  try:base=Path(BASE) if BASE is not None else discover_base()
+  except Exception:return False,'collector_root_unavailable'
+  targets=[str(base/'src/orangepi_collect'/name).encode() for name in ['control/launcher.py','framework/framework_recorder.py','acquisition/capture.py']]
   for p in Path('/proc').iterdir():
    if not p.name.isdigit():continue
    try:args=(p/'cmdline').read_bytes().split(b'\0')
