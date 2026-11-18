@@ -27,6 +27,16 @@ class InstallTest(unittest.TestCase):
    with self.assertRaises(OSError):m.install(self.stage,self.hash)
   for n in m.FILES:self.assertEqual((self.root/n).read_bytes(),self.before[n])
   self.sig.assert_not_called()
+ def test_replace_succeeded_but_parent_fsync_failed_restores_preimage(self):
+  real=m.sync_dir;fired=[False]
+  def inject(path):
+   if Path(path)==self.root and (self.root/'service.py').read_bytes()==self.after['service.py'] and not fired[0]:
+    fired[0]=True;raise OSError('injected parent fsync failure')
+   return real(path)
+  with self.patches(),patch.object(m,'sync_dir',side_effect=inject):
+   with self.assertRaisesRegex(OSError,'fsync'):m.install(self.stage,self.hash)
+  self.assertTrue(fired[0]);self.assertEqual((self.root/'service.py').read_bytes(),self.before['service.py']);self.sig.assert_not_called()
+
  def test_unhealthy_new_service_restores_programs_only(self):
   self.status.side_effect=lambda version=None: (_ for _ in ()).throw(ValueError('bad version')) if version not in (None,'legacy') else {}
   with self.patches(),patch.object(m.time,'sleep',lambda _:None):

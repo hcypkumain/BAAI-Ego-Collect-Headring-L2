@@ -71,7 +71,10 @@ def install(stage,manifest_hash):
  config_bytes,_=read_regular(ROOT/'config.json');cfg=json.loads(config_bytes);require(cfg.get('receive_strategy')=='manual_handoff_v1','unexpected receiver strategy')
  db=Path(cfg.get('receiver_state_root',str(ROOT/'state/receiver')))/'receiver.sqlite3';require(db.is_absolute() and not db.is_symlink() and db.is_file(),'receiver DB unavailable')
  read_status_stopped('legacy');old_pid,cgroup=unit()
- backup=ROOT/'backups'/('copy-only-'+str(time.time_ns()));backup.mkdir(parents=True,mode=0o700)
+ backup_parent=ROOT/'backups'
+ if not backup_parent.exists():backup_parent.mkdir(mode=0o700);sync_dir(ROOT)
+ require(not backup_parent.is_symlink() and backup_parent.is_dir(),'unsafe backup parent')
+ backup=backup_parent/('copy-only-'+str(time.time_ns()));backup.mkdir(mode=0o700);sync_dir(backup_parent)
  for name in FILES:atomic(backup/name,pre[name],modes[name])
  atomic(backup/'manifest.json',manifest_bytes,0o600)
  # Consistent evidence snapshot only. Never use it to roll a live DB backward.
@@ -87,13 +90,16 @@ def install(stage,manifest_hash):
   pid,cg=unit();require((pid,cg)==(old_pid,cgroup),'service changed during preflight')
   for name in FILES:
    require(sha(read_regular(ROOT/name)[0])==m['files'][name]['before'],'source changed before switch')
-   atomic(ROOT/name,payload[name],modes[name]);changed.append(name)
+   changed.append(name)  # intent before replace; fsync itself may fail
+   atomic(ROOT/name,payload[name],modes[name])
   guarded_signal(old_pid);signaled=True
   conn.commit()
  except BaseException:
   # With the database write lock held, no new receive can have been authorized.
   for name in reversed(changed):
-   current,_=read_regular(ROOT/name);require(sha(current)==m['files'][name]['after'],'cannot safely restore changed source')
+   current,_=read_regular(ROOT/name);current_sha=sha(current)
+   if current_sha==m['files'][name]['before']:continue
+   require(current_sha==m['files'][name]['after'],'cannot safely restore changed source')
    atomic(ROOT/name,pre[name],modes[name])
   conn.rollback()
   if signaled:
