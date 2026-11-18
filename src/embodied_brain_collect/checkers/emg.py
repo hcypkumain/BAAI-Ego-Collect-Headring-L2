@@ -82,6 +82,12 @@ class EmgChecker(BaseChecker):
         MadOutlier("imu_accel"),
     ]
 
+    def __init__(self, checker_cfg=None):
+        super().__init__(checker_cfg)
+        # Scope the 150 ms hard gap only to this EMG receiver (EMG and its IMU).
+        override = dict(self.checker_cfg.get("timestampgap") or {})
+        override["min_s"] = 0.1500005  # 0.5 µs accommodates float timestamp rounding
+        self.checker_cfg["timestampgap"] = override
     def prepare(self, ctx: CheckContext) -> None:
         ctx.add_series("emg", key="emg_timestamps")
         ctx.add_series("imu", key="imu_timestamps")

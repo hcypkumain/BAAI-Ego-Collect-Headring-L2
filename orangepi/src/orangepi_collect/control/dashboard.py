@@ -31,7 +31,7 @@ def impedance_presentation(state, selected_devices, worker, worker_active):
     """Explain preparation separately from the current owner's measured state."""
     if 'eeg' not in (selected_devices or ()):
         return dict(required=False, supported=False, phase='not_selected', can_record=True)
-    required = os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT') == '1'
+    required = False  # New recordings intentionally skip impedance preflight.
     worker = worker or {}
     measured = worker.get('eeg_impedance')
     if worker_active and isinstance(measured, dict) and measured.get('phase'):
@@ -519,7 +519,7 @@ class Dashboard:
                 and self.snapshot.get('collection_mode')==active.get('collection_mode')
                 and type(self.snapshot.get('revision')) is int and self.snapshot['revision']==active.get('submitted_revision'))
 
-    def complete(self,error=None,task_block_details=None,expected_job=None):
+    def complete(self,error=None,task_block_details=None,expected_job=None,action_details=None):
         with self.lock:
             active=getattr(self,'active_task_block_job',None)
             if expected_job is not None and (not self.busy or not isinstance(active,dict) or active!=expected_job):
@@ -538,6 +538,11 @@ class Dashboard:
                 if task_block_details['outcome']=='applied' and (error or readback is None or readback['configured_size']!=active['requested_value']):
                     raise ValueError('任务分组成功结果缺少匹配的读回')
             self.busy=False;self.result={'ok':not error,'error':error,'time':time.time(),'action':getattr(self,'active_action',None)}
+            if action_details is not None and getattr(self,'active_action',None)=='delete_recording' and not error:
+                if isinstance(action_details,dict) and action_details.get('deleted') is True and isinstance(action_details.get('message'),str):
+                    self.result['session_id']=action_details.get('id')
+                    self.result['message']=action_details['message'][:300]
+                    self.result['reference_restoration']=copy.deepcopy(action_details.get('reference_restoration'))
             if active is not None:
                 receipt={key:active[key] for key in ('action','request_id','client_request_id','collection_context','collection_mode','submitted_revision','requested_value')}
                 details=copy.deepcopy(task_block_details) if task_block_details is not None else {'outcome':'rejected','readback':None}

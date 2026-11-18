@@ -4,6 +4,8 @@ No recorder access. Mutations run through the controller's existing action
 queue, only after it has verified no preparation/recording worker is alive.
 """
 import datetime
+import contextlib
+import fcntl
 import hashlib
 import json
 import math
@@ -272,6 +274,17 @@ class RecordingStore:
     def _delete_unlocked(self,identifier,token):
         path=self.path(identifier);value=self.metadata(path)
         if value['token']!=token:raise ValueError('采集条目已变化，请刷新后再删除')
+        if value['reference_path']:
+            image=(self.project/value['reference_path']).resolve()
+            image.relative_to((self.project/'configs/environments').resolve())
+            with (self.base/'runtime/ledger.lock').open('a') as lock:
+                fcntl.flock(lock,fcntl.LOCK_EX)
+                ledger_value=self.ledger.read(image.parent/'used.yaml')
+                owner=ledger_value.get('used',{}).get(image.name)
+                attempts=ledger_value.get('attempts',{}).get(image.name,[])
+                if not isinstance(attempts,list) or any(not isinstance(x,dict) for x in attempts):raise ValueError('参考图历史损坏，未删除，请人工核对')
+                other=any(x.get('session')!=str(path) and not x.get('deleted') and x.get('status') in ('success','pending_qc') for x in attempts)
+                if isinstance(owner,dict) and owner.get('session')==str(path) and other:raise ValueError('参考图还有其他已保存记录，为防错误释放未删除，请人工核对')
         _,volume=self.roots();target_root=volume/'deleted-recordings';target_root.mkdir(exist_ok=True)
         target=target_root/(identifier+'--'+uuid.uuid4().hex[:12])
         if target_root.is_symlink() or target_root.resolve().parent!=volume or path.stat().st_dev!=target_root.stat().st_dev:raise ValueError('回收站不在同一采集存储卷')
@@ -399,24 +412,52 @@ class RecordingStore:
         root,volume=self.roots();source=Path(operation['source']);target=Path(operation['target'])
         if source.parent!=root or target.parent!=(volume/'deleted-recordings') or source.name!=operation['session_id']:raise ValueError('删除事务路径不在采集目录内')
         if source.is_symlink() or target.is_symlink() or target.parent.is_symlink():raise ValueError('删除事务不能使用链接目录')
-        if source.exists():
-            if target.exists():raise ValueError('删除目标已存在，请检查事务日志')
-            atomic_json(source/'recording_deleted.json',dict(operation_id=operation['id'],deleted_at_unix=operation['created_at_unix'],reference_path=operation['reference_path']))
-            os.rename(str(source),str(target));sync_directory(root);sync_directory(target.parent)
-        elif not target.is_dir():raise ValueError('删除事务的源和目标均不存在')
-        marker=json.loads(bounded(target/'recording_deleted.json'))
-        if marker.get('operation_id')!=operation['id']:raise ValueError('回收站删除凭据不匹配')
         image=self.project/operation['reference_path'] if operation['reference_path'] else None
-        released=self.ledger.release(image,source) if image else False
-        operation.update(phase='complete',reference_released=released,completed_at_unix=self.clock());atomic_json(journal,operation)
-        return dict(id=operation['session_id'],deleted=True,reference_released=released,
-            message='已删除本段采集，参考图已释放，可重新采集。' if released else '已删除本段采集，参考图状态已重新核对。')
+        with ((self.base/'runtime/ledger.lock').open('a') if image else contextlib.nullcontext()) as ledger_lock:
+            if image:
+                fcntl.flock(ledger_lock,fcntl.LOCK_EX)
+                image=image.resolve();image.relative_to((self.project/'configs/environments').resolve())
+                value=self.ledger.read(image.parent/'used.yaml');owner=value.get('used',{}).get(image.name)
+                attempts=value.get('attempts',{}).get(image.name,[])
+                if not isinstance(attempts,list) or any(not isinstance(x,dict) for x in attempts):raise ValueError('参考图历史损坏，未删除，请人工核对')
+                other=any(x.get('session')!=str(source) and not x.get('deleted') and x.get('status') in ('success','pending_qc') for x in attempts)
+                if isinstance(owner,dict) and owner.get('session')==str(source) and other:
+                    # Abort the durable transaction as well: never leave a
+                    # permanently replaying journal after a conservative refusal.
+                    if target.exists() and not source.exists():
+                        recorded=json.loads(bounded(target/'recording_deleted.json'))
+                        if recorded.get('operation_id')!=operation['id']:raise ValueError('回收站删除凭据不匹配')
+                        os.rename(str(target),str(source));sync_directory(root);sync_directory(target.parent)
+                    if source.exists() and (source/'recording_deleted.json').exists():
+                        recorded=json.loads(bounded(source/'recording_deleted.json'))
+                        if recorded.get('operation_id')!=operation['id']:raise ValueError('删除标记凭据不匹配')
+                        (source/'recording_deleted.json').unlink();sync_directory(source)
+                    operation.update(phase='complete',outcome='refused',reference_restoration={'status':'manual','reason':'参考图还有其他已保存记录'},completed_at_unix=self.clock());atomic_json(journal,operation)
+                    raise ValueError('参考图还有其他已保存记录，为防错误释放未删除，请人工核对')
+            if source.exists():
+                if target.exists():raise ValueError('删除目标已存在，请检查事务日志')
+                atomic_json(source/'recording_deleted.json',dict(operation_id=operation['id'],deleted_at_unix=operation['created_at_unix'],reference_path=operation['reference_path']))
+                os.rename(str(source),str(target));sync_directory(root);sync_directory(target.parent)
+            elif not target.is_dir():raise ValueError('删除事务的源和目标均不存在')
+            marker=json.loads(bounded(target/'recording_deleted.json'))
+            if marker.get('operation_id')!=operation['id']:raise ValueError('回收站删除凭据不匹配')
+            released=self.ledger._release_locked(image,source) if image else False
+            if image:
+                from task_delete_restore import restore_saved_reference
+                restoration=restore_saved_reference(self.base,self.project,self.ledger,operation['reference_path'],source,already_locked=True)
+            else:restoration={'status':'manual','reason':'本段缺少参考图关联'}
+            released=released or restoration['status']=='restored'
+            operation.update(phase='complete',reference_released=released,reference_restoration=restoration,completed_at_unix=self.clock());atomic_json(journal,operation)
+            return dict(id=operation['session_id'],deleted=True,reference_released=released,reference_restoration=restoration,
+                message='已删除本段采集，参考图与可证明的任务进度已恢复。' if restoration['status']=='restored' else '已删除本段采集，但参考图进度未自动恢复：'+restoration['reason'])
 
     def recover(self):
         if not self.operations.is_dir():return
         for journal in sorted(self.operations.glob('*.json')):
             value=json.loads(bounded(journal,65536))
-            if value.get('kind')=='delete_recording' and value.get('phase')!='complete':self._finish_delete(journal,value)
+            if value.get('kind')=='delete_recording' and value.get('phase')!='complete':
+                from cloud_common import session_lock
+                with session_lock(self.base,value['session_id']):self._finish_delete(journal,value)
             elif value.get('kind')=='discard_recording' and value.get('phase')!='complete':
                 from cloud_common import session_lock
                 with session_lock(self.base,value['session_id']):self._finish_discard(journal,value)

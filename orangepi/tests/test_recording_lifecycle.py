@@ -80,12 +80,30 @@ class StoreTests(unittest.TestCase):
     def test_delete_older_take_does_not_release_newer_successful_owner(self):
         old=self.take();new=self.take('L2-001-2026-10-30-10-01-00');row=next(v for v in self.store.page()['items'] if v['id']==old.name)
         result=self.store.delete(old.name,row['token']);self.assertFalse(result['reference_released']);self.assertEqual(ledger.read(self.library/'used.yaml')['used'][self.image.name]['session'],str(new))
+    def test_delete_current_owner_with_older_retained_take_is_refused_before_journal(self):
+        old=self.take();new=self.take('L2-001-2026-10-30-10-01-00');row=next(v for v in self.store.page()['items'] if v['id']==new.name)
+        before=ledger.read(self.library/'used.yaml')
+        with self.assertRaisesRegex(ValueError,'其他已保存记录'):self.store.delete(new.name,row['token'])
+        self.assertTrue(old.exists());self.assertTrue(new.exists());self.assertEqual(ledger.read(self.library/'used.yaml'),before)
+        self.assertEqual(list(self.store.operations.glob('*.json')),[])
+        self.assertFalse((self.volume/'deleted-recordings').exists())
     def test_delete_recovers_after_rename_before_ledger_update(self):
         path=self.take();token=self.store.page()['items'][0]['token']
-        with patch.object(ledger,'release',side_effect=OSError('simulated interruption')):
+        with patch.object(ledger,'_release_locked',side_effect=OSError('simulated interruption')):
             with self.assertRaises(OSError):self.store.delete(path.name,token)
         self.assertFalse(path.exists());self.store.recover();self.assertEqual(ledger.read(self.library/'used.yaml')['used'],{})
         journal=json.loads(next(self.store.operations.glob('*.json')).read_text());self.assertEqual(journal['phase'],'complete')
+    def test_delete_replays_after_ledger_release_before_task_progress(self):
+        path=self.take();token=self.store.page()['items'][0]['token']
+        progress=self.base/'runtime/reference_task_blocks.json'
+        progress.write_text(json.dumps({'version':4,'current_task':'task','target_size':5,'completed_ids':[],'finished_tasks':[],'pending':None,'selected_ids':['img'],'finished_images':{},'image_refs':{'img':{'task':'task','relative_path':'configs/environments/scene/task_1.png'}},'saved_ids':['img'],'saved_history':['img'],'block_saved_start':None}))
+        with patch('task_delete_restore._durable',side_effect=OSError('interrupted')):
+            with self.assertRaises(OSError):self.store.delete(path.name,token)
+        stamp=ledger.read(self.library/'used.yaml')['attempts'][self.image.name][0]['deleted_at']
+        self.store.recover();self.store.recover()
+        self.assertEqual(stamp,ledger.read(self.library/'used.yaml')['attempts'][self.image.name][0]['deleted_at'])
+        self.assertEqual(json.loads(progress.read_text())['saved_history'],[])
+        journal=json.loads(next(self.store.operations.glob('*.json')).read_text());self.assertEqual(journal['reference_restoration']['status'],'restored')
     def test_abandoned_preparation_is_outside_upload_tree_and_started_take_is_refused(self):
         path=self.take(status='cancelled',keep=False);(path/'start_gate.json').unlink();result=self.store.abandon_preparation(path)
         self.assertFalse(path.exists());self.assertTrue(result['deleted']);self.assertEqual(list((self.volume/'.discarding-recordings').iterdir()),[]);self.assertEqual(self.store.page('all')['total'],0)

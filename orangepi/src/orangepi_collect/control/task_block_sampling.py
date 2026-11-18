@@ -209,6 +209,14 @@ class TaskBlocks:
             return True
         return False
 
+    def reload_saved_state(self):
+        # Rehydrate after a journaled delete changed the persisted progress.
+        base=self.path.parent.parent.parent if self.round_robin else self.path.parent.parent
+        settings=dict(list_ids=list(self.ids),block_size=self.size,count_basis=self.count_basis,round_robin=self.round_robin)
+        if self.round_robin:settings['namespace']=self.path.stem[len('blocks-'):]
+        fresh=TaskBlocks(base,settings)
+        self.value=copy.deepcopy(fresh.value);self._saved=copy.deepcopy(fresh._saved)
+
     def cancel_pending(self):
         identifier=self.value['pending']
         if identifier is None:return False

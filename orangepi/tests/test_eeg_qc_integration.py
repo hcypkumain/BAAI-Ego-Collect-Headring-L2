@@ -6,7 +6,8 @@ ROOT=pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/'src/orangepi_collect/common'))
 import project_paths
 import framework_qc as qc
-from embodied_brain_collect.checkers.base import StreamReport,Finding
+from embodied_brain_collect.checkers.base import StreamReport,Finding,BaseChecker
+from embodied_brain_collect.checkers.emg import EmgChecker
 from embodied_brain_collect.session.config import load_checker
 from framework_recorder import impedance_request
 
@@ -30,7 +31,7 @@ class EegQcIntegration(unittest.TestCase):
   self.assertIsNone(impedance_request('{"command":"STOP","request_id":"test"}'))
 
  def test_shared_emg_gap_rules_still_apply_in_the_eeg_edition(self):
-  for gap,expected in [(.02,'WARN'),(.12,'ERROR')]:
+  for gap,expected in [(.02,'WARN'),(.12,'WARN'),(.16,'ERROR')]:
    with self.subTest(gap=gap),tempfile.TemporaryDirectory() as temp:
     root=pathlib.Path(temp);d=root/'emg_left';d.mkdir()
     k=np.arange(15000);em=k%10!=9;et=k[em]*.00045;it=k[~em]*.00045;et[len(et)//2:]+=gap
@@ -42,6 +43,21 @@ class EegQcIntegration(unittest.TestCase):
     # quality policy separately from the dedicated receipt-integrity tests.
     with patch('local_qc_receipt.write'):
      report=qc.check_emg(root)
+    full=qc.parallel_qc_session(root,load_checker(),workers=1)
+    partial=qc.parallel_qc_session(root,load_checker(),workers=1,only=['emg_left'])
+    for candidate in (full,partial):
+     self.assertEqual(candidate.streams['emg_left'].level,expected)
+    with patch('embodied_brain_collect.checkers.marker.find_run_window',return_value=None):
+     fallback=qc.parallel_qc_session(root,load_checker(),workers=1)
+    self.assertEqual(fallback.streams['emg_left'].level,expected)
+    # The OTA overlay ships Pi adapters while devices may retain the old core.
+    with patch.object(EmgChecker,'__init__',BaseChecker.__init__):
+     old_core=qc.parallel_qc_session(root,load_checker(),workers=1,only=['emg_left'])
+     with patch('embodied_brain_collect.checkers.marker.find_run_window',return_value=None):
+      old_core_no_marker=qc.parallel_qc_session(root,load_checker(),workers=1)
+    self.assertEqual(old_core.streams['emg_left'].level,expected)
+    self.assertEqual(old_core_no_marker.streams['emg_left'].level,expected)
+
     self.assertEqual(report['streams']['emg_left']['level'],expected)
     # Missing frozen device and capture evidence must remain a session error.
     self.assertEqual(report['level'],'ERROR')

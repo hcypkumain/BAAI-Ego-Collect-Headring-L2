@@ -216,7 +216,9 @@ def main():
     lock = (base/'runtime/eeg.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     # Every recorded EEG episode requires its own durable preflight. Preview stays opt-in.
-    required=bool(args.output) or os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT')=='1'
+    # Recorded EEG uses the explicitly requested no-impedance policy.
+    skip_impedance=bool(args.output)
+    required=(bool(args.output) or os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT')=='1') and not skip_impedance
     official_sdk = (base/'runtime/official-sdk-0.2.0').is_dir()
     if official_sdk:
         sys.path.insert(0, str(base/'runtime/official-sdk-0.2.0'))
@@ -243,7 +245,11 @@ def main():
         if frontend.enabled_mask != 255 or frontend.mode not in ('eeg', 'both_bias'):
             raise RuntimeError('Require EEG mode and active CH1–8; inspect frontend configuration')
         path = args.output/'eeg' if args.output else None
-        if path: writer = Writer(path, config, frontend, info)
+        if path:
+            writer = Writer(path, config, frontend, info)
+            identity=Path('/opt/egorecord/DEVICE_ID').read_text().strip()
+            if not __import__('re').fullmatch(r'cp_[0-9]{4}',identity):raise RuntimeError('设备身份无效')
+            writer.metadata['headring_device_id']=identity
         else:
             # Coefficients are prepared before acquisition also in idle preview.
             from eeg_filter import FilterSettings, StreamingFilter
@@ -256,6 +262,9 @@ def main():
         else:
             from eeg_impedance import Preflight
             preflight=Preflight(board,config,args.output,emit,required)
+        if skip_impedance:
+            preflight.state.update(phase='skipped',reason='operator_requested_skip',message='本段不测阻抗；脑电在线检查仍然执行。')
+            preflight.publish()
         pump = Pump(board,preflight); parent = os.getppid()
         signal.signal(signal.SIGTERM, lambda *a:pump.stop.set())
         signal.signal(signal.SIGINT, lambda *a:pump.stop.set())

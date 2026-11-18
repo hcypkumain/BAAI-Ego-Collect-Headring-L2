@@ -551,8 +551,21 @@ class Capture:
                             screen_privacy=screen_proof,required_device_contract_version=self.required_contract['version'],
                             required_devices=self.required_contract['required_devices'],required_device_readiness=readiness['devices'])
                         if self.eeg:
-                            start_gate['eeg_impedance']=bind_start(self.path,start_gate,
-                                self.eeg.impedance_snapshot(),CONFIG['eeg'])
+                            impedance_state=self.eeg.impedance_snapshot()
+                            if (impedance_state.get('required') is False
+                                    and impedance_state.get('phase')=='skipped'
+                                    and impedance_state.get('reason')=='operator_requested_skip'):
+                                device_id=Path('/opt/egorecord/DEVICE_ID').read_text().strip()
+                                if not __import__('re').fullmatch(r'cp_[0-9]{4}',device_id):raise RuntimeError('设备身份无效')
+                                eeg_ready=readiness['devices'].get('eeg',{})
+                                if eeg_ready.get('ready') is not True or eeg_ready.get('fresh') is not True or type(eeg_ready.get('seen')) is not int or eeg_ready['seen']<=0:raise RuntimeError('脑电设备未提供新数据')
+                                capture_meta=json.loads((self.path/'meta.json').read_text(encoding='utf-8'))
+                                storage=capture_meta.get('storage_config')
+                                if (capture_meta.get('session_id')!=self.path.name or not isinstance(storage,dict)
+                                        or not isinstance(storage.get('device_id'),str) or not storage['device_id']):raise RuntimeError('本段身份凭据不完整')
+                                start_gate['eeg_impedance']=dict(version=2,device_id=device_id,status='not_measured',reason='operator_requested_skip',session_id=self.path.name,storage_device_id=storage['device_id'])
+                            else:
+                                start_gate['eeg_impedance']=bind_start(self.path,start_gate,impedance_state,CONFIG['eeg'])
                         atomic_json(self.path/'start_gate.json',start_gate)
                         self.screen_privacy_start=screen_proof
                         self.active = self.started = True

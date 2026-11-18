@@ -45,7 +45,7 @@ def load_bundle(path,expected):
    require(m.isfile() and m.name not in files and not m.name.startswith('/') and all(x not in ('','.','..') for x in m.name.split('/')),'unsafe bundle member')
    total+=m.size;require(m.size<=8_000_000 and total<=30_000_000,'bundle budget exceeded');files[m.name]=t.extractfile(m).read()
  require('manifest.json' in files,'manifest missing');m=json.loads(files.pop('manifest.json'))
- require(m.get('schema')==1 and m.get('baseline_commit')=='083155214907c55dc61d78fb34d65b29d12f2b82' and m.get('base_collector_commit')=='f5d03b7b5fb197eb76e78610a0bce672e5cc4853' and m.get('collector_overlay_manifest_sha256')=='963fc716fe06b5b49b4a9929ac7885d129b67fb5cbf58fb086a8d6da56397702','wrong manifest baseline')
+ require(m.get('schema')==1 and m.get('baseline_commit')=='083155214907c55dc61d78fb34d65b29d12f2b82' and m.get('base_collector_commit')=='f5d03b7b5fb197eb76e78610a0bce672e5cc4853' and m.get('collector_overlay_manifest_sha256')=='1fdd00add147d81c230293f6dc5221f77ff2c37b26d6cd301a09310d7f0a2fac','wrong manifest baseline')
  require(re.fullmatch(r'cp_[0-9]{4}',m.get('device_id','')) and re.fullmatch(r'offline-[0-9a-f]{16}',m.get('release_id','')),'invalid release identity')
  require(m.get('release_prefix')=='/opt/headring-offline/releases/'+m['release_id'],'invalid release path')
  require(set(files)==set(m['files']),'manifest membership mismatch')

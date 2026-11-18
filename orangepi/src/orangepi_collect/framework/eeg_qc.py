@@ -249,6 +249,29 @@ class OmniEegImpedance(BaseCheck):
         try:
             metadata = json.loads((Path(ctx.dir)/'metadata.json').read_text(encoding='utf-8'))
             gate = json.loads((root/'start_gate.json').read_text(encoding='utf-8'))
+            marker=gate.get('eeg_impedance')
+            if isinstance(marker,dict) and marker.get('status')=='not_measured':
+                device=marker.get('device_id')
+                if not isinstance(device,str) or not __import__('re').fullmatch(r'cp_[0-9]{4}',device) or marker.get('reason')!='operator_requested_skip':raise ValueError('跳过阻抗凭据无效')
+                capture_meta=json.loads((root/'meta.json').read_text(encoding='utf-8'))
+                storage=capture_meta.get('storage_config')
+                if not isinstance(storage,dict):raise ValueError('跳过阻抗的设备身份缺失')
+                if marker.get('version')==1 and type(marker.get('version')) is int and set(marker)=={'version','device_id','status','reason'}:
+                    legacy={'cp_0013':{'orangepi-01','orangepi-cp0013'},'cp_0017':{'orangepi-cp0017'},'cp_0018':{'orangepi-cp0018'},'cp_0023':{'orangepi-cp0023'}}
+                    if storage.get('device_id') not in legacy.get(device,set()):raise ValueError('历史跳过阻抗设备身份不匹配')
+                elif marker.get('version')==2 and type(marker.get('version')) is int and set(marker)=={'version','device_id','status','reason','session_id','storage_device_id'}:
+                    if (not isinstance(marker.get('storage_device_id'),str) or not marker['storage_device_id']
+                            or not isinstance(marker.get('session_id'),str) or not marker['session_id']
+                            or marker['storage_device_id']!=storage.get('device_id') or marker['session_id']!=capture_meta.get('session_id')
+                            or metadata.get('headring_device_id')!=device):raise ValueError('跳过阻抗与冻结会话身份不匹配')
+                else:raise ValueError('跳过阻抗凭据版本无效')
+                readiness=gate.get('required_device_readiness',{}).get('eeg',{})
+                if ('eeg' not in gate.get('required_devices',[]) or readiness.get('ready') is not True
+                        or readiness.get('fresh') is not True or type(readiness.get('seen')) is not int or readiness['seen']<=0):
+                    raise ValueError('跳过阻抗的记录缺少脑电在线与新鲜数据证明')
+                out.stats.update(impedance_required=False,impedance_measured=False,impedance_skip_reason='operator_requested_skip')
+                out.findings.append(self.finding('WARN','按要求跳过采前阻抗测量；已检查脑电设备在线及数据新鲜度',field='start_gate.json',detail={'device_id':marker['device_id'],'impedance_measured':False}))
+                return out
             proof = validate_start_binding(root, gate, expected_eeg_config=metadata['config'])
             preflight = json.loads((Path(ctx.dir)/'impedance_preflight.json').read_text(encoding='utf-8'))
             if metadata['frontend_config'] != preflight['restored_frontend']:

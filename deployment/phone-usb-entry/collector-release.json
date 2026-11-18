@@ -1,15 +1,20 @@
 {
   "baseline_commit": "083155214907c55dc61d78fb34d65b29d12f2b82",
   "overrides": {
+    "orangepi/src/orangepi_collect/acquisition/capture.py": {
+      "post_sha256": "9a3d8048906ef7756e57bd82586d2bec19f3f4d31ef4f6c2b29df96b0de4c4fa",
+      "pre_sha256": "901c64c1cc77d1f1759673664ba8a0892a4ec0098ff83094c0119e148c10a1c6",
+      "size": 35767
+    },
     "orangepi/src/orangepi_collect/acquisition/eeg_bridge.py": {
-      "post_sha256": "a53b404b2601a9190210046861fdfaf532b413a60cbe2c83da299a3a700e9ada",
+      "post_sha256": "493c949c9137662aab1ca9e71445079ea72de455eadd3a9f821946e4300648c3",
       "pre_sha256": "b5e3d1bb6f88a66bc33c903d62ac54e385124518238c58ab8400e9c04341c455",
-      "size": 7021
+      "size": 6967
     },
     "orangepi/src/orangepi_collect/acquisition/eeg_worker.py": {
-      "post_sha256": "169566e306cba2fae59eaa7026702ab8f1622f34ae2fc4cd461eb0cd1d2e2ce2",
+      "post_sha256": "648908d04124d378071ea60c57fff7ea46ce41c989aeac37175828b7465b5acb",
       "pre_sha256": "7bcbf2b7bc92b8c3ac1ca25227ccf5dadc8576b49cca514281610e9783ebba73",
-      "size": 18197
+      "size": 18795
     },
     "orangepi/src/orangepi_collect/common/collection_profiles.py": {
       "post_sha256": "ea33a64208b6465426f6bba5f4e1c488ae4cc717c3654a43b6c92b2a80797dc4",
@@ -25,6 +30,11 @@
       "post_sha256": "93f8228d78d946b6131532939ba2dda0b99df929cdf676e6a8ce3de48bb40947",
       "pre_sha256": "dc437d13d2e488a361671949fc6dc9199a7148447191720bf2287c36a65a09d3",
       "size": 20944
+    },
+    "orangepi/src/orangepi_collect/common/local_qc_receipt.py": {
+      "post_sha256": "19343fa3656e3a4faa16cfd40262e2dc9314b1d6d5a3c50baf48ddc048484ba1",
+      "pre_sha256": "d02e6da219e38542517fed165494964f8d40a2259fe53cbc7762dd6714e25a88",
+      "size": 6902
     },
     "orangepi/src/orangepi_collect/common/official_impedance.py": {
       "post_sha256": "3e50044035afcc0a9895ae739011d67a222e52a79fcedda9181d60330c78aa5f",
@@ -52,9 +62,9 @@
       "size": 105339
     },
     "orangepi/src/orangepi_collect/control/dashboard.py": {
-      "post_sha256": "f0c89933178baa329aeaec2a6a82edfd1a6c6678e54315cfbbe723071531663f",
+      "post_sha256": "0c61df2532d826f99a9faf836653e32703aee5098d274bde13014c051dca8afc",
       "pre_sha256": "7dad452bedfa97baa3e4436d4e0b88e90e0edcb42874809b751ebc74755331f9",
-      "size": 43453
+      "size": 43999
     },
     "orangepi/src/orangepi_collect/control/launcher.py": {
       "post_sha256": "5e999b6e3efaff8be100ceb7241af602e4e9853f11c35e45f6139e4b39f8ee90",
@@ -87,9 +97,9 @@
       "size": 2864
     },
     "orangepi/src/orangepi_collect/control/phone_recordings.js": {
-      "post_sha256": "37d34860092b2926a92c8980babb7e1ef50bb688abf69ab5cd0570087ee6c86a",
+      "post_sha256": "caec3db5d617330d5a7d7856e221e9d69816af87f6aebeb6961ecbd571742443",
       "pre_sha256": "bed865feb1e8ebaa2808317dc39e0cbfd198b903478f32b848a4eb7a4c4ddc4e",
-      "size": 8968
+      "size": 9215
     },
     "orangepi/src/orangepi_collect/control/phone_shell.js": {
       "post_sha256": "ac863685d7761c2389e1fc655d87bf23c62dc04ad3cf1f640cd1eb751732033c",
@@ -97,9 +107,9 @@
       "size": 56271
     },
     "orangepi/src/orangepi_collect/control/recording_store.py": {
-      "post_sha256": "b445f80bdac1ed3a8a23405647b34d648f83d12c9efe3377d96d91e069b86427",
+      "post_sha256": "e8c56b3989bf0106f6ac64e8e16689991e65183f3aca511bed1d1f038fa93fc3",
       "pre_sha256": "4792d0ae41b4ec236c47a9e4a8b8df2e3cc0f3410352e000a37743356c40c6bd",
-      "size": 28504
+      "size": 32447
     },
     "orangepi/src/orangepi_collect/control/reference_catalog.py": {
       "post_sha256": "a23372e1c83d8768e56119b07cd040558f4fe31b42cb177e0bc6fc6e01c26818",
@@ -112,9 +122,14 @@
       "size": 56764
     },
     "orangepi/src/orangepi_collect/control/task_block_sampling.py": {
-      "post_sha256": "fd00b320973a2a6056e0a89be59327e99c1308fd735a8f9f87c6625cb5805493",
+      "post_sha256": "67bd64160c75d93712ccfc15617146b95e6a955df1af609c3fe7648bb04ba823",
       "pre_sha256": "29b6443d2fd6dfc0ab0237e4cbb4f8d9149cc29f160c0fe9ff99ce5d6ab99e6c",
-      "size": 29645
+      "size": 30184
+    },
+    "orangepi/src/orangepi_collect/control/task_delete_restore.py": {
+      "post_sha256": "71d99db6703f944f21a4b07787831e005ae9f7a55a10b4339321e77046e7af5a",
+      "pre_sha256": null,
+      "size": 4828
     },
     "orangepi/src/orangepi_collect/control/usb_export_cleanup.py": {
       "post_sha256": "9eb59abfb204e030dbbf40e1147d7278a55001f8b2b481c0e7c11236a133e088",
@@ -197,19 +212,44 @@
       "size": 22179
     },
     "orangepi/src/orangepi_collect/control/web_controls.py": {
-      "post_sha256": "411a651dd2bcda3d58ec4df3d9f8c3f97dc498a1d696664af85c7e9827616a93",
+      "post_sha256": "9cca0b08f80c925cac5717c42b3f0d140d4378ea1eff85ecd599fc91b3afb330",
       "pre_sha256": "68731528bb53f328768bbeb70d9cc75fb99cce532a35a9cb6b92453db0a817b3",
-      "size": 37922
+      "size": 38445
+    },
+    "orangepi/src/orangepi_collect/framework/eeg_qc.py": {
+      "post_sha256": "0842e18cedef4bda467d879f8bc14ba5857e41bae5f7667113c60cd909ce7aee",
+      "pre_sha256": "b362e196b9f2d568e9e64037667a0cfbf31e2b7c12751344cbf7fdb730a9b78d",
+      "size": 20968
+    },
+    "orangepi/src/orangepi_collect/framework/emg_recoverability.py": {
+      "post_sha256": "af2f5b388f0118a39c264c19bee428e115bf678bd1e8d3e75ba4a909e876f713",
+      "pre_sha256": "89bdc0ff0c3e336e412350e6e3df48a6f12594e050002d3e9d2ff042e34d4b40",
+      "size": 8702
+    },
+    "orangepi/src/orangepi_collect/framework/framework_qc.py": {
+      "post_sha256": "096d111da9ceeb7ef377abac6ca804a7f67c1229579165697a798a64a3c84b5a",
+      "pre_sha256": "39012f929a6e0d4deee7721669aa1deb355421c7750ea83d05f2c6c2653d73d6",
+      "size": 51197
     },
     "orangepi/src/orangepi_collect/framework/framework_recorder.py": {
       "post_sha256": "00589bbdcf2b2d1e72241ec5e60fe42097684269b36bad737c9c140d5c4de758",
       "pre_sha256": "aa9d9f7d315c98fe8a80f8712c99e33503117bcb23d09ea3ab36083bfb9114ac",
       "size": 16821
     },
+    "orangepi/src/orangepi_collect/framework/gap_thresholds.py": {
+      "post_sha256": "987c6fe3d97edea3251976491cf48ee416c5fdc5abc785a03ef4e763b0291242",
+      "pre_sha256": "aaf1ab0a02a54e916b80a0f887f4f8cab53f04c379c8b9f8757b3af085c6d823",
+      "size": 1824
+    },
+    "orangepi/src/orangepi_collect/framework/qc_policy.py": {
+      "post_sha256": "bc35ded45c4d649f74d9c42dc1a7b288e36d32b2b870dfb6105fcf202f41a7c4",
+      "pre_sha256": "f8681125fc4069664a9202a8e7a7df1c3cbf3189d9dd070843607be203303d92",
+      "size": 16786
+    },
     "orangepi/src/orangepi_collect/storage/ledger.py": {
-      "post_sha256": "59c188f2f9aae93051a7b65cb8ba313cfa8a29ec52a26babff66c3d349a2e00d",
+      "post_sha256": "93597482a0e1b6fa69055665e036c42a0329d81c8887adfaeed584ab17e42bdb",
       "pre_sha256": "79a22cffae8e5562eae0b2fd8fac4e240e160e554ec6de2359d91826a06e89c2",
-      "size": 24128
+      "size": 24326
     }
   },
   "rotation": {

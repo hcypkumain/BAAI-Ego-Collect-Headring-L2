@@ -348,22 +348,29 @@ def migrate_legacy():
 
 def release(image,session):
     """Release only the take that currently owns the reference completion."""
-    image=Path(image).resolve();image.relative_to(LIBRARY.resolve());target=image.parent/'used.yaml'
     lockroot=BASE/'runtime';lockroot.mkdir(exist_ok=True)
     with (lockroot/'ledger.lock').open('a') as lock:
-        fcntl.flock(lock,fcntl.LOCK_EX);value=read(target);used=value.setdefault('used',{});entry=used.get(image.name)
-        attempts=value.get('attempts',{}).get(image.name,[])
-        for attempt in attempts:
-            if attempt.get('session')==str(session):attempt.update(deleted=True,retained=False,deleted_at=time.time())
-        if not isinstance(entry,dict) or str(entry.get('session',''))!=str(session):
-            if attempts:atomic_yaml(target,value)
-            return False
-        backup=lockroot/'ledger_backups';backup.mkdir(exist_ok=True)
-        identity=hashlib.sha256(str(target).encode()).hexdigest()[:16]
-        if target.exists():(backup/(identity+'_'+str(time.time_ns())+'_released.yaml')).write_bytes(target.read_bytes())
-        used.pop(image.name,None);value.get('failed',{}).pop(image.name,None);atomic_yaml(target,value)
-        return True
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        return _release_locked(image,session)
 
+def _release_locked(image,session):
+    """Caller must hold the exclusive ledger.lock."""
+    image=Path(image).resolve();image.relative_to(LIBRARY.resolve());target=image.parent/'used.yaml'
+    lockroot=BASE/'runtime'
+    value=read(target);used=value.setdefault('used',{});entry=used.get(image.name)
+    attempts=value.get('attempts',{}).get(image.name,[])
+    changed=False
+    for attempt in attempts:
+        if attempt.get('session')==str(session) and not attempt.get('deleted'):
+            attempt.update(deleted=True,retained=False,deleted_at=time.time());changed=True
+    if not isinstance(entry,dict) or str(entry.get('session',''))!=str(session):
+        if changed:atomic_yaml(target,value)
+        return False
+    backup=lockroot/'ledger_backups';backup.mkdir(exist_ok=True)
+    identity=hashlib.sha256(str(target).encode()).hexdigest()[:16]
+    if target.exists():(backup/(identity+'_'+str(time.time_ns())+'_released.yaml')).write_bytes(target.read_bytes())
+    used.pop(image.name,None);value.get('failed',{}).pop(image.name,None);atomic_yaml(target,value)
+    return True
 
 def retain_error(image,session):
     image=Path(image).resolve();image.relative_to(LIBRARY.resolve());target=image.parent/'used.yaml'

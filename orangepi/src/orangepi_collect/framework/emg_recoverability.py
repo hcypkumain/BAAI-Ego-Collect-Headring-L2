@@ -7,7 +7,7 @@ import shutil
 import time
 import numpy as np
 
-HARD_GAP_S=.1
+HARD_GAP_S=.1500005  # nominal 150 ms plus float timestamp rounding
 MAX_RECEIPT_GAP_S=3.0
 MAX_LOSS_FRACTION=.01
 MAX_REPAIR_FRACTION=.001

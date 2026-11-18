@@ -25,7 +25,7 @@ class EegProcess:
         self.config = config
         self.state_lock = threading.RLock()
         self.write_lock = threading.Lock()
-        self.impedance = dict(required=os.environ.get('OMNIBCI_ENABLE_IMPEDANCE_PREFLIGHT') == '1',
+        self.impedance = dict(required=False,
             supported=False, phase='unavailable', can_record=False, active=False, pending=False,
             channels=[], loff_off_confirmed=False, frontend_restored=False)
         self.process = subprocess.Popen(

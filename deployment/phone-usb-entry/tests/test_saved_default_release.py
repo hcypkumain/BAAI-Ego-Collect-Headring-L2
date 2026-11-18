@@ -27,7 +27,7 @@ class DefaultReleaseTests(unittest.TestCase):
   raise AssertionError(args)
  def test_default_payload_contains_saved_rotation_not_old_git_source(self):
   with patch.object(b,'git',self.git):sources,profile,index=b.collector_sources()
-  self.assertEqual(len(sources),139)
+  self.assertEqual(len(sources),140)
   self.assertEqual(profile['rotation']['count_basis'],'saved')
   self.assertIn(b"settings.get('count_basis','saved')",sources['orangepi/src/orangepi_collect/control/task_block_sampling.py'])
   self.assertIn(b'saved_history',sources['orangepi/src/orangepi_collect/control/task_block_sampling.py'])

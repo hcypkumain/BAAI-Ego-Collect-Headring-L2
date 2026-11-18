@@ -580,6 +580,16 @@ def performance():
         value.update(qc_video_backend='cv2',qc_workers=int(os.environ.get('ORANGEPI_HOST_QC_WORKERS','4')))
     return value
 
+def _emg_checker_config(cfg):
+    result=dict(cfg or {})
+    keys=[k for k in result if isinstance(k,str) and k.lower().replace("_","")=="timestampgap"]
+    previous=result.get(keys[-1],{}) if keys else {}
+    for k in keys:result.pop(k)
+    value=dict(previous) if isinstance(previous,dict) else {}
+    value["min_s"]=.1500005  # timestamp float rounding tolerance, nominal 150 ms
+    result["timestamp_gap"]=value
+    return result
+
 def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused_streams=None):
     """Same original checkers, thresholds and report order; concurrent independent streams."""
     from concurrent.futures import ThreadPoolExecutor
@@ -593,6 +603,11 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused
         inputs['findings']=[f for f in inputs['findings'] if f.get('subject') in only or f.get('check')=='PiSelection']
     if window is None:
         report=framework.qc_session(root,checker_cfg=cfg)
+        # Keep original missing-marker verdict, but use EMG-only gap policy.
+        for name in ('emg_left','emg_right'):
+            if name in report.streams and (root/name).is_dir():
+                cls=framework.checker_for(name)
+                if cls is not None:report.streams[name]=cls(_emg_checker_config(cfg)).run(root/name,None)
         report.findings.extend(Finding(**item) for item in inputs['findings'])
         # A missing marker remains an original hard failure, but must not
         # accidentally bypass the modality-specific continuity checks.
@@ -625,7 +640,7 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused
         if cls is None:
             return StreamReport(stream=directory.name,files=sorted(p.name for p in directory.iterdir() if p.is_file()),
                 findings=[Finding('INFO','未知模态 — 已跳过',check='Dispatch')])
-        checker=cls(cfg)
+        checker=cls(_emg_checker_config(cfg) if directory.name in ('emg_left','emg_right') else cfg)
         # Instance-local timing facts do not change the original checker
         # verdict. Keep the existing wrist evidence, while EMG/board acceptance
         # remains governed by their original checker rules.
@@ -785,12 +800,12 @@ def check_emg(path,progress=None):
     report,audit=apply_policy(report,load_policy(BASE/'configs/qc_policy.json'))
     audit['recorded_raw_level']=raw['level']
     audit['preprocessing']=preprocessing
-    audit['emg_acceptance_policy']='original-framework-v1'
-    audit['emg_timestamp_gap_error_s']=.1
+    audit['emg_acceptance_policy']='emg-gap-150ms-v1'
+    audit['emg_timestamp_gap_error_s']=.15
     audit['emg_SN_loss_warn_fraction']=.001
     audit['emg_SN_loss_error_fraction']=None
     data=report.to_dict();data['scope']='emg_only';data['remaining_qc']='pending_linux_host'
-    data['qc_rules']='original-framework-v1'
+    data['qc_rules']='emg-gap-150ms-v1'
     atomic_json(Path(path)/'emg_qc_policy.json',audit)
     atomic_json(Path(path)/'emg_qc_report.json',data)
     from local_qc_receipt import write

@@ -16,7 +16,7 @@
     if(reset)list.replaceChildren();summary.textContent=(day==='today'?'今日':'全部')+'：保留 '+data.retained_count+' 段 / 共 '+data.total+' 段。成功/WARN标记已采集；保留ERROR不计成功，删除会重新开放参考图。';
     for(const item of data.items){const row=el('article','','phone-take'),title=el('b',item.reference_name),info=el('p',new Date(item.created_unix*1000).toLocaleString()+' · '+Math.max(0,Number(item.duration)||0).toFixed(1)+' 秒 · '+item.id),state=el('small',item.retention_kind==='pending_qc'?'已保存 · 待主机质检 · 暂不重复抽取':item.retention_kind==='unsuccessful'?'未成功数据已保留 · '+(item.qc_level||item.status)+' · 本段不计为参考图成功':item.retained?'已保留，晚间上传用 · 参考图已采集（WARN不判失败）':'未成功/未确认保留 · 可保留错误数据或删除');
      const actions=el('div','','phone-row'),remove=button('作废并删除本段',()=>{
-      actions.replaceChildren(el('p','删除本段的全部相机及同步数据？对应参考图将重新开放采集，本段移出上传清单。'),button('确认删除',()=>discard(item)),button('取消',()=>load(true)));
+      actions.replaceChildren(el('p','删除本段的全部相机及同步数据？系统会核对参考图及任务进度，本段移出上传清单。'),button('确认删除',()=>discard(item)),button('取消',()=>load(true)));
       for(const node of actions.querySelectorAll('button'))node.dataset.deleteTake='';controls();
      });remove.dataset.deleteTake='';if(!item.retained&&['error','qc_error','failed','interrupted'].includes(item.status)){const keep=button('保留未成功数据',()=>discard(item,true));keep.dataset.deleteTake='';actions.append(keep);}actions.append(remove);row.append(title,info,state,actions);list.append(row);
     }
@@ -27,12 +27,12 @@
   async function discard(item,retain=false){if(busy||!current())return;const id=version,before=status().result?.time||0;lock(true);message(retain?'正在保留未成功数据，参考图仍可重采…':'正在删除本段并释放参考图…');
    try{
     if(!await action(retain?'retain_error_recording':'delete_recording',{session_id:item.id,token:item.token}))throw Error('本次操作未提交，请刷新当前状态后重试。');
-    const deadline=performance.now()+20000;
+    const expectedAction=retain?'retain_error_recording':'delete_recording';const deadline=performance.now()+90000;let completedMessage='';
     while(valid(id)){
-     await refresh?.();const state=status();if(state.result?.time>before&&!state.busy){if(!state.result.ok)throw Error(state.result.error||'删除未完成');break;}
+     await refresh?.();const state=status();if(state.result?.time>before&&!state.busy&&state.result.action===expectedAction&&(!state.result.ok||retain||state.result.session_id===item.id)){if(!state.result.ok)throw Error(state.result.error||'删除未完成');completedMessage=state.result.action==='delete_recording'?state.result.message||'':'';break;}
      if(performance.now()>deadline)throw Error('操作结果尚未确认，请先刷新，避免重复提交。');await new Promise(resolve=>setTimeout(resolve,150));
     }
-    if(!valid(id))return;lock(false);await load(true);if(valid(id))message(retain?'未成功数据已保留；ERROR标记与参考图未成功状态保持，可切换下一张。':'已删除本段采集并重新核对参考图状态；数据已移入回收站，不再计入晚间上传。');
+    if(!valid(id))return;lock(false);await load(true);if(valid(id))message(retain?'未成功数据已保留；ERROR标记与参考图未成功状态保持，可切换下一张。':completedMessage||'已删除本段采集；请核对参考图状态。');
    }catch(error){if(valid(id))message(error.message);}finally{if(valid(id))lock(false);}
   }
   async function manifest(){if(busy||!current())return;const id=version;lock(true);try{const response=await request('/api/phone/upload-manifest?'+new URLSearchParams({day})),blob=await response.blob();if(!valid(id))return;const url=URL.createObjectURL(blob),link=el('a');link.href=url;link.download='retained-recordings-'+(day==='today'?new Date().toLocaleDateString('sv-SE'):day)+'.json';document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);message('已导出本地保留条目清单。请按清单上传，旧归档和回收站不在清单中。');}catch(error){if(valid(id))message(error.message);}finally{if(valid(id))lock(false);}}

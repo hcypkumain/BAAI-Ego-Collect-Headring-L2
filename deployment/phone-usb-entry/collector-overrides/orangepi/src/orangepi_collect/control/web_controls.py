@@ -410,6 +410,11 @@ class WebControls:
         if self.state not in ('device_confirm','idle','failed_wait','exhausted') or getattr(self,'worker',None):raise ValueError('请先结束或放弃当前准备，再管理采集条目')
         if self.dashboard.privacy.snapshot().get('required'):raise ValueError('采集状态未确认停止')
         result=self.recording_store.delete(value['session_id'],value['token'])
+        if result.get('reference_restoration',{}).get('status')=='restored':
+            reloaded=set()
+            for blocks in (getattr(self,'_reference_task_blocks',None),getattr(self,'_base_reference_task_blocks',None)):
+                if blocks is not None and id(blocks) not in reloaded:
+                    blocks.reload_saved_state();reloaded.add(id(blocks))
         created=getattr(self,'retained_created_ids',set())
         if value['session_id'] in created:created.discard(value['session_id']);self.success_count=max(0,self.success_count-1)
         if (getattr(self,'last_completed',None) or {}).get('session')==value['session_id']:self.last_completed=None
@@ -455,7 +460,7 @@ class WebControls:
         self.ui_publish()
         job=dashboard.take()
         if job:
-            error=None;block_details=None
+            error=None;block_details=None;action_details=None
             try:
                 impedance = self.worker_status().get('eeg_impedance', {}) if 'eeg' in (getattr(self,'selected_devices',None) or ()) else dict(required=False)
                 allowed=list(actions_for(self.state,impedance))
@@ -510,7 +515,7 @@ class WebControls:
                 elif action=='collection_mode':
                     self.switch_collection_mode(job['value'])
                 elif action=='delete_recording':
-                    self.delete_recording(job['value'])
+                    action_details=self.delete_recording(job['value'])
                 elif action=='retain_error_recording':
                     self.retain_error_recording(job['value'])
                 elif action in ('select_reference','switch_reference'):
@@ -600,6 +605,7 @@ class WebControls:
                         except (ValueError,TypeError) as exc:
                             try:dashboard.complete('任务分组结果未确认：'+str(exc),expected_job=job)
                             except ValueError:pass
+                    elif job.get('action')=='delete_recording':dashboard.complete(error,action_details=action_details)
                     else:dashboard.complete(error)
         self.ensure_preview()
 
