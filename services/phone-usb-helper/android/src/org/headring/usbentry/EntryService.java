@@ -21,6 +21,8 @@ public final class EntryService extends Service {
  private volatile ServerSocket server,server6;
  private ScheduledExecutorService timers;
  private DiscoveryProvider discovery;
+ private Endpoint checkedWorkbench;
+ private int workbenchFailures;
  private boolean scanActive;
  private ScanJob pendingScan;
  private static final class ScanJob {
@@ -138,7 +140,12 @@ public final class EntryService extends Service {
  private void checkTarget(){
   Endpoint e=state.snapshot(System.nanoTime()).target;if(!running||e==null)return;
   InetAddress source=new UsbScanDiscovery(this).sourceFor(e.address);
-  if(source!=null&&source.equals(e.source)&&IdentityProbe.verify(e.address,source,null,e.deviceId))return;
+  if(e!=checkedWorkbench){checkedWorkbench=e;workbenchFailures=0;}
+  if(source!=null&&source.equals(e.source)&&IdentityProbe.verify(e.address,source,null,e.deviceId)){
+   if(WorkbenchProbe.reachable(e.address,source,e.port)){workbenchFailures=0;return;}
+   if(++workbenchFailures<3)return;
+  }
+  checkedWorkbench=null;workbenchFailures=0;
   synchronized(stateLock){if(!state.invalidate(e))return;closeSockets();}notifyState();requestScan(null,true);
  }
  private void listen(String address,boolean v6){

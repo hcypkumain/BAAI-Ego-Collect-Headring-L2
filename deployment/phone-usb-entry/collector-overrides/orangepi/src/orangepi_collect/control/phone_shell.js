@@ -1,6 +1,19 @@
 /* Page content follows source/ui/app/panel.c and panel_workflow.c. */
 (function(global){
  'use strict';
+ global.describeDeviceErrors=function(errors){
+  const names={cam_left_wrist:'左腕相机',cam_right_wrist:'右腕相机',cam_ros_left:'头环前左相机',cam_ros_right:'头环前右相机',cam_ros_bleft:'头环后左相机',cam_ros_bright:'头环后右相机',emg_left:'左臂肌电',emg_right:'右臂肌电',eeg:'脑电设备',board_imu:'头环惯性传感器'};
+  const result=[],seen=new Set();
+  for(const entry of Array.isArray(errors)?errors:[]){
+   if(typeof entry!=='string')continue;
+   const match=entry.match(/\b(cam_left_wrist|cam_right_wrist|cam_ros_left|cam_ros_right|cam_ros_bleft|cam_ros_bright|emg_left|emg_right|eeg|board_imu)\b/i);
+   if(!match)continue;const key=match[1].toLowerCase();if(seen.has(key))continue;seen.add(key);
+   let advice=key.startsWith('cam_ros_')?'检查头环相机服务及预览；若多路同时异常，请检查头环连接。':key.startsWith('cam_')?'结束当前段后检查对应相机线缆、USB 接口和集线器，再重新扫描。':key.startsWith('emg_')?'结束当前段后检查对应肌电设备、接收器和 USB 线缆，再重新扫描。':key==='eeg'?'结束当前段后检查脑电板供电和 USB 连接，再重新扫描。':'检查头环连接并重新扫描；反复出现请联系维护人员。';
+   result.push(names[key]+'：采集或检测异常。'+advice);
+  }
+  return result;
+ };
+ global.shouldShowImpedancePanel=function(value){return value?.eeg_impedance?.required===true&&value?.eeg_impedance?.supported===true;};
  global.describePhoneRecordingResult=function(value,label){
   const review=value.review||{},last=value.last_completed||{},current=(value.session||'').split('/').pop()||'';
   const session=review.session||'',historical=!!session&&session!==current;
@@ -35,6 +48,7 @@
   }
   const button=(label,fn)=>{const b=document.createElement('button');b.textContent=label;b.onclick=fn;return b;};
   const step=document.querySelector('.step-card'),referenceCard=document.querySelector('.reference-card'),wristCard=$('wrists').closest('.card'),emgCard=$('emg-card'),eegCard=$('eeg').closest('.card');
+  const impedancePanel=$('impedance-panel');impedancePanel.hidden=true;impedancePanel.style.display='none';
   const waves={eeg:$('eeg'),emg_left:$('emg_left'),emg_right:$('emg_right')};
   const referenceStatus=document.createElement('section');referenceStatus.id='phone-reference-status';referenceStatus.innerHTML='<p id="phone-reference-state-text"></p><small>ERROR 可保留但不算成功；WARN 不判失败。多个启用列表合并随机抽取，优先从未采集；重采保持同一张。</small><div class="phone-row"><button id="phone-pick-reference">自选任务与参考图</button><button id="phone-switch-reference">切换下一张</button><button id="phone-manage-current">管理已拍录像</button></div><div class="phone-row" id="phone-task-choice-row" hidden><label>任务列表 <select id="phone-task-choice" aria-label="选择任务列表"></select></label><button id="phone-use-task">使用此任务列表</button></div><div class="phone-row"><select id="phone-reference-choice" hidden aria-label="选择要采集的参考图"></select><button id="phone-use-reference" hidden>使用所选图</button><button id="phone-more-references" hidden>加载更多</button></div><p id="phone-reference-choice-message" class="phone-hint"></p>';referenceCard.querySelector('.reference').append(referenceStatus);
   let referenceChoiceRevision=0,referenceChoicesNext=null,referenceChoicesBusy=false,referenceChoiceGeneration=0;
@@ -221,18 +235,18 @@
    const stage=setup?(!impedanceDone?'impedance':referenceReadKey===context?'start':'reference'):'';
    if(stage!==setupStage&&pageId==='workflow'){workflowBody.scrollTop=0;pages.workflow.scrollTop=0;}setupStage=stage;
    if(setup)pages.workflow.dataset.setupStage=stage;else delete pages.workflow.dataset.setupStage;
-   impedanceTabs.hidden=!(stage==='impedance'&&imp.required);
+   impedanceTabs.hidden=!(stage==='impedance'&&global.shouldShowImpedancePanel(snapshot));
    if(stage==='impedance')pages.workflow.dataset.impedanceView=impedanceView;else delete pages.workflow.dataset.impedanceView;
    for(const tab of impedanceTabs.children)tab.setAttribute('aria-pressed',String(tab.dataset.impedanceView===impedanceView));
    setupProgress.hidden=!setup;setupDetails.hidden=!setup;startSummary.hidden=stage!=='start';
    const current=stage==='impedance'?0:stage==='reference'?1:2;
    [...setupProgress.children].forEach((item,index)=>{item.classList.toggle('is-complete',index<current);if(index===current)item.setAttribute('aria-current','step');else item.removeAttribute('aria-current');});
-   setupProgress.children[0].textContent=imp.required?'检查阻抗':'设备准备';
+   setupProgress.children[0].textContent=global.shouldShowImpedancePanel(snapshot)?'检查阻抗':'设备准备';
    // Keep the original controls and event handlers available, collapsed below
    // the focused step. Calibration and all non-preparation pages retain them.
    if(setup&&step.parentElement!==setupDetails)setupDetails.append(step);
    else if(!setup&&step.parentElement!==workflowBody){workflowBody.insertBefore(step,referenceCard);setupDetails.open=false;}
-   wristCard.hidden=!manualWrist;emgCard.hidden=!emg;eegCard.hidden=!(setup&&stage==='impedance'&&imp.required);referenceCard.hidden=setup?stage!=='reference':manualWrist||emg;
+   wristCard.hidden=!manualWrist;emgCard.hidden=!emg;eegCard.hidden=!(setup&&stage==='impedance'&&global.shouldShowImpedancePanel(snapshot));referenceCard.hidden=setup?stage!=='reference':manualWrist||emg;
    if(pageId==='workflow')restoreWaves();
    preflight.hidden=!setup||stage==='impedance';
    $('phone-check-cameras').hidden=stage==='impedance'||stage==='start'&&!check.required;
@@ -273,6 +287,7 @@
   }
 
   function updateContent(value){
+   const showImpedance=global.shouldShowImpedancePanel(value);impedancePanel.hidden=!showImpedance;impedancePanel.style.display=showImpedance?'':'none';
    const muscleOnly=value.collection_mode==='emg';
    for(const tab of signalTabs.children)if(tab.dataset.signal==='eeg')tab.hidden=muscleOnly;
    if(muscleOnly&&signalId==='eeg'){signalId='emg_left';if(pageId==='signals')selectSignal(signalId);}
@@ -312,7 +327,7 @@
    const issues=devices.filter(device=>!device.connected||device.role_confirmed===false),signature=JSON.stringify(issues.map(device=>[device.name,device.label,device.error,device.connected,device.role_confirmed,chosen.includes(device.name)]));
    problems.hidden=!issues.length;text($('phone-device-problem-summary'),'设备提示（'+issues.length+' 项）');
    if(signature!==problemSignature){problemSignature=signature;const target=$('phone-device-problem-list');target.replaceChildren();for(const device of issues){const item=document.createElement('li');item.textContent=device.label+'：'+(!device.connected?(device.error||'未发现设备，请检查 USB 连接和供电'):'已连接，请在采集步骤确认左右')+(value.selected_devices&&!chosen.includes(device.name)?'；本段未选，不参与录制':'');target.append(item);}}
-   overviewActions(value);text($('phone-home-hint'),(value.errors||[]).join('；')||(!value.actions?.some(a=>['confirm_devices','prepare','start','stop','keep','retry'].includes(a))?'请进入当前采集步骤，按提示继续设置或标定。':value.selected_devices?'本段已选 '+chosen.length+' 台；未选设备不参与本段。':'预览独立于录制；停止后还需完成收尾与保存确认。'));
+   overviewActions(value);const errorList=[...(Array.isArray(value.errors)?value.errors:[]),...(Array.isArray(value.worker?.errors)?value.worker.errors:[]),...(Array.isArray(value.result?.errors)?value.result.errors:[])];const uniqueErrors=[...new Set(errorList.filter(x=>typeof x==='string'))];const detailed=global.describeDeviceErrors(uniqueErrors);text($('phone-home-hint'),(detailed.length?detailed.join('\n')+'\n原始错误：'+uniqueErrors.join('；'):uniqueErrors.join('；'))||(!value.actions?.some(a=>['confirm_devices','prepare','start','stop','keep','retry'].includes(a))?'请进入当前采集步骤，按提示继续设置或标定。':value.selected_devices?'本段已选 '+chosen.length+' 台；未选设备不参与本段。':'预览独立于录制；停止后还需完成收尾与保存确认。'));
    const result=global.describePhoneRecordingResult(value,label);
    text($('phone-result-badge'),result.title);$('phone-result-badge').classList.toggle('phone-qc-error',result.qc_level==='ERROR');$('phone-result-badge').classList.toggle('phone-qc-warn',result.qc_level==='WARN');text($('phone-result-text'),result.text);
    text($('phone-wave-hint'),signalId==='eeg'?'脑电单位：µV · 近 2 秒逐点波形；可切换原始电压与显示滤波，纵轴使用实际单位。':'肌电单位：ADC counts · 20 ms 包络，尚未换算成电压；纵轴刻度与通道数值可查看。');

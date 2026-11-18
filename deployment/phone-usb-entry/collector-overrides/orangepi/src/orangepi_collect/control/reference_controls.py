@@ -535,7 +535,7 @@ class ReferenceControlsMixin:
         return image.stem.replace('_','，') if image else '本段任务'
 
     def refresh_reference_histories(self):
-        result={};cache={}
+        result={};cache={};completed=[];reserved=[]
         for image in self._reference_ledger.images():
             image=Path(image);path=image.parent/'used.yaml'
             if path not in cache:cache[path]=self._reference_ledger.read(path)
@@ -545,11 +545,15 @@ class ReferenceControlsMixin:
             latest=attempts[-1] if attempts else None
             pending=entry is not None and self._reference_ledger.reserved_used(entry,image)
             state='pending_qc' if pending else 'collected' if complete else 'unattempted' if not attempts else 'attempted_uncollected'
-            result[image.relative_to(self._reference_project).as_posix()]=dict(state=state,ever_recorded=bool(attempts),attempt_count=len(attempts),
+            relative=image.relative_to(self._reference_project).as_posix()
+            if complete:completed.append(relative)
+            if pending:reserved.append(relative)
+            result[relative]=dict(state=state,ever_recorded=bool(attempts),attempt_count=len(attempts),
                 collected=complete and not pending,pending_qc=pending,latest_qc=latest.get('qc_level') if latest else None,
                 latest_deleted=bool(latest and latest.get('deleted')),latest_retained=bool(latest and latest.get('retained')),
                 history=attempts[-5:])
         self._reference_histories=result
+        return tuple(sorted(set(completed))),tuple(sorted(set(reserved)))
 
     def reference_history_states(self):return getattr(self,'_reference_histories',{})
 
@@ -689,9 +693,7 @@ class ReferenceControlsMixin:
         if (not force and self._reference_retry is not None
                 and self.reference_catalog.revision==getattr(self,'_deferred_catalog_revision',None)):
             return False
-        self._reference_completed=_completed_paths(self._reference_project,self._reference_ledger)
-        self._reference_reserved=_reserved_paths(self._reference_project,self._reference_ledger)
-        self.refresh_reference_histories()
+        self._reference_completed,self._reference_reserved=self.refresh_reference_histories()
         identifier=current['list_id'] if self._reference_cli_image and current else self._reference_preferences['selected_list_id']
         if getattr(self,'_reference_task_blocks',None) is None:self._configure_text_blocks(identifier)
         try:snapshot=self.reference_catalog.freeze_list(identifier,self.reference_catalog.revision,include_completed=True)
@@ -858,7 +860,7 @@ class ReferenceControlsMixin:
         try:self.voice.say(message+'。处理后可重新准备，已有目录和数据保留。')
         except Exception:pass  # Advisory voice must not turn a recoverable prepare failure fatal.
 
-    def reference_reaped(self):
+    def reference_reaped(self, *, refresh=True):
         self._reference_mutation_started()
         active=getattr(self,'_reference_active',None)
         outcome=getattr(self,'_reference_reap_outcome',None);self._reference_reap_outcome=None
@@ -872,8 +874,9 @@ class ReferenceControlsMixin:
         if active:
             self._reference_retry=None if outcome in ('success','pending_qc') or getattr(self,'quit',False) else active['entry']
         self.reference_release_pin();self._reference_active=None
-        try:self.reference_refresh(force=True)
-        except (OSError,ValueError,RecursionError) as error:self.reference_error='参考图进度暂未更新：'+str(error)
+        if refresh:
+            try:self.reference_refresh(force=True)
+            except (OSError,ValueError,RecursionError) as error:self.reference_error='参考图进度暂未更新：'+str(error)
 
     def reference_close(self):
         self._reference_mutation_started()

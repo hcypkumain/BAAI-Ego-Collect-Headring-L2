@@ -80,7 +80,17 @@ const snapshot={state:'device_confirm',revision:7,collection_mode:'emg',collecti
   assert.equal(await preview(),'preview');failStream=false;
   console.log('PASS temporary stream failure does not refresh or navigate home');
 
-  await state({state:'ready'});assert.equal(await preview(),'workflow','actual workflow transitions still guide the operator');
+  await state({state:'ready',collection_mode:'eeg',eeg_impedance:{required:false,phase:'skipped',can_record:true},camera_check:{eligible:true}});
+  assert.equal(await preview(),'workflow','actual workflow transitions still guide the operator');
+  assert(await page.locator('#impedance-panel').isHidden(),'skipped impedance must stay hidden');
+  for(let i=0;i<3;i++){await page.waitForTimeout(900);assert(await page.locator('#impedance-panel').isHidden(),'polling must not re-show skipped impedance');}
+  await state({state:'ready',eeg_impedance:{required:true,supported:false,phase:'initializing',can_record:false},camera_check:{eligible:false}});
+  assert(await page.locator('#impedance-panel').isHidden(),'transient initialization must not show impedance');
+  await state({state:'ready',eeg_impedance:{required:true,supported:true,phase:'not_checked',can_record:false},camera_check:{eligible:false}});
+  assert.equal(await page.locator('#impedance-panel').evaluate(e=>e.hidden),false,'required impedance remains enabled');
+  await state({state:'ready',eeg_impedance:{required:false,phase:'skipped',can_record:true},camera_check:{eligible:true}});
+  assert(await page.locator('#impedance-panel').isHidden(),'switching back to skip hides impedance');
+  console.log('PASS skipped impedance stays hidden; required impedance remains available');
   await state({state:'device_confirm'});assert.equal(await preview(),'overview','invalidated workflow still returns to device confirmation');
   assert.equal(navigations,1,'no document reloads');assert.deepEqual(errors,[]);
   console.log('PASS workflow safety navigation preserved; no document reloads or script errors');

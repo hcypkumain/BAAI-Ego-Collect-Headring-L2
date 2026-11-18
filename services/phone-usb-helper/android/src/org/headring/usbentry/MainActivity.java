@@ -45,6 +45,7 @@ public final class MainActivity extends Activity {
   String uiNonce="";
   long uiNavigation=-1;
   boolean nativeRequested;
+  boolean connectionLost;
   boolean picking;
   volatile boolean saving;
   UiSession(Activity owner)throws IOException{context=new MutableContextWrapper(owner);exports=new ExportStore(owner.getFilesDir());WebTheme loaded;try{loaded=new WebTheme(owner);}catch(IOException e){loaded=null;}theme=loaded;}
@@ -97,7 +98,7 @@ public final class MainActivity extends Activity {
  }
  private void showConnections(boolean requested){if(requested)session.nativeRequested=true;nativePane.setVisibility(View.VISIBLE);session.web.setVisibility(View.GONE);}
  private void openCollection(){
-  if(!Diagnostics.snapshot().ready()){session.toast(Diagnostics.snapshot().message);return;}
+  if(Diagnostics.snapshot().current().isEmpty()){session.toast("头环尚未验证连接，请先搜索并连接");return;}
   session.nativeRequested=false;nativePane.setVisibility(View.GONE);session.web.setVisibility(View.VISIBLE);
   if(session.recovery.failed()||session.web.getUrl()==null||!sameOrigin(session.web.getUrl(),desiredHome())){session.recovery.manual();loadHome();}
  }
@@ -124,7 +125,7 @@ public final class MainActivity extends Activity {
    public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){Uri u=request.getUrl();String scheme=u.getScheme();if(("http".equalsIgnoreCase(scheme)||"https".equalsIgnoreCase(scheme))&&!allowed(u))return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));return null;}
    public void onPageStarted(WebView v,String url,android.graphics.Bitmap icon){session.navigation++;session.token=UUID.randomUUID().toString();session.uiNonce=UUID.randomUUID().toString();session.uiNavigation=-1;session.exports.abortActive();session.recovery.started();}
    public void onPageCommitVisible(WebView v,String url){applyTheme(v,url);}
-   public void onPageFinished(WebView v,String url){if(allowed(Uri.parse(url))&&url.equals(v.getUrl())){session.recovery.success();v.evaluateJavascript(BLOB_HOOK.replace("__TOKEN__",session.token),null);applyTheme(v,url);}}
+   public void onPageFinished(WebView v,String url){if(allowed(Uri.parse(url))&&url.equals(v.getUrl())){session.recovery.success();v.evaluateJavascript(BLOB_HOOK.replace("__TOKEN__",session.token),null);applyTheme(v,url);if(ConnectionVisibility.revealAfterLoad(session.connectionLost,session.recovery.failed(),Diagnostics.snapshot().current(),session.nativeRequested)){session.connectionLost=false;nativePane.setVisibility(View.GONE);v.setVisibility(View.VISIBLE);}}}
    public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError error){if(request.isForMainFrame()&&"GET".equals(request.getMethod())&&allowed(request.getUrl()))pageFailed();}
    public void onReceivedHttpError(WebView v,WebResourceRequest request,WebResourceResponse response){if(request.isForMainFrame()&&"GET".equals(request.getMethod())&&allowed(request.getUrl())&&response.getStatusCode()>=400)pageFailed();}
   });
@@ -169,16 +170,25 @@ public final class MainActivity extends Activity {
   choose.setVisibility(!connected&&!view.candidates.isEmpty()?View.VISIBLE:View.GONE);choose.setEnabled(!view.choosing&&!view.candidates.isEmpty());
   enter.setEnabled(connected);setText(enter,session.recovery.failed()?"重试打开采集页":"进入采集工作台");back.setVisibility(session.web.getUrl()!=null?View.VISIBLE:View.GONE);
   int mode=connected?2:view.candidates.isEmpty()?0:1;if(mode!=buttonMode){buttonMode=mode;UiTheme.button(scan,mode==0);UiTheme.button(choose,mode==1);}
-  if(!view.ready()&&session.web.getUrl()==null)showConnections(false);
+  if(ConnectionVisibility.lost(session.web.getUrl()!=null,session.lastDevice,view.current())){
+   session.connectionLost=true;showConnections(false);
+   setText(connectionTitle,"与头环连接中断");
+   setText(connectionNote,"当前采集状态未知。请保持头环运行，检查 USB 数据线及手机 USB 网络共享；连接恢复后将重新读取状态。");
+   setText(deviceSummary,"上次连接："+session.lastDevice);
+   back.setVisibility(View.GONE);
+  }else if(!view.ready()&&session.web.getUrl()==null)showConnections(false);
   if(view.connectionRevision!=session.connectionRevision&&!session.picking){
    session.connectionRevision=view.connectionRevision;String id=view.current();
-   if(view.ready()&&(session.web.getUrl()==null||!id.equals(session.lastDevice)||session.recovery.failed())){session.recovery.manual();loadHome();if(!id.isEmpty()&&!session.nativeRequested){nativePane.setVisibility(View.GONE);session.web.setVisibility(View.VISIBLE);}}
-   session.lastDevice=id;
+   if(connected&&(session.web.getUrl()==null||!id.equals(session.lastDevice)||session.recovery.failed()||session.connectionLost)){
+    session.recovery.manual();loadHome();
+    if(!session.connectionLost&&!session.nativeRequested){nativePane.setVisibility(View.GONE);session.web.setVisibility(View.VISIBLE);}
+   }
+   if(connected)session.lastDevice=id;
   }
   handler.postDelayed(this::refresh,1000);
  }
  private static void setText(TextView view,String text){if(!android.text.TextUtils.equals(view.getText(),text))view.setText(text);}
- public void onBackPressed(){if(nativePane.getVisibility()==View.VISIBLE){if(session.web.getUrl()!=null&&Diagnostics.snapshot().ready())openCollection();else super.onBackPressed();return;}if(session.web.canGoBack())session.web.goBack();else super.onBackPressed();}
+ public void onBackPressed(){if(nativePane.getVisibility()==View.VISIBLE){if(session.web.getUrl()!=null&&!Diagnostics.snapshot().current().isEmpty())openCollection();else super.onBackPressed();return;}if(session.web.canGoBack())session.web.goBack();else super.onBackPressed();}
  protected void onSaveInstanceState(Bundle out){super.onSaveInstanceState(out);if(session!=null){session.web.saveState(out);out.putBoolean("settings_open",nativePane.getVisibility()==View.VISIBLE);out.putBoolean("advanced_open",advancedSection.getVisibility()==View.VISIBLE);out.putString("manual_ip",manualAddress.getText().toString());}}
  public Object onRetainNonConfigurationInstance(){return session;}
  protected void onActivityResult(int request,int result,Intent data){

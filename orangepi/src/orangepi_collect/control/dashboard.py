@@ -555,7 +555,7 @@ class Dashboard:
             value['reference_image_state']={'kind':reference.get('kind','image')} if isinstance(reference,dict) else {'kind':'image'}
             value['result']=copy.deepcopy(self.result)
             value['task_block_size_result']=copy.deepcopy(getattr(self,'task_block_size_result',None))
-            value['worker']={k:(self.snapshot.get('worker') or {}).get(k) for k in ('recording_active','state')}
+            value['worker']={k:copy.deepcopy((self.snapshot.get('worker') or {}).get(k)) for k in ('recording_active','state','qc_scope','progress','processing_started','time')}
         value['privacy']=self.privacy.snapshot()
         return value
 

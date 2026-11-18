@@ -107,6 +107,7 @@ public final class AppRegressionTest {
   page.started();page.success();check(page.failure()==750,"successful page resets next failure budget");
  }
  public static void main(String[] args)throws Exception{
+  ConnectionVisibilityTest.test(); WorkbenchProbeTest.test();
   PolicyTest.main(new String[0]);stateTests();scanTests();proxyTests();exportTests(new File(args[0]));recoveryTests();FastConnectTest.main(new String[0]);
   System.out.println("App regressions: "+checks+" checks passed");
  }

@@ -18,7 +18,7 @@ classes = work / 'classes'
 classes.mkdir(exist_ok=True)
 source = app / 'src/org/headring/usbentry'
 names = ('DeviceIdentity', 'DeviceSelection', 'OriginPolicy', 'Endpoint', 'ConnectionState',
-         'ScanResult', 'ScanCollector', 'ProxyRequest', 'TransferBudget', 'ExportStore', 'PageRecovery', 'EntryAddress', 'UsbSource')
+         'ScanResult', 'ScanCollector', 'ProxyRequest', 'TransferBudget', 'ExportStore', 'PageRecovery', 'EntryAddress', 'UsbSource', 'ConnectionVisibility', 'WorkbenchProbe')
 java = os.environ.get('TEST_JAVA', '/usr/lib/jvm/java-25-openjdk-amd64/bin/java')
 commands = [
     [java, 'com.sun.tools.javac.Main', '-source', '8', '-target', '8', '-proc:none',

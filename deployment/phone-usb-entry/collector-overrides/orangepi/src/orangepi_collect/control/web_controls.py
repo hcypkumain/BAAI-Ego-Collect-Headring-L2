@@ -375,10 +375,11 @@ class WebControls:
         status=self.worker_status() if getattr(self,'worker',None) else {}
         path=getattr(self,'path',None)
         if status.get('recording_active') or (path and (path/'start_gate.json').exists()):raise ValueError('本段已正式开录，不能按准备放弃')
+        self.last_help=['正在退出准备，等待设备释放并更新任务进度，请稍候。'];self.state_write()
         self._reference_mutation_started()
         if getattr(self,'worker',None):
             self.command('STOP');self.worker.wait(timeout=50)
-            if not self.reap():raise ValueError('设备进程尚未全部退出，文件未清理')
+            if not self.reap(refresh=False):raise ValueError('设备进程尚未全部退出，文件未清理')
             if path:
                 from recording_store import atomic_json
                 atomic_json(path/'ui_preparation_cancelled.json',dict(reason='operator_abandoned_before_start',time=time.time()))

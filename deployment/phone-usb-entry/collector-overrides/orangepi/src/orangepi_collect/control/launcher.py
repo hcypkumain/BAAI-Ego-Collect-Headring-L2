@@ -1314,7 +1314,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         self.capture_registry_cleanup_pending=False
         return self._persist_owner_exit_proof()
 
-    def reap(self):
+    def reap(self, *, refresh=True):
         self._assert_controller_thread()
         self.worker.wait(timeout=2)
         if not self.owner_finished():return False
@@ -1325,7 +1325,7 @@ class Controller(ReferenceControlsMixin, EmgInsertionControls, WebControls):
         finally:
             self.worker=None
             self.log=None
-            self.reference_reaped()
+            self.reference_reaped(refresh=refresh)
         return True
 
     def poll(self):

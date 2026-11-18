@@ -43,13 +43,13 @@ def _read_json(path,limit=32*1024*1024):
     if not isinstance(value,dict):raise ValueError('ledger evidence must be an object')
     return value
 
-def _session_matches_image(session,image):
+def _session_matches_image(session,image,metadata=None):
     if image is None:return True
     try:
         image=Path(image).resolve();image.relative_to(LIBRARY.resolve())
         relative=image.relative_to(PROJECT.resolve()).as_posix()
         library_relative=image.relative_to(LIBRARY.resolve()).as_posix()
-        meta=_load_yaml((Path(session)/'meta.yaml').read_text(encoding='utf-8')) or {}
+        meta=metadata if metadata is not None else (_load_yaml((Path(session)/'meta.yaml').read_text(encoding='utf-8')) or {})
         if not isinstance(meta,dict):return False
         values=[meta.get('reference_image'),meta.get('environment'),
                 (meta.get('pi') or {}).get('reference_image') if isinstance(meta.get('pi'),dict) else None]
@@ -239,12 +239,15 @@ def reserved_used(entry,image=None):
         session=Path(value)
         if session.is_symlink() or not session.is_dir() or (session/'recording_deleted.json').exists():return False
         summary=_read_json(session/'capture_summary.json')
-        meta=_load_yaml((session/'meta.yaml').read_text(encoding='utf-8')) or {}
+        meta_path=session/'meta.yaml';before=meta_path.stat()
+        meta=_load_yaml(meta_path.read_text(encoding='utf-8')) or {}
+        after=meta_path.stat()
+        if (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns):return False
         proof=summary.get('storage_durability')
         if (summary.get('status')!='pending_qc' or not isinstance(proof,dict) or proof.get('completed') is not True
                 or not isinstance(meta,dict) or meta.get('status')!='pending_qc'):
             return False
-        return image is None or _session_matches_image(session,image)
+        return image is None or _session_matches_image(session,image,metadata=meta)
     except (OSError,ValueError,TypeError,KeyError,AttributeError,RecursionError,yaml.YAMLError):return False
 
 def _usb_completion(entry,image):

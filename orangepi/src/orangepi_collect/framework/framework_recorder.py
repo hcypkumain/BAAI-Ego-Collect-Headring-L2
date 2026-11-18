@@ -221,6 +221,8 @@ class PiBundleRecorder(BaseRecorder):
         atomic_json(path/'status.json',dict(state='postprocessing',pid=os.getpid(),time=time.time(),processing_started=processing_started))
         summary=standardize(path)
         summary['standardize_elapsed_seconds']=time.monotonic()-qc_started
+        # QC reads this file; commit STOP-boundary-adjusted counts before validation.
+        atomic_json(path/'capture_summary.json',summary)
         # Runs after all serial/video handles have been closed.
         def progress(value):
             atomic_json(path/'status.json',dict(state='checking',pid=os.getpid(),time=time.time(),processing_started=processing_started,progress=value))

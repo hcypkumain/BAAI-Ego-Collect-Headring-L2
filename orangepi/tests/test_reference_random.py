@@ -63,6 +63,7 @@ class ReferenceTests(unittest.TestCase):
         c._reference_task_blocks=None;c._base_reference_task_blocks=None;c._configure_text_blocks(self.list_id)
         c._apply_reference_snapshot(self.snapshot())
         self.done=[]
+        c.refresh_reference_histories.side_effect=lambda:(tuple(self.done),())
         self.completed=patch('reference_controls._completed_paths',side_effect=lambda *args:tuple(self.done))
         self.completed.start(); self.addCleanup(self.completed.stop)
 
