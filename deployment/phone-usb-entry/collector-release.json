@@ -32,9 +32,9 @@
       "size": 20944
     },
     "orangepi/src/orangepi_collect/common/local_qc_receipt.py": {
-      "post_sha256": "19343fa3656e3a4faa16cfd40262e2dc9314b1d6d5a3c50baf48ddc048484ba1",
+      "post_sha256": "ca012b79afff29bff47925b693d835ff11b55c251ff7a113806da17fcb6f5212",
       "pre_sha256": "d02e6da219e38542517fed165494964f8d40a2259fe53cbc7762dd6714e25a88",
-      "size": 6902
+      "size": 6916
     },
     "orangepi/src/orangepi_collect/common/official_impedance.py": {
       "post_sha256": "3e50044035afcc0a9895ae739011d67a222e52a79fcedda9181d60330c78aa5f",
@@ -222,14 +222,14 @@
       "size": 20968
     },
     "orangepi/src/orangepi_collect/framework/emg_recoverability.py": {
-      "post_sha256": "af2f5b388f0118a39c264c19bee428e115bf678bd1e8d3e75ba4a909e876f713",
+      "post_sha256": "89bdc0ff0c3e336e412350e6e3df48a6f12594e050002d3e9d2ff042e34d4b40",
       "pre_sha256": "89bdc0ff0c3e336e412350e6e3df48a6f12594e050002d3e9d2ff042e34d4b40",
-      "size": 8702
+      "size": 8648
     },
     "orangepi/src/orangepi_collect/framework/framework_qc.py": {
-      "post_sha256": "096d111da9ceeb7ef377abac6ca804a7f67c1229579165697a798a64a3c84b5a",
+      "post_sha256": "543f7a6a4b437c731875fb07389cf578c7cde0611761b10aeb54421cb28f74ae",
       "pre_sha256": "39012f929a6e0d4deee7721669aa1deb355421c7750ea83d05f2c6c2653d73d6",
-      "size": 51197
+      "size": 52912
     },
     "orangepi/src/orangepi_collect/framework/framework_recorder.py": {
       "post_sha256": "00589bbdcf2b2d1e72241ec5e60fe42097684269b36bad737c9c140d5c4de758",
@@ -242,9 +242,9 @@
       "size": 1824
     },
     "orangepi/src/orangepi_collect/framework/qc_policy.py": {
-      "post_sha256": "bc35ded45c4d649f74d9c42dc1a7b288e36d32b2b870dfb6105fcf202f41a7c4",
+      "post_sha256": "29c21181fa8dbd1e0b4267496830ad8c22d68747533663a3becf3ddfad6caca6",
       "pre_sha256": "f8681125fc4069664a9202a8e7a7df1c3cbf3189d9dd070843607be203303d92",
-      "size": 16786
+      "size": 16823
     },
     "orangepi/src/orangepi_collect/storage/ledger.py": {
       "post_sha256": "93597482a0e1b6fa69055665e036c42a0329d81c8887adfaeed584ab17e42bdb",

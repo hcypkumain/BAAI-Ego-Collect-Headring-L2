@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .base import BaseCheck, BaseChecker, CheckContext, CheckOutput
-from .checks import DeadChannel, MadOutlier, ts_checks
+from .checks import DeadChannel, MadOutlier, TimestampGap, ts_checks
 
 
 @dataclass(frozen=True)
@@ -58,6 +58,32 @@ class SnGap(BaseCheck):
         return out
 
 
+@dataclass(frozen=True)
+class EmgSampleGap(BaseCheck):
+    """Classify adjacent EMG sample intervals inside the selected run window."""
+    def run(self, ctx: CheckContext) -> CheckOutput:
+        out = CheckOutput()
+        s = self.target(ctx)
+        if s is None or s.n < 2:
+            return out
+        # Compare endpoints in the timestamp's own floating-point domain.
+        # Subtracting two Unix epochs can turn an exact 150 ms boundary into
+        # 150.000095 ms. Resolution is limited by the saved clock.
+        later, earlier = s.t[1:], s.t[:-1]
+        hard = later > earlier + 0.150
+        soft = (later > earlier + 0.010) & ~hard
+        intervals = later - earlier
+        out.stats.update(warn_count=int(soft.sum()), error_count=int(hard.sum()))
+        for level, mask, limit in (("WARN", soft, 0.010), ("ERROR", hard, 0.150)):
+            if mask.any():
+                longest = float(np.max(intervals[mask]))
+                out.findings.append(self.finding(
+                    level, f"肌电相邻样本间隔超过 {limit * 1000:.0f} 毫秒，共 {int(mask.sum())} 次",
+                    subject=s.label, threshold=limit, observed=longest,
+                    detail={"count": int(mask.sum()), "comparison": "strictly_greater"}))
+        return out
+
+
 class EmgChecker(BaseChecker):
     """Weili armband: two frame types interleaved on one wire.
 
@@ -73,7 +99,8 @@ class EmgChecker(BaseChecker):
     default_series = "emg"
 
     checks = [
-        ts_checks("emg", dup_level="ERROR"),
+        [EmgSampleGap(series="emg") if type(check) is TimestampGap else check
+         for check in ts_checks("emg", dup_level="ERROR")],
         ts_checks("imu", dup_level="ERROR"),
         SnGap(),
         MadOutlier("emg_data"),
@@ -82,12 +109,6 @@ class EmgChecker(BaseChecker):
         MadOutlier("imu_accel"),
     ]
 
-    def __init__(self, checker_cfg=None):
-        super().__init__(checker_cfg)
-        # Scope the 150 ms hard gap only to this EMG receiver (EMG and its IMU).
-        override = dict(self.checker_cfg.get("timestampgap") or {})
-        override["min_s"] = 0.1500005  # 0.5 µs accommodates float timestamp rounding
-        self.checker_cfg["timestampgap"] = override
     def prepare(self, ctx: CheckContext) -> None:
         ctx.add_series("emg", key="emg_timestamps")
         ctx.add_series("imu", key="imu_timestamps")

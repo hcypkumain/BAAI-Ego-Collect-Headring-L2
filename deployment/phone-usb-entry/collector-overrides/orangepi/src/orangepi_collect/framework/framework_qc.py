@@ -22,9 +22,9 @@ import yaml
 from project_paths import BASE, PROJECT, SRC, devices
 sys.path.insert(0,str(PROJECT/'src'))
 import embodied_brain_collect.checkers as framework
-from embodied_brain_collect.checkers.base import BaseChecker, Finding, flatten_checks
+from embodied_brain_collect.checkers.base import BaseCheck, BaseChecker, CheckContext, CheckOutput, Finding, flatten_checks
 from embodied_brain_collect.checkers.camera import CameraChecker
-from embodied_brain_collect.checkers.checks import ts_checks,FrameCountMatch,BlackFrame,Freeze,NanFraction,MadOutlier
+from embodied_brain_collect.checkers.checks import ts_checks,TimestampGap,FrameCountMatch,BlackFrame,Freeze,NanFraction,MadOutlier
 from embodied_brain_collect.recorders.emg.timestamp_rebuild import rebuild
 from embodied_brain_collect.session.config import load_checker
 from embodied_brain_collect.stim.marker_codes import RUN_START,RUN_END
@@ -580,15 +580,45 @@ def performance():
         value.update(qc_video_backend='cv2',qc_workers=int(os.environ.get('ORANGEPI_HOST_QC_WORKERS','4')))
     return value
 
-def _emg_checker_config(cfg):
-    result=dict(cfg or {})
-    keys=[k for k in result if isinstance(k,str) and k.lower().replace("_","")=="timestampgap"]
-    previous=result.get(keys[-1],{}) if keys else {}
-    for k in keys:result.pop(k)
-    value=dict(previous) if isinstance(previous,dict) else {}
-    value["min_s"]=.1500005  # timestamp float rounding tolerance, nominal 150 ms
-    result["timestamp_gap"]=value
-    return result
+@dataclasses.dataclass(frozen=True)
+class EmgSampleGap(BaseCheck):
+    """Classify adjacent EMG sample intervals inside the selected run window."""
+    def run(self, ctx: CheckContext) -> CheckOutput:
+        out = CheckOutput()
+        s = self.target(ctx)
+        if s is None or s.n < 2:
+            return out
+        # Compare endpoints in the timestamp's own floating-point domain.
+        # Subtracting two Unix epochs can turn an exact 150 ms boundary into
+        # 150.000095 ms. Resolution is limited by the saved clock.
+        later, earlier = s.t[1:], s.t[:-1]
+        hard = later > earlier + 0.150
+        soft = (later > earlier + 0.010) & ~hard
+        intervals = later - earlier
+        out.stats.update(warn_count=int(soft.sum()), error_count=int(hard.sum()))
+        for level, mask, limit in (("WARN", soft, 0.010), ("ERROR", hard, 0.150)):
+            if mask.any():
+                longest = float(np.max(intervals[mask]))
+                out.findings.append(self.finding(
+                    level, f"肌电相邻样本间隔超过 {limit * 1000:.0f} 毫秒，共 {int(mask.sum())} 次",
+                    subject=s.label, threshold=limit, observed=longest,
+                    detail={"count": int(mask.sum()), "comparison": "strictly_greater"}))
+        return out
+
+
+def _scope_emg_checker(checker, cfg):
+    """Adapt older installed cores without changing IMU or other checkers."""
+    # A previous core replaced the configured IMU limit inside its constructor.
+    # Restore only the shared TimestampGap settings before adapting the EMG check.
+    configured_gap = BaseChecker(cfg).checker_cfg.get("timestampgap")
+    if configured_gap is None:
+        checker.checker_cfg.pop("timestampgap", None)
+    else:
+        checker.checker_cfg["timestampgap"] = configured_gap
+    checker.checks = [EmgSampleGap(series="emg")
+                      if type(check) is TimestampGap and check.series == "emg"
+                      else check for check in flatten_checks(checker.checks)]
+    return checker
 
 def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused_streams=None):
     """Same original checkers, thresholds and report order; concurrent independent streams."""
@@ -607,7 +637,7 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused
         for name in ('emg_left','emg_right'):
             if name in report.streams and (root/name).is_dir():
                 cls=framework.checker_for(name)
-                if cls is not None:report.streams[name]=cls(_emg_checker_config(cfg)).run(root/name,None)
+                if cls is not None:report.streams[name]=_scope_emg_checker(cls(cfg),cfg).run(root/name,None)
         report.findings.extend(Finding(**item) for item in inputs['findings'])
         # A missing marker remains an original hard failure, but must not
         # accidentally bypass the modality-specific continuity checks.
@@ -640,7 +670,8 @@ def parallel_qc_session(path, cfg, workers=None, progress=None, only=None,reused
         if cls is None:
             return StreamReport(stream=directory.name,files=sorted(p.name for p in directory.iterdir() if p.is_file()),
                 findings=[Finding('INFO','未知模态 — 已跳过',check='Dispatch')])
-        checker=cls(_emg_checker_config(cfg) if directory.name in ('emg_left','emg_right') else cfg)
+        checker=cls(cfg)
+        if directory.name in ('emg_left','emg_right'):checker=_scope_emg_checker(checker,cfg)
         # Instance-local timing facts do not change the original checker
         # verdict. Keep the existing wrist evidence, while EMG/board acceptance
         # remains governed by their original checker rules.
@@ -802,6 +833,7 @@ def check_emg(path,progress=None):
     audit['preprocessing']=preprocessing
     audit['emg_acceptance_policy']='emg-gap-150ms-v1'
     audit['emg_timestamp_gap_error_s']=.15
+    audit['armband_imu_timestamp_gap_error_s']=.1
     audit['emg_SN_loss_warn_fraction']=.001
     audit['emg_SN_loss_error_fraction']=None
     data=report.to_dict();data['scope']='emg_only';data['remaining_qc']='pending_linux_host'

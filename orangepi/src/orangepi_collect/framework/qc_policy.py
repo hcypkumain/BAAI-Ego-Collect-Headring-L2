@@ -211,7 +211,7 @@ def apply_policy(report, config=None,preserve_streams=None):
     audit['capture_integrity']=dict(schema_version=1, policy='recorded-stream-v1',
         comparison='strictly_greater_than', wrist_warn_ns=100000000,wrist_error_ns=150000000,
         board_imu_rule_set='original-framework-v1',
-        emg_rule_set='emg-gap-150ms-v1',emg_timestamp_gap_error_s=.15,
+        emg_rule_set='emg-gap-150ms-v1',emg_timestamp_gap_error_s=.15,armband_imu_timestamp_gap_error_s=.1,
         emg_wire_loss_warn_fraction=.001,emg_wire_loss_error_fraction=None,
         protected_checks=['PiWristFrameGap'])
     if config['mode'] == 'strict':

@@ -37,7 +37,7 @@ def rules(scope):
     if scope=='emg':
         result.update(emg=code(checks/'emg.py'),checks=code(checks/'checks.py'),
             rebuild=code(root/'src/embodied_brain_collect/recorders/emg/timestamp_rebuild.py'),recovery=code(fw/'emg_recoverability.py'), gap_thresholds=code(fw/'gap_thresholds.py'),
-            preparation=code(fw/'framework_qc.py',{'standardize_emg','check_emg','parallel_qc_session','_emg_checker_config'}))
+            preparation=code(fw/'framework_qc.py',{'standardize_emg','check_emg','parallel_qc_session','_scope_emg_checker','EmgSampleGap'}))
     else:
         result.update(eeg=code(fw/'eeg_qc.py'),settings=code(common/'eeg_settings.py'),impedance=code(common/'impedance_record.py'))
     return hashlib.sha256(canonical(result)).hexdigest()
